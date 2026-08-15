@@ -195,6 +195,24 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
     const porTelefone = grupo.telefone
       ? telefoneParaCliente.get(grupo.telefone)
       : undefined;
+
+    // Conta e telefone apontando para clientes diferentes: mesmo caso de
+    // duplicata — mescla no cliente da conta.
+    if (porConta && porTelefone && porConta !== porTelefone) {
+      const { error } = await service.rpc("mesclar_clientes", {
+        manter: porConta,
+        remover: porTelefone,
+      });
+      if (error) throw new Error(`mesclar_clientes: ${error.message}`);
+      mesclados++;
+      for (const [conta, cid] of contaParaCliente) {
+        if (cid === porTelefone) contaParaCliente.set(conta, porConta);
+      }
+      for (const [tel, cid] of telefoneParaCliente) {
+        if (cid === porTelefone) telefoneParaCliente.set(tel, porConta);
+      }
+    }
+
     const id = porConta ?? porTelefone;
 
     if (id) existentes.push({ id, grupo });
@@ -256,15 +274,31 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
     );
   }
 
-  const atualizacoes = existentes.map(({ id, grupo }) => {
-    const estado = atual.get(id);
+  // Dois grupos podem resolver para o MESMO cliente (após mesclas): o upsert
+  // não aceita o mesmo id duas vezes no lote, então mescla os campos antes.
+  const porId = new Map<string, (typeof existentes)[number]["grupo"] & { id: string }>();
+  for (const { id, grupo } of existentes) {
     grupo.contas.forEach((conta) => {
       if (!contaParaCliente.has(conta)) {
         vinculos.push({ conta, customer_id: id });
       }
     });
+    const junto = porId.get(id);
+    if (junto) {
+      junto.telefone = junto.telefone ?? grupo.telefone;
+      junto.documento = junto.documento ?? grupo.documento;
+      junto.email = junto.email ?? grupo.email;
+      junto.conta_aberta_em = junto.conta_aberta_em ?? grupo.conta_aberta_em;
+      junto.ativo = junto.ativo || grupo.ativo;
+    } else {
+      porId.set(id, { ...grupo, id });
+    }
+  }
+
+  const atualizacoes = [...porId.values()].map((grupo) => {
+    const estado = atual.get(grupo.id);
     return {
-      id,
+      id: grupo.id,
       nome_completo: grupo.nome,
       telefone_e164: grupo.telefone ?? estado?.telefone_e164 ?? null,
       documento: grupo.documento ?? estado?.documento ?? null,
@@ -281,7 +315,10 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
     if (error) throw new Error(error.message);
   }
 
-  for (const parte of blocos(vinculos)) {
+  // A mesma conta só entra uma vez no lote.
+  const vinculosUnicos = [...new Map(vinculos.map((v) => [v.conta, v])).values()];
+
+  for (const parte of blocos(vinculosUnicos)) {
     const { error } = await service
       .from("customer_accounts")
       .upsert(parte, { onConflict: "conta" });
@@ -290,7 +327,7 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
 
   return {
     gravados: grupos.length,
-    contasNovas: vinculos.length,
+    contasNovas: vinculosUnicos.length,
     mesclados,
   };
 }
@@ -515,14 +552,34 @@ export async function importarLotes(
       }
     }
 
-    const registros = agregados
-      .filter((a) => mapa.has(a.conta))
-      .map((a) => ({
-        customer_id: mapa.get(a.conta)!,
-        referencia_data: a.referencia,
-        quantidade: a.quantidade,
-        import_id: registroId ?? null,
-      }));
+    // Duas contas do mesmo cliente no mesmo dia somam num registro só —
+    // o upsert não aceita a mesma chave (cliente, dia) duas vezes no lote.
+    const porClienteDia = new Map<
+      string,
+      {
+        customer_id: string;
+        referencia_data: string;
+        quantidade: number;
+        import_id: string | null;
+      }
+    >();
+    for (const a of agregados) {
+      const customerId = mapa.get(a.conta);
+      if (!customerId) continue;
+      const chave = `${customerId}|${a.referencia}`;
+      const atual = porClienteDia.get(chave);
+      if (atual) {
+        atual.quantidade += a.quantidade;
+      } else {
+        porClienteDia.set(chave, {
+          customer_id: customerId,
+          referencia_data: a.referencia,
+          quantidade: a.quantidade,
+          import_id: registroId ?? null,
+        });
+      }
+    }
+    const registros = [...porClienteDia.values()];
 
     let gravados = 0;
     for (const parte of blocos(registros)) {
