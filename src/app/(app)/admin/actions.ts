@@ -295,6 +295,60 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
 }
 
 // ===========================================================================
+// Exclusão de importação
+// ===========================================================================
+
+export type ResultadoExclusao = { ok?: boolean; erro?: string };
+
+/**
+ * Remove uma importação do histórico. Para lotes, desfaz também os dados
+ * (customer_lots marcados com o import_id) e o arquivo no Storage. Para
+ * clientes, remove apenas o registro — a base pode ter sido atualizada por
+ * uploads posteriores e apagar em cascata seria destrutivo.
+ */
+export async function excluirImportacao(
+  _estado: ResultadoExclusao,
+  formData: FormData,
+): Promise<ResultadoExclusao> {
+  const perfil = await validarGestor();
+  if (!perfil) return { erro: "Só administração e gestão podem excluir." };
+
+  const id = String(formData.get("import_id") ?? "");
+  if (!id) return { erro: "Importação não informada." };
+
+  const service = createServiceClient();
+
+  const { data: registro } = await service
+    .from("imports")
+    .select("id, tipo, arquivo_path")
+    .eq("id", id)
+    .single();
+
+  if (!registro) return { erro: "Importação não encontrada." };
+
+  if (registro.tipo === "lotes") {
+    const { error } = await service
+      .from("customer_lots")
+      .delete()
+      .eq("import_id", id);
+    if (error) return { erro: `Falha ao remover os lotes: ${error.message}` };
+  }
+
+  if (registro.arquivo_path) {
+    await service.storage.from("importacoes").remove([registro.arquivo_path]);
+  }
+
+  const { error } = await service.from("imports").delete().eq("id", id);
+  if (error) return { erro: `Falha ao excluir: ${error.message}` };
+
+  revalidatePath("/admin");
+  revalidatePath("/atendimento");
+  revalidatePath("/leads");
+
+  return { ok: true };
+}
+
+// ===========================================================================
 // Clientes
 // ===========================================================================
 

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { ImportForm } from "./import-form";
+import { ExcluirImportacao } from "./excluir-import";
 import { importarClientes, importarLotes } from "./actions";
 
 export const metadata: Metadata = { title: "Administração · Zeve CRM" };
@@ -102,6 +103,9 @@ export default async function AdminPage() {
                   <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
                     Por
                   </th>
+                  <th scope="col" className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    <span className="sr-only">Ações</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200">
@@ -137,6 +141,13 @@ export default async function AdminPage() {
                     </td>
                     <td className="px-2 text-sm text-neutral-600">
                       {imp.autor?.nome ?? "—"}
+                    </td>
+                    <td className="px-2 text-right">
+                      <ExcluirImportacao
+                        importId={imp.id}
+                        tipo={imp.tipo}
+                        arquivo={imp.arquivo_nome ?? "sem nome"}
+                      />
                     </td>
                   </tr>
                 ))}
