@@ -40,6 +40,9 @@ if (abaClientes) {
   const r = prepararClientes(abaClientes.linhas);
   console.log(`  grupos (clientes únicos): ${r.grupos.length}`);
   console.log(`  com telefone: ${r.grupos.filter((g) => g.telefone).length}`);
+  console.log(`  com documento: ${r.grupos.filter((g) => g.documento).length}`);
+  console.log(`  com data de abertura: ${r.grupos.filter((g) => g.conta_aberta_em).length}`);
+  console.log(`  ativos: ${r.grupos.filter((g) => g.ativo).length} · inativos: ${r.grupos.filter((g) => !g.ativo).length}`);
   console.log(
     `  contas vinculadas: ${r.grupos.reduce((s, g) => s + g.contas.length, 0)}`,
   );

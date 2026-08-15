@@ -102,6 +102,10 @@ export function campo(linha: LinhaCsv, ...nomes: string[]) {
  * Retorna null quando não dá para confiar no número.
  */
 export function normalizarTelefone(bruto: string): string | null {
+  // Notação científica do Excel ("5,56599E+12"): os dígitos finais foram
+  // perdidos na exportação — número irrecuperável, melhor nulo que errado.
+  if (/e[+-]?\d/i.test(bruto)) return null;
+
   const d = bruto.replace(/\D/g, "").replace(/^0+/, "");
   if (!d) return null;
 

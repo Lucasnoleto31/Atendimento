@@ -56,8 +56,8 @@ export default async function AdminPage() {
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <ImportForm
           titulo="Base de clientes"
-          descricao="Sobe ou atualiza a base. Aceita a planilha da corretora (CONTA SINACOR + NOME) ou um arquivo com telefone. Cliente com várias contas é agrupado pelo nome."
-          colunas="colunas: nome + conta e/ou telefone · opcionais: documento, email, data_abertura"
+          descricao="Sobe ou atualiza a base. Aceita o diversificador da corretora direto: as contas da mesma pessoa são agrupadas pelo CPF, e a situação da conta define quem está ativo."
+          colunas="colunas: nome + conta e/ou telefone · opcionais: cpf_cnpj, email, data_habilitacao"
           acao={importarClientes}
           rotulo="Importar clientes"
         />

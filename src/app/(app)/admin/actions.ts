@@ -187,6 +187,7 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
           documento: g.documento,
           email: g.email,
           conta_aberta_em: g.conta_aberta_em,
+          ativo: g.ativo,
         })),
       )
       .select("id");
@@ -242,7 +243,7 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
       documento: grupo.documento ?? estado?.documento ?? null,
       email: grupo.email ?? estado?.email ?? null,
       conta_aberta_em: grupo.conta_aberta_em ?? estado?.conta_aberta_em ?? null,
-      ativo: true,
+      ativo: grupo.ativo,
     };
   });
 
@@ -406,6 +407,7 @@ export async function importarLotes(
           documento: null,
           email: null,
           conta_aberta_em: null,
+          ativo: true,
         })),
       );
       contasNovas = gravados;

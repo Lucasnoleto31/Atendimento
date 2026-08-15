@@ -1,4 +1,9 @@
-import { campo, normalizarData, normalizarTelefone, type LinhaCsv } from "../csv.ts";
+import {
+  campo,
+  normalizarData,
+  normalizarTelefone,
+  type LinhaCsv,
+} from "../csv.ts";
 import {
   COLUNAS_CONTA,
   COLUNAS_NOME,
@@ -13,6 +18,7 @@ export type GrupoCliente = {
   documento: string | null;
   email: string | null;
   conta_aberta_em: string | null;
+  ativo: boolean;
 };
 
 export type PreparoClientes = {
@@ -22,8 +28,9 @@ export type PreparoClientes = {
 
 /**
  * Agrupa as linhas do arquivo em clientes.
- * Identidade: telefone quando existe; sem telefone, o nome (é o caso da base
- * por conta da corretora, onde o mesmo nome aparece em várias contas).
+ * Identidade, na ordem de confiança: telefone > documento (CPF/CNPJ) > nome.
+ * No diversificador da corretora o telefone costuma vir corrompido pelo Excel,
+ * mas o CPF é 100% preenchido — é ele que junta as contas da mesma pessoa.
  */
 export function prepararClientes(linhas: LinhaCsv[]): PreparoClientes {
   const grupos = new Map<string, GrupoCliente>();
@@ -34,6 +41,9 @@ export function prepararClientes(linhas: LinhaCsv[]): PreparoClientes {
     const nome = campo(linha, ...COLUNAS_NOME).trim();
     const telefone = normalizarTelefone(campo(linha, ...COLUNAS_TELEFONE));
     const conta = normalizarConta(campo(linha, ...COLUNAS_CONTA));
+    const documento =
+      campo(linha, "documento", "cpf", "cnpj", "cpf_cnpj").replace(/\D/g, "") ||
+      null;
 
     if (!nome) {
       erros.push(`Linha ${numeroLinha}: sem nome.`);
@@ -44,15 +54,16 @@ export function prepararClientes(linhas: LinhaCsv[]): PreparoClientes {
       return;
     }
 
-    const chave = telefone ?? `nome:${chaveNome(nome)}`;
+    const chave =
+      telefone ?? (documento ? `doc:${documento}` : `nome:${chaveNome(nome)}`);
     const existente = grupos.get(chave);
 
-    const documento =
-      campo(linha, "documento", "cpf", "cnpj", "cpf_cnpj") || null;
     const email = campo(linha, "email", "e_mail") || null;
     const abertura = normalizarData(
-      campo(linha, "conta_aberta_em", "data_abertura", "abertura"),
+      campo(linha, "conta_aberta_em", "data_abertura", "data_habilitacao", "abertura"),
     );
+    const situacao = campo(linha, "situacao_conta", "situacao").toUpperCase();
+    const ativo = situacao === "" || situacao === "ATIVA" || situacao === "ATIVO";
 
     if (existente) {
       if (conta && !existente.contas.includes(conta)) {
@@ -61,7 +72,12 @@ export function prepararClientes(linhas: LinhaCsv[]): PreparoClientes {
       existente.telefone = existente.telefone ?? telefone;
       existente.documento = existente.documento ?? documento;
       existente.email = existente.email ?? email;
-      existente.conta_aberta_em = existente.conta_aberta_em ?? abertura;
+      // Mantém a abertura mais antiga entre as contas do cliente.
+      if (abertura && (!existente.conta_aberta_em || abertura < existente.conta_aberta_em)) {
+        existente.conta_aberta_em = abertura;
+      }
+      // Basta uma conta ativa para o cliente contar como ativo.
+      existente.ativo = existente.ativo || ativo;
       return;
     }
 
@@ -72,6 +88,7 @@ export function prepararClientes(linhas: LinhaCsv[]): PreparoClientes {
       documento,
       email,
       conta_aberta_em: abertura,
+      ativo,
     });
   });
 
