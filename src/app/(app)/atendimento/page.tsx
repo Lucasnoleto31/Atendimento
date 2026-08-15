@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Atendimento · Zeve CRM" };
 type LinhaLead = {
   id: string;
   nome: string;
-  telefone_e164: string;
+  telefone_e164: string | null;
   customer_id: string | null;
   campanha: string | null;
   stage_id: string | null;

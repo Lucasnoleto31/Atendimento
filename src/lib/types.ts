@@ -15,7 +15,7 @@ export type Stage = {
 export type LeadCard = {
   id: string;
   nome: string;
-  telefone_e164: string;
+  telefone_e164: string | null;
   customer_id: string | null;
   campanha: string | null;
   stage_id: string | null;

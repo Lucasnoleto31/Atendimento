@@ -61,9 +61,13 @@ export function LeadCardItem({
         </span>
       </div>
 
-      <p className="mt-0.5 font-mono text-xs text-neutral-600 tabular-nums">
-        {formatarTelefone(lead.telefone_e164)}
-      </p>
+      {lead.telefone_e164 ? (
+        <p className="mt-0.5 font-mono text-xs text-neutral-600 tabular-nums">
+          {formatarTelefone(lead.telefone_e164)}
+        </p>
+      ) : (
+        <p className="mt-0.5 text-xs text-neutral-400">sem telefone na base</p>
+      )}
 
       <p className="mt-1 truncate text-xs text-neutral-600">
         {lead.canal ?? "Sem canal"}

@@ -113,6 +113,9 @@ export function ImportForm({
             {estado.contasNovas ? (
               <> · {estado.contasNovas} conta(s) nova(s) vinculada(s)</>
             ) : null}
+            {estado.mesclados ? (
+              <> · {estado.mesclados} duplicado(s) mesclado(s)</>
+            ) : null}
           </p>
 
           {estado.reativacao &&

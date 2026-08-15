@@ -26,6 +26,7 @@ export type ResultadoImport = {
   linhasErro?: number;
   exemplosErro?: string[];
   contasNovas?: number;
+  mesclados?: number;
   reativacao?: { queda: number; semGiro: number };
 };
 
@@ -160,11 +161,36 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
 
   const novos: GrupoCliente[] = [];
   const existentes: { id: string; grupo: GrupoCliente }[] = [];
+  let mesclados = 0;
 
   for (const grupo of grupos) {
-    const porConta = grupo.contas
-      .map((c) => contaParaCliente.get(c))
-      .find(Boolean);
+    // Contas da mesma pessoa apontando para clientes diferentes: registros
+    // duplicados (lotes importados antes da base). Mescla no primeiro.
+    const idsDoGrupo = [
+      ...new Set(
+        grupo.contas
+          .map((c) => contaParaCliente.get(c))
+          .filter((v): v is string => Boolean(v)),
+      ),
+    ];
+
+    const porConta = idsDoGrupo[0];
+
+    for (const duplicado of idsDoGrupo.slice(1)) {
+      const { error } = await service.rpc("mesclar_clientes", {
+        manter: porConta,
+        remover: duplicado,
+      });
+      if (error) throw new Error(`mesclar_clientes: ${error.message}`);
+      mesclados++;
+      for (const [conta, id] of contaParaCliente) {
+        if (id === duplicado) contaParaCliente.set(conta, porConta!);
+      }
+      for (const [tel, id] of telefoneParaCliente) {
+        if (id === duplicado) telefoneParaCliente.set(tel, porConta!);
+      }
+    }
+
     const porTelefone = grupo.telefone
       ? telefoneParaCliente.get(grupo.telefone)
       : undefined;
@@ -264,6 +290,7 @@ async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
   return {
     gravados: grupos.length,
     contasNovas: vinculos.length,
+    mesclados,
   };
 }
 
@@ -306,7 +333,10 @@ export async function importarClientes(
   });
 
   try {
-    const { gravados, contasNovas } = await aplicarClientes(service, grupos);
+    const { gravados, contasNovas, mesclados } = await aplicarClientes(
+      service,
+      grupos,
+    );
     await fecharRegistro(service, registroId, {
       status: "concluida",
       ok: gravados,
@@ -324,6 +354,7 @@ export async function importarClientes(
       linhasErro: erros.length,
       exemplosErro: erros.slice(0, 5),
       contasNovas,
+      mesclados,
     };
   } catch (e) {
     const detalhe = e instanceof Error ? e.message : String(e);
