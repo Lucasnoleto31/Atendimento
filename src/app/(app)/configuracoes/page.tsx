@@ -1,20 +1,669 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/app/module-placeholder";
+import { redirect } from "next/navigation";
+import { Check, Plus, Trash2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { perfilAtual } from "@/lib/auth";
+import { formatarReais, formatarTelefone } from "@/lib/format";
+import { CAMPO, BOTAO_ICONE, BOTAO_ICONE_PERIGO } from "@/components/app/form-styles";
+import { cn } from "@/lib/utils";
+import {
+  alternarInstancia,
+  alternarProduto,
+  atualizarInstancia,
+  atualizarMensagem,
+  atualizarProduto,
+  criarInstancia,
+  criarMensagem,
+  criarProduto,
+  criarTag,
+  excluirInstancia,
+  excluirMensagem,
+  excluirProduto,
+  excluirTag,
+  salvarMeta,
+  salvarParametro,
+} from "./actions";
 
 export const metadata: Metadata = { title: "Configurações · Zeve CRM" };
 
-export default function ConfiguracoesPage() {
+const RECORRENCIAS = [
+  { valor: "unica", rotulo: "Única" },
+  { valor: "recorrente", rotulo: "Recorrente" },
+  { valor: "por_operacao", rotulo: "Por operação" },
+];
+
+const PARAMETROS = [
+  {
+    chave: "queda_lotes_percentual",
+    rotulo: "Queda de lotes (%)",
+    ajuda: "Queda em 30 dias que devolve o cliente para a fila.",
+  },
+  {
+    chave: "dias_sem_giro",
+    rotulo: "Dias sem giro",
+    ajuda: "Dias sem operar para entrar na lista de reativação.",
+  },
+  {
+    chave: "dias_sem_resposta",
+    rotulo: "Dias sem resposta",
+    ajuda: "Dias sem resposta do lead para marcá-lo como sem resposta.",
+  },
+];
+
+export default async function ConfiguracoesPage({
+  searchParams,
+}: PageProps<"/configuracoes">) {
+  const perfil = await perfilAtual();
+  if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
+    redirect("/atendimento");
+  }
+
+  const params = await searchParams;
+  const aviso = typeof params.aviso === "string" ? params.aviso : null;
+
+  const supabase = await createClient();
+  const [
+    { data: produtos },
+    { data: tags },
+    { data: mensagens },
+    { data: instancias },
+    { data: equipe },
+    { data: parametros },
+  ] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, codigo, nome, valor_comissao_centavos, recorrencia, ativo")
+      .order("codigo"),
+    supabase.from("tags").select("id, nome").order("nome"),
+    supabase
+      .from("quick_replies")
+      .select("id, titulo, corpo")
+      .order("titulo"),
+    supabase
+      .from("whatsapp_instances")
+      .select("id, nome, telefone_e164, vendedor_id, ativa")
+      .order("nome"),
+    supabase
+      .from("profiles")
+      .select("id, nome, papel, ativo, meta_mensal_centavos")
+      .eq("ativo", true)
+      .order("nome"),
+    supabase.from("settings").select("chave, valor"),
+  ]);
+
+  const valorParametro = new Map(
+    ((parametros ?? []) as { chave: string; valor: unknown }[]).map((p) => [
+      p.chave,
+      String(p.valor),
+    ]),
+  );
+
+  const listaEquipe = (equipe ?? []) as {
+    id: string;
+    nome: string;
+    papel: string;
+    meta_mensal_centavos: number;
+  }[];
+
   return (
-    <ModulePlaceholder
-      titulo="Configurações"
-      descricao="O que a equipe usa no dia a dia: produtos, tags, mensagens e instâncias."
-      itens={[
-        "Produtos por código, nome, valor e recorrência",
-        "Tags de atendimento para a troca de mensagens",
-        "Mensagens padrão para disparar ao lead",
-        "Até 10 instâncias de WhatsApp, uma por vendedor",
-        "Metas de venda do mês por vendedor",
-      ]}
-    />
+    <div className="p-2 md:p-3">
+      <header className="border-b border-neutral-200 pb-2">
+        <h1 className="text-h1 text-neutral-900">Configurações</h1>
+        <p className="mt-1 max-w-[68ch] text-base text-neutral-600">
+          Produtos, tags, mensagens padrão, instâncias de WhatsApp, metas e os
+          parâmetros da reativação.
+        </p>
+      </header>
+
+      {aviso ? (
+        <p
+          role="alert"
+          className="mt-2 max-w-[68ch] rounded-md border border-warning bg-warning-bg px-1.5 py-1 text-sm text-warning"
+        >
+          {aviso}
+        </p>
+      ) : null}
+
+      {/* Produtos ---------------------------------------------------------- */}
+      <section className="mt-3" aria-labelledby="produtos-titulo">
+        <h2 id="produtos-titulo" className="text-h3 text-neutral-900">
+          Produtos
+        </h2>
+        <p className="mt-1 text-sm text-neutral-600">
+          O valor é a comissão que o vendedor recebe por venda.
+        </p>
+
+        <div className="mt-2 flex flex-col gap-1">
+          {((produtos ?? []) as {
+            id: string;
+            codigo: string;
+            nome: string;
+            valor_comissao_centavos: number;
+            recorrencia: string;
+            ativo: boolean;
+          }[]).map((produto) => (
+            <div key={produto.id} className="flex flex-wrap items-center gap-1">
+              <form
+                action={atualizarProduto}
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-1"
+              >
+                <input type="hidden" name="id" value={produto.id} />
+                <label htmlFor={`prod-cod-${produto.id}`} className="sr-only">
+                  Código
+                </label>
+                <input
+                  id={`prod-cod-${produto.id}`}
+                  name="codigo"
+                  defaultValue={produto.codigo}
+                  required
+                  className={cn(CAMPO, "w-[104px] font-mono text-xs uppercase")}
+                />
+                <label htmlFor={`prod-nome-${produto.id}`} className="sr-only">
+                  Nome
+                </label>
+                <input
+                  id={`prod-nome-${produto.id}`}
+                  name="nome"
+                  defaultValue={produto.nome}
+                  required
+                  className={cn(CAMPO, "min-w-[160px] flex-1")}
+                />
+                <label htmlFor={`prod-valor-${produto.id}`} className="sr-only">
+                  Comissão em reais
+                </label>
+                <input
+                  id={`prod-valor-${produto.id}`}
+                  name="valor"
+                  defaultValue={(produto.valor_comissao_centavos / 100)
+                    .toFixed(2)
+                    .replace(".", ",")}
+                  required
+                  inputMode="decimal"
+                  className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+                />
+                <label htmlFor={`prod-rec-${produto.id}`} className="sr-only">
+                  Recorrência
+                </label>
+                <select
+                  id={`prod-rec-${produto.id}`}
+                  name="recorrencia"
+                  defaultValue={produto.recorrencia}
+                  className={cn(CAMPO, "w-[136px]")}
+                >
+                  {RECORRENCIAS.map((r) => (
+                    <option key={r.valor} value={r.valor}>
+                      {r.rotulo}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  aria-label={`Salvar produto ${produto.nome}`}
+                  className={BOTAO_ICONE}
+                >
+                  <Check size={18} strokeWidth={1.5} aria-hidden />
+                </button>
+              </form>
+
+              <form action={alternarProduto}>
+                <input type="hidden" name="id" value={produto.id} />
+                <button
+                  type="submit"
+                  aria-pressed={produto.ativo}
+                  title={produto.ativo ? "Desativar" : "Reativar"}
+                  className={cn(
+                    "inline-flex h-[20px] items-center rounded-sm px-1 text-xs transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                    produto.ativo
+                      ? "bg-success-bg text-success"
+                      : "bg-neutral-100 text-neutral-400",
+                  )}
+                >
+                  {produto.ativo ? "ativo" : "inativo"}
+                </button>
+              </form>
+
+              <form action={excluirProduto}>
+                <input type="hidden" name="id" value={produto.id} />
+                <button
+                  type="submit"
+                  aria-label={`Excluir produto ${produto.nome}`}
+                  className={cn(BOTAO_ICONE, BOTAO_ICONE_PERIGO)}
+                >
+                  <Trash2 size={18} strokeWidth={1.5} aria-hidden />
+                </button>
+              </form>
+            </div>
+          ))}
+
+          <form action={criarProduto} className="flex flex-wrap items-center gap-1">
+            <label htmlFor="novo-prod-cod" className="sr-only">
+              Código do novo produto
+            </label>
+            <input
+              id="novo-prod-cod"
+              name="codigo"
+              placeholder="CT-PJ"
+              required
+              className={cn(CAMPO, "w-[104px] font-mono text-xs uppercase")}
+            />
+            <label htmlFor="novo-prod-nome" className="sr-only">
+              Nome do novo produto
+            </label>
+            <input
+              id="novo-prod-nome"
+              name="nome"
+              placeholder="Nome do produto…"
+              required
+              className={cn(CAMPO, "min-w-[160px] flex-1")}
+            />
+            <label htmlFor="novo-prod-valor" className="sr-only">
+              Comissão em reais
+            </label>
+            <input
+              id="novo-prod-valor"
+              name="valor"
+              placeholder="15,00"
+              required
+              inputMode="decimal"
+              className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+            />
+            <label htmlFor="novo-prod-rec" className="sr-only">
+              Recorrência
+            </label>
+            <select
+              id="novo-prod-rec"
+              name="recorrencia"
+              defaultValue="unica"
+              className={cn(CAMPO, "w-[136px]")}
+            >
+              {RECORRENCIAS.map((r) => (
+                <option key={r.valor} value={r.valor}>
+                  {r.rotulo}
+                </option>
+              ))}
+            </select>
+            <button type="submit" aria-label="Adicionar produto" className={BOTAO_ICONE}>
+              <Plus size={18} strokeWidth={1.5} aria-hidden />
+            </button>
+          </form>
+        </div>
+      </section>
+
+      {/* Tags -------------------------------------------------------------- */}
+      <section className="mt-4" aria-labelledby="tags-titulo">
+        <h2 id="tags-titulo" className="text-h3 text-neutral-900">
+          Tags de atendimento
+        </h2>
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          {((tags ?? []) as { id: string; nome: string }[]).map((tag) => (
+            <span
+              key={tag.id}
+              className="inline-flex items-center gap-0.5 rounded-sm bg-neutral-100 py-0.5 pr-0.5 pl-1 text-sm text-neutral-800"
+            >
+              {tag.nome}
+              <form action={excluirTag} className="flex">
+                <input type="hidden" name="id" value={tag.id} />
+                <button
+                  type="submit"
+                  aria-label={`Excluir tag ${tag.nome}`}
+                  className="inline-flex h-[20px] w-[20px] items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] hover:bg-danger-bg hover:text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  <Trash2 size={12} strokeWidth={1.5} aria-hidden />
+                </button>
+              </form>
+            </span>
+          ))}
+
+          <form action={criarTag} className="flex items-center gap-1">
+            <label htmlFor="nova-tag" className="sr-only">
+              Nome da nova tag
+            </label>
+            <input
+              id="nova-tag"
+              name="nome"
+              placeholder="Nova tag…"
+              required
+              className={cn(CAMPO, "w-[160px]")}
+            />
+            <button type="submit" aria-label="Adicionar tag" className={BOTAO_ICONE}>
+              <Plus size={18} strokeWidth={1.5} aria-hidden />
+            </button>
+          </form>
+        </div>
+      </section>
+
+      {/* Mensagens padrão --------------------------------------------------- */}
+      <section className="mt-4" aria-labelledby="mensagens-titulo">
+        <h2 id="mensagens-titulo" className="text-h3 text-neutral-900">
+          Mensagens padrão
+        </h2>
+        <p className="mt-1 text-sm text-neutral-600">
+          Textos prontos para a equipe disparar na conversa com o lead.
+        </p>
+
+        <div className="mt-2 grid gap-2 lg:grid-cols-2">
+          {((mensagens ?? []) as { id: string; titulo: string; corpo: string }[]).map(
+            (msg) => (
+              <form
+                key={msg.id}
+                action={atualizarMensagem}
+                className="flex flex-col gap-1 rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
+              >
+                <input type="hidden" name="id" value={msg.id} />
+                <div className="flex items-center gap-1">
+                  <label htmlFor={`msg-titulo-${msg.id}`} className="sr-only">
+                    Título
+                  </label>
+                  <input
+                    id={`msg-titulo-${msg.id}`}
+                    name="titulo"
+                    defaultValue={msg.titulo}
+                    required
+                    className={cn(CAMPO, "flex-1 font-medium")}
+                  />
+                  <button
+                    type="submit"
+                    aria-label={`Salvar mensagem ${msg.titulo}`}
+                    className={BOTAO_ICONE}
+                  >
+                    <Check size={18} strokeWidth={1.5} aria-hidden />
+                  </button>
+                  <button
+                    type="submit"
+                    formAction={excluirMensagem}
+                    aria-label={`Excluir mensagem ${msg.titulo}`}
+                    className={cn(BOTAO_ICONE, BOTAO_ICONE_PERIGO)}
+                  >
+                    <Trash2 size={18} strokeWidth={1.5} aria-hidden />
+                  </button>
+                </div>
+                <label htmlFor={`msg-corpo-${msg.id}`} className="sr-only">
+                  Texto da mensagem
+                </label>
+                <textarea
+                  id={`msg-corpo-${msg.id}`}
+                  name="corpo"
+                  defaultValue={msg.corpo}
+                  required
+                  rows={3}
+                  className="rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                />
+              </form>
+            ),
+          )}
+
+          <form
+            action={criarMensagem}
+            className="flex flex-col gap-1 rounded-lg border border-dashed border-neutral-300 bg-neutral-50 p-2"
+          >
+            <div className="flex items-center gap-1">
+              <label htmlFor="nova-msg-titulo" className="sr-only">
+                Título da nova mensagem
+              </label>
+              <input
+                id="nova-msg-titulo"
+                name="titulo"
+                placeholder="Título (ex.: Primeiro contato)"
+                required
+                className={cn(CAMPO, "flex-1")}
+              />
+              <button
+                type="submit"
+                aria-label="Adicionar mensagem"
+                className={BOTAO_ICONE}
+              >
+                <Plus size={18} strokeWidth={1.5} aria-hidden />
+              </button>
+            </div>
+            <label htmlFor="nova-msg-corpo" className="sr-only">
+              Texto da nova mensagem
+            </label>
+            <textarea
+              id="nova-msg-corpo"
+              name="corpo"
+              placeholder="Texto da mensagem…"
+              required
+              rows={3}
+              className="rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            />
+          </form>
+        </div>
+      </section>
+
+      {/* Instâncias --------------------------------------------------------- */}
+      <section className="mt-4" aria-labelledby="instancias-titulo">
+        <h2 id="instancias-titulo" className="text-h3 text-neutral-900">
+          Instâncias de WhatsApp
+        </h2>
+        <p className="mt-1 text-sm text-neutral-600">
+          Até 10 números, cada um associado a um vendedor. A conexão com o
+          número oficial da Meta é feita na Administração, pelo webhook.
+        </p>
+
+        <div className="mt-2 flex flex-col gap-1">
+          {((instancias ?? []) as {
+            id: string;
+            nome: string;
+            telefone_e164: string;
+            vendedor_id: string | null;
+            ativa: boolean;
+          }[]).map((inst) => (
+            <div key={inst.id} className="flex flex-wrap items-center gap-1">
+              <form
+                action={atualizarInstancia}
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-1"
+              >
+                <input type="hidden" name="id" value={inst.id} />
+                <label htmlFor={`inst-nome-${inst.id}`} className="sr-only">
+                  Nome da instância
+                </label>
+                <input
+                  id={`inst-nome-${inst.id}`}
+                  name="nome"
+                  defaultValue={inst.nome}
+                  required
+                  className={cn(CAMPO, "w-[140px]")}
+                />
+                <span className="font-mono text-sm text-neutral-600 tabular-nums">
+                  {formatarTelefone(inst.telefone_e164)}
+                </span>
+                <label htmlFor={`inst-vend-${inst.id}`} className="sr-only">
+                  Vendedor responsável
+                </label>
+                <select
+                  id={`inst-vend-${inst.id}`}
+                  name="vendedor_id"
+                  defaultValue={inst.vendedor_id ?? ""}
+                  className={cn(CAMPO, "w-[180px]")}
+                >
+                  <option value="">Sem vendedor</option>
+                  {listaEquipe.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.nome}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  aria-label={`Salvar instância ${inst.nome}`}
+                  className={BOTAO_ICONE}
+                >
+                  <Check size={18} strokeWidth={1.5} aria-hidden />
+                </button>
+              </form>
+
+              <form action={alternarInstancia}>
+                <input type="hidden" name="id" value={inst.id} />
+                <button
+                  type="submit"
+                  aria-pressed={inst.ativa}
+                  title={inst.ativa ? "Desativar" : "Reativar"}
+                  className={cn(
+                    "inline-flex h-[20px] items-center rounded-sm px-1 text-xs transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                    inst.ativa
+                      ? "bg-success-bg text-success"
+                      : "bg-neutral-100 text-neutral-400",
+                  )}
+                >
+                  {inst.ativa ? "ativa" : "inativa"}
+                </button>
+              </form>
+
+              <form action={excluirInstancia}>
+                <input type="hidden" name="id" value={inst.id} />
+                <button
+                  type="submit"
+                  aria-label={`Excluir instância ${inst.nome}`}
+                  className={cn(BOTAO_ICONE, BOTAO_ICONE_PERIGO)}
+                >
+                  <Trash2 size={18} strokeWidth={1.5} aria-hidden />
+                </button>
+              </form>
+            </div>
+          ))}
+
+          <form action={criarInstancia} className="flex flex-wrap items-center gap-1">
+            <label htmlFor="nova-inst-nome" className="sr-only">
+              Nome da nova instância
+            </label>
+            <input
+              id="nova-inst-nome"
+              name="nome"
+              placeholder="Mesa 01"
+              required
+              className={cn(CAMPO, "w-[140px]")}
+            />
+            <label htmlFor="nova-inst-tel" className="sr-only">
+              Telefone da instância
+            </label>
+            <input
+              id="nova-inst-tel"
+              name="telefone"
+              placeholder="11 98842-1170"
+              required
+              inputMode="tel"
+              className={cn(CAMPO, "w-[160px] font-mono tabular-nums")}
+            />
+            <label htmlFor="nova-inst-vend" className="sr-only">
+              Vendedor responsável
+            </label>
+            <select
+              id="nova-inst-vend"
+              name="vendedor_id"
+              defaultValue=""
+              className={cn(CAMPO, "w-[180px]")}
+            >
+              <option value="">Sem vendedor</option>
+              {listaEquipe.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.nome}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              aria-label="Adicionar instância"
+              className={BOTAO_ICONE}
+            >
+              <Plus size={18} strokeWidth={1.5} aria-hidden />
+            </button>
+          </form>
+        </div>
+      </section>
+
+      {/* Metas -------------------------------------------------------------- */}
+      <section className="mt-4" aria-labelledby="metas-titulo">
+        <h2 id="metas-titulo" className="text-h3 text-neutral-900">
+          Metas do mês
+        </h2>
+        {perfil.papel !== "admin" ? (
+          <p className="mt-1 text-sm text-neutral-600">
+            Só o admin altera metas. As atuais:{" "}
+            {listaEquipe
+              .map((v) => `${v.nome} ${formatarReais(v.meta_mensal_centavos)}`)
+              .join(" · ")}
+          </p>
+        ) : (
+          <div className="mt-2 flex flex-col gap-1">
+            {listaEquipe.map((vendedor) => (
+              <form
+                key={vendedor.id}
+                action={salvarMeta}
+                className="flex items-center gap-1"
+              >
+                <input type="hidden" name="id" value={vendedor.id} />
+                <span className="w-[220px] truncate text-sm text-neutral-800">
+                  {vendedor.nome}
+                  <span className="ml-0.5 text-xs text-neutral-400 capitalize">
+                    {vendedor.papel}
+                  </span>
+                </span>
+                <label htmlFor={`meta-${vendedor.id}`} className="sr-only">
+                  Meta mensal de {vendedor.nome} em reais
+                </label>
+                <input
+                  id={`meta-${vendedor.id}`}
+                  name="meta"
+                  defaultValue={(vendedor.meta_mensal_centavos / 100)
+                    .toFixed(2)
+                    .replace(".", ",")}
+                  inputMode="decimal"
+                  className={cn(CAMPO, "w-[128px] text-right font-mono tabular-nums")}
+                />
+                <button
+                  type="submit"
+                  aria-label={`Salvar meta de ${vendedor.nome}`}
+                  className={BOTAO_ICONE}
+                >
+                  <Check size={18} strokeWidth={1.5} aria-hidden />
+                </button>
+              </form>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Parâmetros --------------------------------------------------------- */}
+      <section className="mt-4 mb-3" aria-labelledby="parametros-titulo">
+        <h2 id="parametros-titulo" className="text-h3 text-neutral-900">
+          Parâmetros da reativação
+        </h2>
+        <div className="mt-2 flex flex-col gap-2">
+          {PARAMETROS.map((parametro) => (
+            <form
+              key={parametro.chave}
+              action={salvarParametro}
+              className="flex items-center gap-1"
+            >
+              <input type="hidden" name="chave" value={parametro.chave} />
+              <span className="w-[220px] text-sm text-neutral-800">
+                {parametro.rotulo}
+                <span className="block text-xs text-neutral-600">
+                  {parametro.ajuda}
+                </span>
+              </span>
+              <label htmlFor={`param-${parametro.chave}`} className="sr-only">
+                {parametro.rotulo}
+              </label>
+              <input
+                id={`param-${parametro.chave}`}
+                name="valor"
+                defaultValue={valorParametro.get(parametro.chave) ?? ""}
+                required
+                inputMode="numeric"
+                className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+              />
+              <button
+                type="submit"
+                aria-label={`Salvar ${parametro.rotulo}`}
+                className={BOTAO_ICONE}
+              >
+                <Check size={18} strokeWidth={1.5} aria-hidden />
+              </button>
+            </form>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
