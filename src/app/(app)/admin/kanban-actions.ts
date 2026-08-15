@@ -35,7 +35,13 @@ export async function criarKanban(formData: FormData) {
     .select("id")
     .single();
 
-  if (error) terminar(`Não deu para criar o kanban: ${error.message}`);
+  if (error) {
+    terminar(
+      error.code === "23505"
+        ? `Já existe um kanban chamado “${nome}”. Escolha outro nome.`
+        : `Não deu para criar o kanban: ${error.message}`,
+    );
+  }
 
   // Todo kanban nasce com uma etapa inicial — sem etapa não há coluna.
   await supabase
@@ -57,7 +63,13 @@ export async function renomearKanban(formData: FormData) {
     .update({ nome })
     .eq("id", id);
 
-  if (error) terminar(`Não deu para renomear: ${error.message}`);
+  if (error) {
+    terminar(
+      error.code === "23505"
+        ? `Já existe um kanban chamado “${nome}”. Escolha outro nome.`
+        : `Não deu para renomear: ${error.message}`,
+    );
+  }
   terminar();
 }
 
