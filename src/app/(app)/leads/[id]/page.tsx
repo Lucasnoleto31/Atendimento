@@ -77,11 +77,15 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
   };
   let giro: Giro | null = null;
   let pontos: PontoLote[] = [];
+  let porConta: { conta: string; total30d: number; totalPeriodo: number }[] = [];
 
   if (lead.customer_id) {
     const inicio = new Date();
     inicio.setDate(inicio.getDate() - DIAS_GRAFICO);
     const inicioIso = inicio.toISOString().slice(0, 10);
+    const inicio30 = new Date();
+    inicio30.setDate(inicio30.getDate() - 30);
+    const inicio30Iso = inicio30.toISOString().slice(0, 10);
 
     const [{ data: giroData }, { data: lotes }] = await Promise.all([
       supabase
@@ -91,7 +95,7 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
         .maybeSingle(),
       supabase
         .from("customer_lots")
-        .select("referencia_data, quantidade")
+        .select("referencia_data, quantidade, conta")
         .eq("customer_id", lead.customer_id)
         .gte("referencia_data", inicioIso)
         .order("referencia_data"),
@@ -99,18 +103,39 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
 
     giro = (giroData as Giro | null) ?? null;
 
-    // Preenche os dias sem registro com zero — buraco no gráfico é dado.
-    const porDia = new Map(
-      ((lotes ?? []) as { referencia_data: string; quantidade: number }[]).map(
-        (l) => [l.referencia_data, Number(l.quantidade)],
-      ),
-    );
+    const linhas = (lotes ?? []) as {
+      referencia_data: string;
+      quantidade: number;
+      conta: string | null;
+    }[];
+
+    // Gráfico: soma de TODAS as contas por dia; dia sem registro conta zero.
+    const porDia = new Map<string, number>();
+    for (const l of linhas) {
+      porDia.set(
+        l.referencia_data,
+        (porDia.get(l.referencia_data) ?? 0) + Number(l.quantidade),
+      );
+    }
     pontos = Array.from({ length: DIAS_GRAFICO }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (DIAS_GRAFICO - 1 - i));
       const iso = d.toISOString().slice(0, 10);
       return { data: iso, quantidade: porDia.get(iso) ?? 0 };
     });
+
+    // Detalhe por conta: total no período do gráfico e nos últimos 30 dias.
+    const mapaContas = new Map<string, { total30d: number; totalPeriodo: number }>();
+    for (const l of linhas) {
+      const chave = l.conta ?? "sem conta";
+      const atual = mapaContas.get(chave) ?? { total30d: 0, totalPeriodo: 0 };
+      atual.totalPeriodo += Number(l.quantidade);
+      if (l.referencia_data >= inicio30Iso) atual.total30d += Number(l.quantidade);
+      mapaContas.set(chave, atual);
+    }
+    porConta = [...mapaContas.entries()]
+      .map(([conta, totais]) => ({ conta, ...totais }))
+      .sort((a, b) => b.totalPeriodo - a.totalPeriodo);
   }
 
   const girou30d = (giro?.lotes_30d ?? 0) > 0;
@@ -294,6 +319,66 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
               </dd>
             </div>
           </dl>
+
+          {porConta.length > 1 || (porConta.length === 1 && porConta[0].conta !== "sem conta") ? (
+            <div className="mt-2 overflow-hidden rounded-md border border-neutral-200">
+              <table className="w-full border-collapse text-left">
+                <caption className="sr-only">
+                  Lotes por conta nos últimos 90 e 30 dias
+                </caption>
+                <thead>
+                  <tr className="border-b border-neutral-200 bg-neutral-50">
+                    <th
+                      scope="col"
+                      className="px-1.5 py-0.5 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
+                      Conta
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-1.5 py-0.5 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
+                      Últimos 30d
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-1.5 py-0.5 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
+                      Período (90d)
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-200">
+                  {porConta.map((c) => (
+                    <tr key={c.conta}>
+                      <td className="px-1.5 py-1 font-mono text-sm text-neutral-800 tabular-nums">
+                        {c.conta}
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono text-sm text-neutral-800 tabular-nums">
+                        {c.total30d}
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono text-sm text-neutral-600 tabular-nums">
+                        {c.totalPeriodo}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-neutral-200 bg-neutral-50">
+                    <td className="px-1.5 py-1 text-sm font-medium text-neutral-800">
+                      Total
+                    </td>
+                    <td className="px-1.5 py-1 text-right font-mono text-sm font-medium text-neutral-900 tabular-nums">
+                      {porConta.reduce((s, c) => s + c.total30d, 0)}
+                    </td>
+                    <td className="px-1.5 py-1 text-right font-mono text-sm font-medium text-neutral-900 tabular-nums">
+                      {porConta.reduce((s, c) => s + c.totalPeriodo, 0)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          ) : null}
 
           <div className="mt-2">
             <LotesChart pontos={pontos} />

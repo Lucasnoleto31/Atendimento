@@ -71,7 +71,7 @@ cross join generate_series(
   current_date - interval '1 day',
   interval '1 day'
 ) as dias(d)
-on conflict (customer_id, referencia_data) do nothing;
+on conflict do nothing;
 
 -- Leads ------------------------------------------------------------------
 -- Alguns telefones batem com a base de clientes (o gatilho vincula sozinho),

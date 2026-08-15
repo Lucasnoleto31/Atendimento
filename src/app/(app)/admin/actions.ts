@@ -552,40 +552,23 @@ export async function importarLotes(
       }
     }
 
-    // Duas contas do mesmo cliente no mesmo dia somam num registro só —
-    // o upsert não aceita a mesma chave (cliente, dia) duas vezes no lote.
-    const porClienteDia = new Map<
-      string,
-      {
-        customer_id: string;
-        referencia_data: string;
-        quantidade: number;
-        import_id: string | null;
-      }
-    >();
-    for (const a of agregados) {
-      const customerId = mapa.get(a.conta);
-      if (!customerId) continue;
-      const chave = `${customerId}|${a.referencia}`;
-      const atual = porClienteDia.get(chave);
-      if (atual) {
-        atual.quantidade += a.quantidade;
-      } else {
-        porClienteDia.set(chave, {
-          customer_id: customerId,
-          referencia_data: a.referencia,
-          quantidade: a.quantidade,
-          import_id: registroId ?? null,
-        });
-      }
-    }
-    const registros = [...porClienteDia.values()];
+    // Um registro por conta + dia: o total do cliente é somado na leitura,
+    // preservando o detalhe por conta na ficha do lead.
+    const registros = agregados
+      .filter((a) => mapa.has(a.conta))
+      .map((a) => ({
+        customer_id: mapa.get(a.conta)!,
+        conta: a.conta,
+        referencia_data: a.referencia,
+        quantidade: a.quantidade,
+        import_id: registroId ?? null,
+      }));
 
     let gravados = 0;
     for (const parte of blocos(registros)) {
       const { error } = await service
         .from("customer_lots")
-        .upsert(parte, { onConflict: "customer_id,referencia_data" });
+        .upsert(parte, { onConflict: "conta,referencia_data" });
       if (error) throw new Error(error.message);
       gravados += parte.length;
     }
