@@ -12,7 +12,11 @@
 -- Script reexecutável.
 -- =============================================================================
 
-create or replace view v_listas_atendimento as
+-- A ordem das colunas muda, então a view precisa ser recriada do zero
+-- (create or replace não permite reordenar colunas).
+drop view if exists v_listas_atendimento;
+
+create view v_listas_atendimento as
 select
   l.id as lead_id,
   l.nome,
