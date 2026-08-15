@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { KanbanBoard, type Coluna } from "@/components/app/kanban/board";
 import type { LeadCard, Stage } from "@/lib/types";
@@ -43,13 +44,37 @@ function paraCard(l: LinhaLead): LeadCard {
   };
 }
 
-export default async function AtendimentoPage() {
+export default async function AtendimentoPage({
+  searchParams,
+}: PageProps<"/atendimento">) {
   const supabase = await createClient();
+  const params = await searchParams;
 
-  const { data: stages } = await supabase
-    .from("pipeline_stages")
-    .select("id, nome, ordem, is_final")
-    .order("ordem");
+  const { data: pipelines } = await supabase
+    .from("pipelines")
+    .select("id, nome, padrao")
+    .order("criado_em");
+
+  const listaPipelines = (pipelines ?? []) as {
+    id: string;
+    nome: string;
+    padrao: boolean;
+  }[];
+
+  const kanbanParam = typeof params.kanban === "string" ? params.kanban : null;
+  const pipelineAtivo =
+    listaPipelines.find((p) => p.id === kanbanParam) ??
+    listaPipelines.find((p) => p.padrao) ??
+    listaPipelines[0] ??
+    null;
+
+  const { data: stages } = pipelineAtivo
+    ? await supabase
+        .from("pipeline_stages")
+        .select("id, nome, ordem, is_final")
+        .eq("pipeline_id", pipelineAtivo.id)
+        .order("ordem")
+    : { data: [] };
 
   const [colunas, { count: totalClientes }, { count: totalSemResposta }] =
     await Promise.all([
@@ -85,6 +110,32 @@ export default async function AtendimentoPage() {
     <div className="flex min-h-full flex-col">
       <header className="px-2 pt-2 pb-2 md:px-3 md:pt-3">
         <h1 className="text-h1 text-neutral-900">Atendimento</h1>
+
+        {listaPipelines.length > 1 ? (
+          <nav aria-label="Kanbans" className="mt-1">
+            <ul className="flex flex-wrap gap-1">
+              {listaPipelines.map((p) => {
+                const ativo = p.id === pipelineAtivo?.id;
+                return (
+                  <li key={p.id}>
+                    <Link
+                      href={p.padrao ? "/atendimento" : `/atendimento?kanban=${p.id}`}
+                      aria-current={ativo ? "page" : undefined}
+                      className={
+                        ativo
+                          ? "inline-flex h-[32px] items-center rounded-md bg-primary-50 px-1.5 text-sm font-medium text-primary-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                          : "inline-flex h-[32px] items-center rounded-md px-1.5 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                      }
+                    >
+                      {p.nome}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+        ) : null}
+
         <p className="mt-1 text-sm text-neutral-600">
           <span className="font-mono tabular-nums">{totalLeads}</span> leads no
           funil ·{" "}

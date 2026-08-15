@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { ImportForm } from "./import-form";
 import { ExcluirImportacao } from "./excluir-import";
+import { KanbanConfig, type PipelineComEtapas } from "./kanban-config";
 import { importarClientes, importarLotes } from "./actions";
 
 export const metadata: Metadata = { title: "Administração · Zeve CRM" };
@@ -27,20 +28,64 @@ const ROTULO_STATUS: Record<Importacao["status"], string> = {
   falhou: "Falhou",
 };
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   const perfil = await perfilAtual();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
     redirect("/atendimento");
   }
 
+  const params = await searchParams;
+  const aviso = typeof params.aviso === "string" ? params.aviso : null;
+
   const supabase = await createClient();
-  const { data: importacoes } = await supabase
-    .from("imports")
-    .select(
-      "id, tipo, arquivo_nome, referencia_data, status, total_linhas, linhas_ok, linhas_erro, criado_em, autor:profiles(nome)",
+
+  const [{ data: importacoes }, { data: pipelinesBrutos }, { data: etapas }] =
+    await Promise.all([
+      supabase
+        .from("imports")
+        .select(
+          "id, tipo, arquivo_nome, referencia_data, status, total_linhas, linhas_ok, linhas_erro, criado_em, autor:profiles(nome)",
+        )
+        .order("criado_em", { ascending: false })
+        .limit(20),
+      supabase
+        .from("pipelines")
+        .select("id, nome, padrao")
+        .order("criado_em"),
+      supabase
+        .from("pipeline_stages")
+        .select("id, nome, ordem, is_final, pipeline_id")
+        .order("ordem"),
+    ]);
+
+  // Quantos leads em cada etapa (trava a exclusão de etapa em uso).
+  const contagens = new Map<string, number>();
+  await Promise.all(
+    (etapas ?? []).map(async (e: { id: string }) => {
+      const { count } = await supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .eq("stage_id", e.id);
+      contagens.set(e.id, count ?? 0);
+    }),
+  );
+
+  const pipelines: PipelineComEtapas[] = (
+    (pipelinesBrutos ?? []) as { id: string; nome: string; padrao: boolean }[]
+  ).map((p) => ({
+    ...p,
+    etapas: (
+      (etapas ?? []) as {
+        id: string;
+        nome: string;
+        ordem: number;
+        is_final: boolean;
+        pipeline_id: string;
+      }[]
     )
-    .order("criado_em", { ascending: false })
-    .limit(20);
+      .filter((e) => e.pipeline_id === p.id)
+      .map((e) => ({ ...e, leads: contagens.get(e.id) ?? 0 })),
+  }));
 
   const historico = (importacoes ?? []) as unknown as Importacao[];
 
@@ -49,10 +94,19 @@ export default async function AdminPage() {
       <header className="border-b border-neutral-200 pb-2">
         <h1 className="text-h1 text-neutral-900">Administração</h1>
         <p className="mt-1 max-w-[68ch] text-base text-neutral-600">
-          Importações da base de clientes e dos lotes diários. Usuários e
-          webhook da Meta entram em seguida.
+          Importações, kanbans e etapas do atendimento. Usuários e webhook da
+          Meta entram em seguida.
         </p>
       </header>
+
+      {aviso ? (
+        <p
+          role="alert"
+          className="mt-2 max-w-[68ch] rounded-md border border-warning bg-warning-bg px-1.5 py-1 text-sm text-warning"
+        >
+          {aviso}
+        </p>
+      ) : null}
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <ImportForm
@@ -72,6 +126,8 @@ export default async function AdminPage() {
           rotulo="Importar lotes"
         />
       </div>
+
+      <KanbanConfig pipelines={pipelines} />
 
       <section className="mt-3">
         <h2 className="text-h3 text-neutral-900">Últimas importações</h2>
