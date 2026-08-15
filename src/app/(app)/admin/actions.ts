@@ -3,15 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { normalizarData } from "@/lib/csv";
 import {
-  campo,
-  lerCsv,
-  normalizarData,
-  normalizarNumero,
-  normalizarTelefone,
-} from "@/lib/csv";
+  lerTabela,
+  melhorAba,
+  COLUNAS_CONTA,
+  COLUNAS_LOTES,
+  COLUNAS_NOME,
+  COLUNAS_TELEFONE,
+} from "@/lib/imports/tabular";
+import { prepararClientes, type GrupoCliente } from "@/lib/imports/clientes";
+import { prepararLotes } from "@/lib/imports/lotes";
 
-const LIMITE_BYTES = 10 * 1024 * 1024; // 10 MB
+const LIMITE_BYTES = 20 * 1024 * 1024; // 20 MB — xlsx é maior que csv
 const BLOCO = 500;
 
 export type ResultadoImport = {
@@ -21,8 +25,11 @@ export type ResultadoImport = {
   linhasOk?: number;
   linhasErro?: number;
   exemplosErro?: string[];
+  contasNovas?: number;
   reativacao?: { queda: number; semGiro: number };
 };
+
+type Service = ReturnType<typeof createServiceClient>;
 
 function blocos<T>(lista: T[], tamanho = BLOCO) {
   const partes: T[][] = [];
@@ -32,38 +39,231 @@ function blocos<T>(lista: T[], tamanho = BLOCO) {
   return partes;
 }
 
+async function validarGestor() {
+  const perfil = await perfilAtual();
+  if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
+    return null;
+  }
+  return perfil;
+}
+
 async function lerArquivo(formData: FormData) {
   const arquivo = formData.get("arquivo");
 
   if (!(arquivo instanceof File) || arquivo.size === 0) {
-    return { erro: "Escolha um arquivo CSV." as const };
+    return { erro: "Escolha um arquivo CSV ou Excel (.xlsx)." as const };
   }
   if (arquivo.size > LIMITE_BYTES) {
-    return { erro: "Arquivo maior que 10 MB. Divida em partes." as const };
+    return { erro: "Arquivo maior que 20 MB. Divida em partes." as const };
   }
 
-  const texto = await arquivo.text();
-  const linhas = lerCsv(texto);
-
-  if (linhas.length === 0) {
+  const abas = await lerTabela(arquivo.name, await arquivo.arrayBuffer());
+  if (abas.every((a) => a.linhas.length === 0)) {
     return { erro: "O arquivo está vazio ou não tem cabeçalho." as const };
   }
 
-  return { arquivo, linhas };
+  return { arquivo, abas };
 }
 
-async function guardarArquivo(
-  service: ReturnType<typeof createServiceClient>,
-  arquivo: File,
-  tipo: string,
-) {
+async function guardarArquivo(service: Service, arquivo: File, tipo: string) {
   const caminho = `${tipo}/${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID()}-${arquivo.name}`;
   const { error } = await service.storage
     .from("importacoes")
     .upload(caminho, arquivo, { upsert: false });
 
-  // Bucket ausente não deve derrubar a importação — o que importa são os dados.
+  // Bucket ausente não derruba a importação — o que importa são os dados.
   return error ? null : caminho;
+}
+
+async function abrirRegistro(
+  service: Service,
+  dados: {
+    tipo: "clientes" | "lotes";
+    arquivo: File;
+    arquivoPath: string | null;
+    referencia: string;
+    totalLinhas: number;
+    autorId: string;
+  },
+) {
+  const { data } = await service
+    .from("imports")
+    .insert({
+      tipo: dados.tipo,
+      arquivo_nome: dados.arquivo.name,
+      arquivo_path: dados.arquivoPath,
+      referencia_data: dados.referencia,
+      total_linhas: dados.totalLinhas,
+      criado_por: dados.autorId,
+    })
+    .select("id")
+    .single();
+
+  return data?.id as string | undefined;
+}
+
+async function fecharRegistro(
+  service: Service,
+  id: string | undefined,
+  resultado:
+    | { status: "concluida"; ok: number; erros: number }
+    | { status: "falhou"; detalhe: string },
+) {
+  if (!id) return;
+
+  await service
+    .from("imports")
+    .update(
+      resultado.status === "concluida"
+        ? {
+            status: "concluida",
+            linhas_ok: resultado.ok,
+            linhas_erro: resultado.erros,
+          }
+        : { status: "falhou", erro_detalhe: resultado.detalhe },
+    )
+    .eq("id", id);
+}
+
+/**
+ * Resolve cada grupo do arquivo para um customer_id: primeiro pela conta,
+ * depois pelo telefone; quem não casa com nada vira cliente novo.
+ * Devolve também os vínculos conta -> cliente a gravar.
+ */
+async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
+  const todasContas = grupos.flatMap((g) => g.contas);
+  const todosTelefones = grupos
+    .map((g) => g.telefone)
+    .filter((t): t is string => t !== null);
+
+  const contaParaCliente = new Map<string, string>();
+  for (const parte of blocos(todasContas)) {
+    const { data } = await service
+      .from("customer_accounts")
+      .select("conta, customer_id")
+      .in("conta", parte);
+    (data ?? []).forEach((r: { conta: string; customer_id: string }) =>
+      contaParaCliente.set(r.conta, r.customer_id),
+    );
+  }
+
+  const telefoneParaCliente = new Map<string, string>();
+  for (const parte of blocos(todosTelefones)) {
+    const { data } = await service
+      .from("customers")
+      .select("id, telefone_e164")
+      .in("telefone_e164", parte);
+    (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
+      telefoneParaCliente.set(r.telefone_e164, r.id),
+    );
+  }
+
+  const novos: GrupoCliente[] = [];
+  const existentes: { id: string; grupo: GrupoCliente }[] = [];
+
+  for (const grupo of grupos) {
+    const porConta = grupo.contas
+      .map((c) => contaParaCliente.get(c))
+      .find(Boolean);
+    const porTelefone = grupo.telefone
+      ? telefoneParaCliente.get(grupo.telefone)
+      : undefined;
+    const id = porConta ?? porTelefone;
+
+    if (id) existentes.push({ id, grupo });
+    else novos.push(grupo);
+  }
+
+  const vinculos: { conta: string; customer_id: string }[] = [];
+
+  // Novos em lote; o retorno preserva a ordem do insert.
+  for (const parte of blocos(novos)) {
+    const { data, error } = await service
+      .from("customers")
+      .insert(
+        parte.map((g) => ({
+          nome_completo: g.nome,
+          telefone_e164: g.telefone,
+          documento: g.documento,
+          email: g.email,
+          conta_aberta_em: g.conta_aberta_em,
+        })),
+      )
+      .select("id");
+
+    if (error) throw new Error(error.message);
+
+    (data ?? []).forEach((linha: { id: string }, i) => {
+      parte[i].contas.forEach((conta) =>
+        vinculos.push({ conta, customer_id: linha.id }),
+      );
+    });
+  }
+
+  // Existentes: busca o estado atual e mescla sem apagar dado preenchido.
+  const idsExistentes = existentes.map((e) => e.id);
+  const atual = new Map<
+    string,
+    {
+      telefone_e164: string | null;
+      documento: string | null;
+      email: string | null;
+      conta_aberta_em: string | null;
+    }
+  >();
+
+  for (const parte of blocos(idsExistentes)) {
+    const { data } = await service
+      .from("customers")
+      .select("id, telefone_e164, documento, email, conta_aberta_em")
+      .in("id", parte);
+    (data ?? []).forEach(
+      (r: {
+        id: string;
+        telefone_e164: string | null;
+        documento: string | null;
+        email: string | null;
+        conta_aberta_em: string | null;
+      }) => atual.set(r.id, r),
+    );
+  }
+
+  const atualizacoes = existentes.map(({ id, grupo }) => {
+    const estado = atual.get(id);
+    grupo.contas.forEach((conta) => {
+      if (!contaParaCliente.has(conta)) {
+        vinculos.push({ conta, customer_id: id });
+      }
+    });
+    return {
+      id,
+      nome_completo: grupo.nome,
+      telefone_e164: grupo.telefone ?? estado?.telefone_e164 ?? null,
+      documento: grupo.documento ?? estado?.documento ?? null,
+      email: grupo.email ?? estado?.email ?? null,
+      conta_aberta_em: grupo.conta_aberta_em ?? estado?.conta_aberta_em ?? null,
+      ativo: true,
+    };
+  });
+
+  for (const parte of blocos(atualizacoes)) {
+    const { error } = await service
+      .from("customers")
+      .upsert(parte, { onConflict: "id" });
+    if (error) throw new Error(error.message);
+  }
+
+  for (const parte of blocos(vinculos)) {
+    const { error } = await service
+      .from("customer_accounts")
+      .upsert(parte, { onConflict: "conta" });
+    if (error) throw new Error(error.message);
+  }
+
+  return {
+    gravados: grupos.length,
+    contasNovas: vinculos.length,
+  };
 }
 
 // ===========================================================================
@@ -74,108 +274,61 @@ export async function importarClientes(
   _estado: ResultadoImport,
   formData: FormData,
 ): Promise<ResultadoImport> {
-  const perfil = await perfilAtual();
-  if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
-    return { erro: "Só administração e gestão podem importar." };
-  }
+  const perfil = await validarGestor();
+  if (!perfil) return { erro: "Só administração e gestão podem importar." };
 
   const lido = await lerArquivo(formData);
   if ("erro" in lido) return { erro: lido.erro };
-  const { arquivo, linhas } = lido;
+  const { arquivo, abas } = lido;
 
-  const registros: {
-    nome_completo: string;
-    telefone_e164: string;
-    documento: string | null;
-    email: string | null;
-    conta_aberta_em: string | null;
-  }[] = [];
-  const erros: string[] = [];
-  const vistos = new Set<string>();
+  const aba = melhorAba(abas, [
+    COLUNAS_NOME,
+    [...COLUNAS_TELEFONE, ...COLUNAS_CONTA],
+  ]);
+  if (!aba) {
+    return {
+      erro: "Nenhuma aba tem as colunas esperadas: nome + telefone ou conta.",
+    };
+  }
 
-  linhas.forEach((linha, i) => {
-    const nome = campo(linha, "nome_completo", "nome", "cliente", "razao_social");
-    const telefone = normalizarTelefone(
-      campo(linha, "telefone", "celular", "whatsapp", "fone", "telefone_1"),
-    );
-
-    if (!nome) {
-      erros.push(`Linha ${i + 2}: sem nome.`);
-      return;
-    }
-    if (!telefone) {
-      erros.push(`Linha ${i + 2}: telefone inválido (${nome}).`);
-      return;
-    }
-    if (vistos.has(telefone)) {
-      erros.push(`Linha ${i + 2}: telefone repetido no arquivo (${nome}).`);
-      return;
-    }
-
-    vistos.add(telefone);
-    registros.push({
-      nome_completo: nome,
-      telefone_e164: telefone,
-      documento: campo(linha, "documento", "cpf", "cnpj", "cpf_cnpj") || null,
-      email: campo(linha, "email", "e_mail") || null,
-      conta_aberta_em: normalizarData(
-        campo(linha, "conta_aberta_em", "data_abertura", "abertura", "data"),
-      ),
-    });
-  });
+  const { grupos, erros } = prepararClientes(aba.linhas);
 
   const service = createServiceClient();
   const arquivoPath = await guardarArquivo(service, arquivo, "clientes");
+  const registroId = await abrirRegistro(service, {
+    tipo: "clientes",
+    arquivo,
+    arquivoPath,
+    referencia: new Date().toISOString().slice(0, 10),
+    totalLinhas: aba.linhas.length,
+    autorId: perfil.id,
+  });
 
-  const { data: registro } = await service
-    .from("imports")
-    .insert({
-      tipo: "clientes",
-      arquivo_nome: arquivo.name,
-      arquivo_path: arquivoPath,
-      referencia_data: new Date().toISOString().slice(0, 10),
-      total_linhas: linhas.length,
-      criado_por: perfil.id,
-    })
-    .select("id")
-    .single();
-
-  let gravados = 0;
-  for (const parte of blocos(registros)) {
-    const { error } = await service
-      .from("customers")
-      .upsert(parte, { onConflict: "telefone_e164" });
-
-    if (error) {
-      await service
-        .from("imports")
-        .update({ status: "falhou", erro_detalhe: error.message })
-        .eq("id", registro?.id);
-      return { erro: `Falha ao gravar: ${error.message}` };
-    }
-    gravados += parte.length;
-  }
-
-  await service
-    .from("imports")
-    .update({
+  try {
+    const { gravados, contasNovas } = await aplicarClientes(service, grupos);
+    await fecharRegistro(service, registroId, {
       status: "concluida",
-      linhas_ok: gravados,
-      linhas_erro: erros.length,
-    })
-    .eq("id", registro?.id);
+      ok: gravados,
+      erros: erros.length,
+    });
 
-  revalidatePath("/admin");
-  revalidatePath("/atendimento");
-  revalidatePath("/leads");
+    revalidatePath("/admin");
+    revalidatePath("/atendimento");
+    revalidatePath("/leads");
 
-  return {
-    ok: true,
-    totalLinhas: linhas.length,
-    linhasOk: gravados,
-    linhasErro: erros.length,
-    exemplosErro: erros.slice(0, 5),
-  };
+    return {
+      ok: true,
+      totalLinhas: aba.linhas.length,
+      linhasOk: gravados,
+      linhasErro: erros.length,
+      exemplosErro: erros.slice(0, 5),
+      contasNovas,
+    };
+  } catch (e) {
+    const detalhe = e instanceof Error ? e.message : String(e);
+    await fecharRegistro(service, registroId, { status: "falhou", detalhe });
+    return { erro: `Falha ao gravar: ${detalhe}` };
+  }
 }
 
 // ===========================================================================
@@ -186,10 +339,8 @@ export async function importarLotes(
   _estado: ResultadoImport,
   formData: FormData,
 ): Promise<ResultadoImport> {
-  const perfil = await perfilAtual();
-  if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
-    return { erro: "Só administração e gestão podem importar." };
-  }
+  const perfil = await validarGestor();
+  if (!perfil) return { erro: "Só administração e gestão podem importar." };
 
   const dataPadrao =
     normalizarData(String(formData.get("referencia_data") ?? "")) ??
@@ -197,140 +348,132 @@ export async function importarLotes(
 
   const lido = await lerArquivo(formData);
   if ("erro" in lido) return { erro: lido.erro };
-  const { arquivo, linhas } = lido;
+  const { arquivo, abas } = lido;
 
-  const pendentes: {
-    telefone: string;
-    quantidade: number;
-    referencia: string;
-    origem: number;
-  }[] = [];
-  const erros: string[] = [];
-
-  linhas.forEach((linha, i) => {
-    const telefone = normalizarTelefone(
-      campo(linha, "telefone", "celular", "whatsapp", "fone", "telefone_1"),
-    );
-    const quantidade = normalizarNumero(
-      campo(linha, "lotes", "quantidade", "qtd", "volume", "contratos"),
-    );
-
-    if (!telefone) {
-      erros.push(`Linha ${i + 2}: telefone inválido.`);
-      return;
-    }
-    if (quantidade === null || quantidade < 0) {
-      erros.push(`Linha ${i + 2}: quantidade inválida.`);
-      return;
-    }
-
-    pendentes.push({
-      telefone,
-      quantidade,
-      referencia:
-        normalizarData(campo(linha, "data", "referencia", "data_referencia")) ??
-        dataPadrao,
-      origem: i + 2,
-    });
-  });
+  const aba = melhorAba(abas, [COLUNAS_CONTA, COLUNAS_LOTES]);
+  if (!aba) {
+    return { erro: "Nenhuma aba tem as colunas esperadas: conta + lotes." };
+  }
+  const { agregados, totalLinhas, erros } = prepararLotes(
+    aba.linhas,
+    dataPadrao,
+  );
 
   const service = createServiceClient();
-
-  // Telefone -> customer_id
-  const mapa = new Map<string, string>();
-  for (const parte of blocos([...new Set(pendentes.map((p) => p.telefone))])) {
-    const { data } = await service
-      .from("customers")
-      .select("id, telefone_e164")
-      .in("telefone_e164", parte);
-
-    (data ?? []).forEach((c: { id: string; telefone_e164: string }) =>
-      mapa.set(c.telefone_e164, c.id),
-    );
-  }
-
   const arquivoPath = await guardarArquivo(service, arquivo, "lotes");
-  const { data: registro } = await service
-    .from("imports")
-    .insert({
-      tipo: "lotes",
-      arquivo_nome: arquivo.name,
-      arquivo_path: arquivoPath,
-      referencia_data: dataPadrao,
-      total_linhas: linhas.length,
-      criado_por: perfil.id,
-    })
-    .select("id")
-    .single();
+  const registroId = await abrirRegistro(service, {
+    tipo: "lotes",
+    arquivo,
+    arquivoPath,
+    referencia: dataPadrao,
+    totalLinhas,
+    autorId: perfil.id,
+  });
 
-  const registros: {
-    customer_id: string;
-    referencia_data: string;
-    quantidade: number;
-    import_id: string | null;
-  }[] = [];
+  try {
+    // Conta -> cliente. Conta desconhecida cria o cliente na hora, com o nome
+    // que veio no arquivo, para nenhum lote ficar órfão.
+    const contas = [...new Set(agregados.map((a) => a.conta))];
+    const mapa = new Map<string, string>();
 
-  for (const p of pendentes) {
-    const customerId = mapa.get(p.telefone);
-    if (!customerId) {
-      erros.push(`Linha ${p.origem}: telefone não está na base de clientes.`);
-      continue;
+    for (const parte of blocos(contas)) {
+      const { data } = await service
+        .from("customer_accounts")
+        .select("conta, customer_id")
+        .in("conta", parte);
+      (data ?? []).forEach((r: { conta: string; customer_id: string }) =>
+        mapa.set(r.conta, r.customer_id),
+      );
     }
-    registros.push({
-      customer_id: customerId,
-      referencia_data: p.referencia,
-      quantidade: p.quantidade,
-      import_id: registro?.id ?? null,
-    });
-  }
 
-  let gravados = 0;
-  for (const parte of blocos(registros)) {
-    const { error } = await service
-      .from("customer_lots")
-      .upsert(parte, { onConflict: "customer_id,referencia_data" });
+    const desconhecidas = contas.filter((c) => !mapa.has(c));
+    let contasNovas = 0;
 
-    if (error) {
-      await service
-        .from("imports")
-        .update({ status: "falhou", erro_detalhe: error.message })
-        .eq("id", registro?.id);
-      return { erro: `Falha ao gravar: ${error.message}` };
+    if (desconhecidas.length > 0) {
+      const nomePorConta = new Map<string, string>();
+      agregados.forEach((a) => {
+        if (a.nome && !nomePorConta.has(a.conta)) {
+          nomePorConta.set(a.conta, a.nome);
+        }
+      });
+
+      const { gravados } = await aplicarClientes(
+        service,
+        desconhecidas.map((conta) => ({
+          nome: nomePorConta.get(conta) ?? `Conta ${conta}`,
+          telefone: null,
+          contas: [conta],
+          documento: null,
+          email: null,
+          conta_aberta_em: null,
+        })),
+      );
+      contasNovas = gravados;
+
+      for (const parte of blocos(desconhecidas)) {
+        const { data } = await service
+          .from("customer_accounts")
+          .select("conta, customer_id")
+          .in("conta", parte);
+        (data ?? []).forEach((r: { conta: string; customer_id: string }) =>
+          mapa.set(r.conta, r.customer_id),
+        );
+      }
     }
-    gravados += parte.length;
-  }
 
-  await service
-    .from("imports")
-    .update({
+    const registros = agregados
+      .filter((a) => mapa.has(a.conta))
+      .map((a) => ({
+        customer_id: mapa.get(a.conta)!,
+        referencia_data: a.referencia,
+        quantidade: a.quantidade,
+        import_id: registroId ?? null,
+      }));
+
+    let gravados = 0;
+    for (const parte of blocos(registros)) {
+      const { error } = await service
+        .from("customer_lots")
+        .upsert(parte, { onConflict: "customer_id,referencia_data" });
+      if (error) throw new Error(error.message);
+      gravados += parte.length;
+    }
+
+    await fecharRegistro(service, registroId, {
       status: "concluida",
-      linhas_ok: gravados,
-      linhas_erro: erros.length,
-    })
-    .eq("id", registro?.id);
+      ok: gravados,
+      erros: erros.length,
+    });
 
-  // Quem caiu de giro volta para a fila.
-  const { data: reativados } = await service.rpc("gerar_leads_reativacao");
-  const linhasReativacao = (reativados ?? []) as {
-    criados: number;
-    motivo: string;
-  }[];
+    // Quem caiu de giro volta para a fila.
+    const { data: reativados } = await service.rpc("gerar_leads_reativacao");
+    const linhasReativacao = (reativados ?? []) as {
+      criados: number;
+      motivo: string;
+    }[];
 
-  revalidatePath("/admin");
-  revalidatePath("/atendimento");
-  revalidatePath("/leads");
+    revalidatePath("/admin");
+    revalidatePath("/atendimento");
+    revalidatePath("/leads");
 
-  return {
-    ok: true,
-    totalLinhas: linhas.length,
-    linhasOk: gravados,
-    linhasErro: erros.length,
-    exemplosErro: erros.slice(0, 5),
-    reativacao: {
-      queda:
-        linhasReativacao.find((r) => r.motivo === "queda_lotes")?.criados ?? 0,
-      semGiro:
-        linhasReativacao.find((r) => r.motivo === "sem_giro")?.criados ?? 0,
-    },
-  };
+    return {
+      ok: true,
+      totalLinhas,
+      linhasOk: gravados,
+      linhasErro: erros.length,
+      exemplosErro: erros.slice(0, 5),
+      contasNovas,
+      reativacao: {
+        queda:
+          linhasReativacao.find((r) => r.motivo === "queda_lotes")?.criados ??
+          0,
+        semGiro:
+          linhasReativacao.find((r) => r.motivo === "sem_giro")?.criados ?? 0,
+      },
+    };
+  } catch (e) {
+    const detalhe = e instanceof Error ? e.message : String(e);
+    await fecharRegistro(service, registroId, { status: "falhou", detalhe });
+    return { erro: `Falha ao gravar: ${detalhe}` };
+  }
 }

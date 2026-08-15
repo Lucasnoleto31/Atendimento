@@ -56,16 +56,16 @@ export default async function AdminPage() {
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <ImportForm
           titulo="Base de clientes"
-          descricao="Sobe ou atualiza a base inteira. O telefone é a chave: quem já existe é atualizado, quem não existe entra."
-          colunas="colunas: nome, telefone, documento, email, data_abertura"
+          descricao="Sobe ou atualiza a base. Aceita a planilha da corretora (CONTA SINACOR + NOME) ou um arquivo com telefone. Cliente com várias contas é agrupado pelo nome."
+          colunas="colunas: nome + conta e/ou telefone · opcionais: documento, email, data_abertura"
           acao={importarClientes}
           rotulo="Importar clientes"
         />
 
         <ImportForm
           titulo="Lotes do dia"
-          descricao="Upload diário. Depois de gravar, a reativação roda sozinha: queda acima do limite ou falta de giro devolve o cliente para a fila."
-          colunas="colunas: telefone, lotes, data (opcional)"
+          descricao="Aceita o modelo de contratos direto (uma linha por ativo — o sistema soma por conta e dia). Depois de gravar, a reativação roda sozinha: queda acima do limite ou falta de giro devolve o cliente para a fila."
+          colunas="colunas: conta + lotes operados · opcional: data"
           acao={importarLotes}
           comData
           rotulo="Importar lotes"

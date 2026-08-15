@@ -50,13 +50,13 @@ export function ImportForm({
             htmlFor={inputId}
             className="text-sm font-medium text-neutral-800"
           >
-            Arquivo CSV
+            Arquivo (CSV ou Excel)
           </label>
           <input
             id={inputId}
             name="arquivo"
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             required
             className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 file:mr-1.5 file:h-[32px] file:rounded-sm file:border-0 file:bg-neutral-100 file:px-1.5 file:text-sm file:font-medium file:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
           />
@@ -109,6 +109,9 @@ export function ImportForm({
             linhas importadas
             {estado.linhasErro ? (
               <> · {estado.linhasErro} com problema</>
+            ) : null}
+            {estado.contasNovas ? (
+              <> · {estado.contasNovas} conta(s) nova(s) vinculada(s)</>
             ) : null}
           </p>
 
