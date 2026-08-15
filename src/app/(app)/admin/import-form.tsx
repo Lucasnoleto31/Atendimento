@@ -116,6 +116,12 @@ export function ImportForm({
             {estado.mesclados ? (
               <> · {estado.mesclados} duplicado(s) mesclado(s)</>
             ) : null}
+            {estado.telefonesPreenchidos ? (
+              <>
+                {" "}
+                · {estado.telefonesPreenchidos} lead(s) ganharam telefone
+              </>
+            ) : null}
           </p>
 
           {estado.reativacao &&

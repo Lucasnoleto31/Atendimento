@@ -27,6 +27,7 @@ export type ResultadoImport = {
   exemplosErro?: string[];
   contasNovas?: number;
   mesclados?: number;
+  telefonesPreenchidos?: number;
   reativacao?: { queda: number; semGiro: number };
 };
 
@@ -391,6 +392,10 @@ export async function importarClientes(
       service,
       grupos,
     );
+
+    // Leads criados sem telefone herdam o telefone que a base trouxe agora.
+    const { data: preenchidos } = await service.rpc("atualizar_telefones_leads");
+
     await fecharRegistro(service, registroId, {
       status: "concluida",
       ok: gravados,
@@ -409,6 +414,8 @@ export async function importarClientes(
       exemplosErro: erros.slice(0, 5),
       contasNovas,
       mesclados,
+      telefonesPreenchidos:
+        typeof preenchidos === "number" ? preenchidos : undefined,
     };
   } catch (e) {
     const detalhe = e instanceof Error ? e.message : String(e);
