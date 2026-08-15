@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { formatarTelefone } from "@/lib/format";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Leads · Zeve CRM" };
@@ -103,11 +104,17 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
 
   return (
     <div className="flex min-h-full flex-col p-2 md:p-3">
-      <header className="border-b border-neutral-200 pb-2">
-        <h1 className="text-h1 text-neutral-900">Leads</h1>
-        <p className="mt-1 text-sm text-neutral-600">
-          As listas que a equipe trabalha, cruzadas com o giro de lotes da base.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-neutral-200 pb-2">
+        <div>
+          <h1 className="text-h1 text-neutral-900">Leads</h1>
+          <p className="mt-1 text-sm text-neutral-600">
+            As listas que a equipe trabalha, cruzadas com o giro de lotes da base.
+          </p>
+        </div>
+        <Button href="/leads/novo" size="md">
+          <Plus size={18} strokeWidth={1.5} aria-hidden />
+          Novo lead
+        </Button>
       </header>
 
       <nav aria-label="Listas de atendimento" className="mt-2">
@@ -201,9 +208,12 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                 {linhas.map((linha) => (
                   <tr key={linha.lead_id} className="h-[48px] hover:bg-neutral-50">
                     <td className="px-2">
-                      <span className="block max-w-[280px] truncate text-sm font-medium text-neutral-800">
+                      <Link
+                        href={`/leads/${linha.lead_id}`}
+                        className="block max-w-[280px] truncate rounded-sm text-sm font-medium text-neutral-800 underline-offset-2 hover:text-primary-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                      >
                         {linha.nome}
-                      </span>
+                      </Link>
                       <span className="block font-mono text-xs text-neutral-600 tabular-nums">
                         {linha.telefone_e164
                           ? formatarTelefone(linha.telefone_e164)

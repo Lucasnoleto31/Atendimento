@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { LeadCard as Lead } from "@/lib/types";
 import { formatarTelefone, tempoDesde } from "@/lib/format";
@@ -46,9 +47,12 @@ export function LeadCardItem({
       )}
     >
       <div className="flex items-start justify-between gap-1">
-        <p className="min-w-0 truncate text-sm font-medium text-neutral-800">
+        <Link
+          href={`/leads/${lead.id}`}
+          className="min-w-0 truncate rounded-sm text-sm font-medium text-neutral-800 underline-offset-2 hover:text-primary-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+        >
           {lead.nome}
-        </p>
+        </Link>
         <span
           className={cn(
             "inline-flex h-[20px] shrink-0 items-center rounded-sm px-1 text-xs",
