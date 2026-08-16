@@ -9,6 +9,7 @@ import { CAMPO } from "@/components/app/form-styles";
 import { registrarVenda } from "@/app/(app)/pagamentos/actions";
 import { formatarReais, formatarTelefone, tempoDesde } from "@/lib/format";
 import { LotesChart, type PontoLote } from "@/components/app/lotes-chart";
+import { Conversa, type Mensagem, type MensagemPadrao } from "./conversa";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,7 @@ type LeadDetalhe = {
   entrou_na_etapa_em: string;
   primeira_resposta_em: string | null;
   customer_id: string | null;
+  chatwoot_conversation_id: number | null;
   channel: { nome: string } | null;
   stage: { nome: string; pipeline: { nome: string } | null } | null;
   responsavel: { nome: string } | null;
@@ -75,6 +77,7 @@ export default async function LeadPage({
     .select(
       `id, nome, telefone_e164, status, campanha, observacao, entrada_motivo,
        criado_em, entrou_na_etapa_em, primeira_resposta_em, customer_id,
+       chatwoot_conversation_id,
        channel:channels(nome),
        stage:pipeline_stages(nome, pipeline:pipelines(nome)),
        responsavel:profiles(nome),
@@ -89,24 +92,57 @@ export default async function LeadPage({
 
   const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
 
-  const [{ data: produtos }, { data: equipe }, { data: vendasDoLead }] =
-    await Promise.all([
-      supabase
-        .from("products")
-        .select("id, codigo, nome, valor_comissao_centavos")
-        .eq("ativo", true)
-        .order("nome"),
-      ehGestor
-        ? supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome")
-        : Promise.resolve({ data: null }),
-      supabase
-        .from("sales")
-        .select(
-          "id, valor_comissao_centavos, status, ocorreu_em, produto:products(nome), vendedor:profiles(nome)",
-        )
-        .eq("lead_id", id)
-        .order("ocorreu_em", { ascending: false }),
-    ]);
+  const [
+    { data: produtos },
+    { data: equipe },
+    { data: vendasDoLead },
+    { data: interacoes },
+    { data: mensagensPadrao },
+  ] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, codigo, nome, valor_comissao_centavos")
+      .eq("ativo", true)
+      .order("nome"),
+    ehGestor
+      ? supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome")
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("sales")
+      .select(
+        "id, valor_comissao_centavos, status, ocorreu_em, produto:products(nome), vendedor:profiles(nome)",
+      )
+      .eq("lead_id", id)
+      .order("ocorreu_em", { ascending: false }),
+    supabase
+      .from("lead_interactions")
+      .select("id, tipo, conteudo, criado_em, autor:profiles(nome)")
+      .eq("lead_id", id)
+      .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
+      .order("criado_em", { ascending: true })
+      .limit(200),
+    supabase
+      .from("quick_replies")
+      .select("id, titulo, corpo")
+      .eq("ativo", true)
+      .order("titulo"),
+  ]);
+
+  const mensagens: Mensagem[] = (
+    (interacoes ?? []) as unknown as {
+      id: string;
+      tipo: "mensagem_recebida" | "mensagem_enviada";
+      conteudo: string | null;
+      criado_em: string;
+      autor: { nome: string } | null;
+    }[]
+  ).map((m) => ({
+    id: m.id,
+    tipo: m.tipo,
+    conteudo: m.conteudo,
+    criado_em: m.criado_em,
+    autor: m.autor?.nome ?? null,
+  }));
 
   // Giro e histórico de lotes — só quando o lead é cliente.
   type Giro = {
@@ -323,6 +359,24 @@ export default async function LeadPage({
           )}
         </section>
       </div>
+
+      {/* Conversa */}
+      <section
+        aria-labelledby="conversa-titulo"
+        className="mt-3 rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm"
+      >
+        <h2 id="conversa-titulo" className="text-h3 text-neutral-900">
+          Conversa (WhatsApp)
+        </h2>
+        <div className="mt-2">
+          <Conversa
+            leadId={lead.id}
+            temConversa={lead.chatwoot_conversation_id !== null}
+            mensagens={mensagens}
+            mensagensPadrao={(mensagensPadrao ?? []) as MensagemPadrao[]}
+          />
+        </div>
+      </section>
 
       {/* Venda */}
       <section

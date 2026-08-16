@@ -185,6 +185,27 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               )}
             />
           </div>
+
+          <dl className="mt-2 divide-y divide-neutral-200 border-t border-neutral-200">
+            <div className="flex items-baseline justify-between gap-2 py-1">
+              <dt className="text-sm text-neutral-600">Webhook de entrada</dt>
+              <dd className="font-mono text-sm break-all text-neutral-800">
+                /api/webhooks/chatwoot?token=…
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2 py-1">
+              <dt className="text-sm text-neutral-600">Token do webhook</dt>
+              <dd>
+                <StatusEnv definido={Boolean(process.env.CHATWOOT_WEBHOOK_TOKEN)} />
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-1 text-xs text-neutral-600">
+            No Chatwoot: Configurações → Integrações → Webhooks → adicionar a
+            URL pública acima (com o token do .env.local) assinando o evento{" "}
+            <code className="font-mono">message_created</code>. Mensagem recebida
+            vira lead/interação aqui na hora.
+          </p>
         </div>
       </section>
 

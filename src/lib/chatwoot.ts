@@ -74,9 +74,9 @@ export async function listarConversas(pagina: number) {
   };
 }
 
-/** Envia texto numa conversa existente. */
+/** Envia texto numa conversa existente. Devolve o id da mensagem criada. */
 export async function enviarMensagem(conversaId: number, conteudo: string) {
-  return chamar(`/conversations/${conversaId}/messages`, {
+  return chamar<{ id: number }>(`/conversations/${conversaId}/messages`, {
     method: "POST",
     body: JSON.stringify({ content: conteudo, message_type: "outgoing" }),
   });
