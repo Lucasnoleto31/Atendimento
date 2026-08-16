@@ -6,6 +6,7 @@ import {
   type MensagemChatwoot,
 } from "@/lib/chatwoot";
 import { processarCadencia } from "@/lib/cadencia";
+import { processarAgendadas } from "@/lib/agendadas";
 
 /**
  * Sincronização incremental com o Chatwoot, para quando o webhook não
@@ -35,8 +36,9 @@ export async function sincronizarChatwoot(): Promise<void> {
   if (Date.now() - ultimaSync < INTERVALO_MIN_MS) return;
   ultimaSync = Date.now();
 
-  // Carona no heartbeat: a cadência de follow-up também anda por aqui.
+  // Carona no heartbeat: cadência e mensagens agendadas andam por aqui.
   processarCadencia().catch(() => {});
+  processarAgendadas().catch(() => {});
 
   const service = createServiceClient();
 

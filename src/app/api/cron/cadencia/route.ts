@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { executarCadencia } from "@/lib/cadencia";
+import { processarAgendadas } from "@/lib/agendadas";
 
 /**
  * Gatilho da cadência de follow-up. Em produção, o cron da Vercel chama
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  const resultado = await executarCadencia();
-  return NextResponse.json(resultado);
+  const [resultado, agendadasEnviadas] = await Promise.all([
+    executarCadencia(),
+    processarAgendadas(),
+  ]);
+  return NextResponse.json({ ...resultado, agendadasEnviadas });
 }

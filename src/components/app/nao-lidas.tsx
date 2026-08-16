@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { contarNaoLidas } from "@/app/(app)/chat/actions";
 
 const INTERVALO_MS = 30_000;
@@ -58,10 +59,23 @@ export function ContadorNaoLidas() {
       if (document.visibilityState === "visible") void atualizar();
     };
     document.addEventListener("visibilitychange", aoVoltar);
+
+    // Tempo real (migração 0014): mensagem nova acende o badge na hora.
+    const supabase = createClient();
+    const canal = supabase
+      .channel("badge-tempo-real")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "lead_interactions" },
+        () => void atualizar(),
+      )
+      .subscribe();
+
     return () => {
       ativo = false;
       clearInterval(intervalo);
       document.removeEventListener("visibilitychange", aoVoltar);
+      void supabase.removeChannel(canal);
     };
   }, []);
 

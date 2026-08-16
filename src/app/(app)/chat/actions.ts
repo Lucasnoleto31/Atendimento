@@ -581,6 +581,66 @@ export async function concluirTarefaLead(
   return { ok: true };
 }
 
+/** Agenda o texto digitado para sair sozinho na data marcada. */
+export async function agendarMensagemLead(
+  leadId: string,
+  texto: string,
+  enviarIso: string,
+): Promise<ResultadoEnvio> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+
+  const conteudo = texto.trim();
+  if (!leadId) return { erro: "Lead não informado." };
+  if (!conteudo) return { erro: "Escreva a mensagem antes de agendar." };
+  if (conteudo.length > 4096) return { erro: "Mensagem longa demais." };
+  const quando = Date.parse(enviarIso);
+  if (Number.isNaN(quando)) return { erro: "Escolha data e hora." };
+  if (quando < Date.now() - 60_000) {
+    return { erro: "A data escolhida já passou." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("scheduled_messages").insert({
+    lead_id: leadId,
+    texto: conteudo,
+    enviar_em: enviarIso,
+    autor_id: perfil.id,
+  });
+  if (error) {
+    return {
+      erro: error.message.includes("scheduled_messages")
+        ? "Agendamento depende da migração 0014 — rode supabase/migrations/0014_tempo_real_agendadas.sql no SQL Editor."
+        : error.message,
+    };
+  }
+
+  revalidatePath("/chat");
+  return { ok: true };
+}
+
+export async function cancelarMensagemAgendada(
+  agendadaId: string,
+  leadId: string,
+): Promise<ResultadoEnvio> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!agendadaId) return { erro: "Agendamento não informado." };
+
+  const supabase = await createClient();
+  // Remove pendentes e também registros de falha (para limpar o aviso).
+  const { error } = await supabase
+    .from("scheduled_messages")
+    .delete()
+    .eq("id", agendadaId)
+    .or("enviado_em.is.null,erro.not.is.null");
+  if (error) return { erro: error.message };
+
+  revalidatePath("/chat");
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
 /**
  * Abrir a conversa zera o indicador de não lida. Roda DURANTE o render da
  * página, então não pode revalidar caminho aqui (o Next 16 proíbe) — a
