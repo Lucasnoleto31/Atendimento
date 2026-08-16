@@ -35,7 +35,11 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const rotaPublica =
-    pathname === "/" || pathname.startsWith("/entrar") || pathname.startsWith("/api/webhooks");
+    pathname === "/" ||
+    pathname.startsWith("/entrar") ||
+    pathname.startsWith("/api/webhooks") ||
+    // Cron autentica por CRON_SECRET na própria rota, não por sessão.
+    pathname.startsWith("/api/cron");
 
   if (!user && !rotaPublica) {
     const url = request.nextUrl.clone();

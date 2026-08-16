@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { normalizarTelefone } from "@/lib/csv";
+import { atribuirConversaPorEmail } from "@/lib/chatwoot";
 
 /**
  * Webhook do Chatwoot: mensagem criada lá aparece aqui.
@@ -19,6 +20,8 @@ type EventoChatwoot = {
   content?: string | null;
   message_type?: string | number;
   private?: boolean;
+  status?: string;
+  content_attributes?: { external_error?: string | null };
   conversation?: {
     id?: number;
     meta?: {
@@ -35,6 +38,20 @@ type EventoChatwoot = {
     email?: string | null;
     type?: string;
   };
+  attachments?: {
+    id?: number;
+    file_type?: string | null;
+    data_url?: string | null;
+  }[];
+};
+
+const ROTULO_ANEXO: Record<string, string> = {
+  image: "[imagem]",
+  audio: "[áudio]",
+  video: "[vídeo]",
+  file: "[arquivo]",
+  location: "[localização]",
+  contact: "[contato]",
 };
 
 export async function POST(request: NextRequest) {
@@ -48,6 +65,34 @@ export async function POST(request: NextRequest) {
     evento = (await request.json()) as EventoChatwoot;
   } catch {
     return new Response("Bad request", { status: 400 });
+  }
+
+  // Recibo de entrega/leitura/falha: atualiza o status da mensagem enviada.
+  if (evento.event === "message_updated" && evento.id && !evento.private) {
+    const status = evento.status;
+    if (status && ["sent", "delivered", "read", "failed"].includes(status)) {
+      const service = createServiceClient();
+      const { data: linha } = await service
+        .from("lead_interactions")
+        .select("id, metadados")
+        .eq("metadados->>chatwoot_message_id", String(evento.id))
+        .maybeSingle();
+      if (linha) {
+        await service
+          .from("lead_interactions")
+          .update({
+            metadados: {
+              ...((linha.metadados as Record<string, unknown>) ?? {}),
+              status_envio: status,
+              ...(evento.content_attributes?.external_error
+                ? { erro_envio: evento.content_attributes.external_error }
+                : {}),
+            },
+          })
+          .eq("id", linha.id);
+      }
+    }
+    return NextResponse.json({ ok: true });
   }
 
   // Só mensagens públicas nos interessam; notas privadas ficam no Chatwoot.
@@ -96,6 +141,52 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
+/**
+ * Distribuição automática: com o parâmetro `distribuicao_automatica` = 1,
+ * lead novo vai para o vendedor ativo com menos atendimentos em aberto.
+ */
+async function escolherVendedor(
+  service: ReturnType<typeof createServiceClient>,
+): Promise<{ id: string; nome: string; email: string } | null> {
+  const { data: config } = await service
+    .from("settings")
+    .select("valor")
+    .eq("chave", "distribuicao_automatica")
+    .maybeSingle();
+  if (Number(config?.valor ?? 0) !== 1) return null;
+
+  const { data: vendedores } = await service
+    .from("profiles")
+    .select("id, nome, email")
+    .eq("ativo", true)
+    .eq("papel", "vendedor")
+    .order("nome");
+  const equipe = (vendedores ?? []) as {
+    id: string;
+    nome: string;
+    email: string;
+  }[];
+  if (equipe.length === 0) return null;
+
+  const { data: abertos } = await service
+    .from("leads")
+    .select("responsavel_id")
+    .eq("status", "em_atendimento")
+    .in(
+      "responsavel_id",
+      equipe.map((v) => v.id),
+    );
+
+  const carga = new Map(equipe.map((v) => [v.id, 0]));
+  for (const linha of (abertos ?? []) as { responsavel_id: string }[]) {
+    carga.set(linha.responsavel_id, (carga.get(linha.responsavel_id) ?? 0) + 1);
+  }
+
+  return equipe.reduce((menor, v) =>
+    (carga.get(v.id) ?? 0) < (carga.get(menor.id) ?? 0) ? v : menor,
+  );
+}
+
 async function processar(
   service: ReturnType<typeof createServiceClient>,
   evento: EventoChatwoot,
@@ -106,7 +197,16 @@ async function processar(
   const conversaId = evento.conversation?.id ?? null;
   if (!telefone) throw new Error("Evento sem telefone BR válido.");
 
-  const texto = evento.content?.trim() || "[mensagem sem texto]";
+  // Anexos entram nos metadados; sem texto, o rótulo do primeiro anexo
+  // vira a prévia na lista de conversas.
+  const anexos = (evento.attachments ?? []).flatMap((a) =>
+    a.data_url ? [{ tipo: a.file_type ?? "file", url: a.data_url }] : [],
+  );
+  const texto =
+    evento.content?.trim() ||
+    (anexos.length > 0
+      ? (ROTULO_ANEXO[anexos[0].tipo] ?? "[anexo]")
+      : "[mensagem sem texto]");
   const agora = new Date().toISOString();
 
   const { data: existente } = await service
@@ -137,7 +237,7 @@ async function processar(
       })
       .eq("id", leadId);
   } else {
-    const [{ data: canal }, { data: etapa }] = await Promise.all([
+    const [{ data: canal }, { data: etapa }, vendedor] = await Promise.all([
       service.from("channels").select("id").eq("slug", "whatsapp").maybeSingle(),
       service
         .from("pipeline_stages")
@@ -146,6 +246,7 @@ async function processar(
         .order("ordem")
         .limit(1)
         .maybeSingle(),
+      escolherVendedor(service),
     ]);
 
     const { data: novo, error } = await service
@@ -157,6 +258,7 @@ async function processar(
         stage_id: etapa?.id ?? null,
         status: "em_atendimento",
         entrada_motivo: "webhook_meta",
+        responsavel_id: vendedor?.id ?? null,
         primeira_resposta_em: tipo === "recebida" ? agora : null,
         ultima_interacao_em: agora,
         chatwoot_contact_id: contato?.id ?? null,
@@ -167,6 +269,22 @@ async function processar(
 
     if (error) throw new Error(error.message);
     leadId = novo.id;
+
+    if (vendedor) {
+      await service.from("lead_interactions").insert({
+        lead_id: leadId,
+        tipo: "atribuicao",
+        conteudo: `Atendimento atribuído a ${vendedor.nome} (distribuição automática)`,
+        metadados: { via: "distribuicao_automatica" },
+      });
+      if (conversaId) {
+        try {
+          await atribuirConversaPorEmail(conversaId, vendedor.email);
+        } catch {
+          // espelho no Chatwoot é melhor esforço
+        }
+      }
+    }
   }
 
   // Quem enviou (agente no Chatwoot) vira autor, se o e-mail bater.
@@ -189,6 +307,7 @@ async function processar(
       chatwoot_message_id: evento.id,
       chatwoot_conversation_id: conversaId,
       via: "chatwoot",
+      ...(anexos.length > 0 ? { anexos } : {}),
     },
   });
 }

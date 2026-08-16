@@ -57,6 +57,93 @@ export default async function RelatoriosPage({
 
   const r = (data ?? null) as Relatorio | null;
 
+  // Atividade da equipe (30 dias) — quem contata, quanto e com que resposta.
+  // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
+  const agoraMs = Date.now();
+  const d30 = new Date(agoraMs - 30 * 86_400_000).toISOString();
+  const d1 = new Date(agoraMs - 86_400_000).toISOString();
+
+  const [
+    { data: enviadas },
+    { count: resolvidas },
+    { data: primeiras },
+    { data: conversasAbertas },
+    { data: metasEquipe },
+  ] = await Promise.all([
+    supabase
+      .from("lead_interactions")
+      .select("criado_em, autor:profiles(nome)")
+      .eq("tipo", "mensagem_enviada")
+      .gte("criado_em", d30)
+      .limit(10000),
+    supabase
+      .from("lead_interactions")
+      .select("id", { count: "exact", head: true })
+      .eq("tipo", "nota")
+      .eq("conteudo", "Conversa resolvida")
+      .gte("criado_em", d30),
+    supabase
+      .from("leads")
+      .select("criado_em, primeira_resposta_em")
+      .gte("criado_em", d30)
+      .not("primeira_resposta_em", "is", null)
+      .limit(2000),
+    supabase
+      .from("leads")
+      .select("ultima_interacao_em, chat_lido_em")
+      .not("chatwoot_conversation_id", "is", null)
+      .not("ultima_interacao_em", "is", null)
+      .limit(2000),
+    // Coluna da migração 0013; sem ela, a coluna de meta some da tabela.
+    supabase.from("profiles").select("nome, meta_contatos_dia").eq("ativo", true),
+  ]);
+
+  const porVendedor = new Map<string, { total: number; ultimas24h: number }>();
+  for (const linha of (enviadas ?? []) as unknown as {
+    criado_em: string;
+    autor: { nome: string } | null;
+  }[]) {
+    const nome = linha.autor?.nome ?? "Automação";
+    const atual = porVendedor.get(nome) ?? { total: 0, ultimas24h: 0 };
+    atual.total++;
+    if (linha.criado_em >= d1) atual.ultimas24h++;
+    porVendedor.set(nome, atual);
+  }
+  const rankingVendedores = [...porVendedor.entries()].sort(
+    (a, b) => b[1].total - a[1].total,
+  );
+
+  const temposResposta = ((primeiras ?? []) as {
+    criado_em: string;
+    primeira_resposta_em: string;
+  }[])
+    .map(
+      (l) =>
+        (new Date(l.primeira_resposta_em).getTime() -
+          new Date(l.criado_em).getTime()) /
+        3_600_000,
+    )
+    .filter((h) => h >= 0 && h <= 24 * 30);
+  const mediaRespostaHoras =
+    temposResposta.length > 0
+      ? temposResposta.reduce((s, h) => s + h, 0) / temposResposta.length
+      : null;
+
+  const aguardandoAgora = ((conversasAbertas ?? []) as {
+    ultima_interacao_em: string;
+    chat_lido_em: string | null;
+  }[]).filter(
+    (l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em,
+  ).length;
+
+  const metaPorNome = new Map(
+    ((metasEquipe ?? []) as { nome: string; meta_contatos_dia: number }[]).map(
+      (m) => [m.nome, m.meta_contatos_dia],
+    ),
+  );
+  const metasDisponiveis = metasEquipe !== null;
+  const totalEnviadas30d = (enviadas ?? []).length;
+
   return (
     <div className="p-2 md:p-3">
       <header className="border-b border-neutral-200 pb-2">
@@ -124,6 +211,102 @@ export default async function RelatoriosPage({
               detalhe="novos + em atendimento"
             />
           </dl>
+
+          {/* Atividade da equipe */}
+          <section className="mt-3" aria-labelledby="atividade-titulo">
+            <h2 id="atividade-titulo" className="text-h3 text-neutral-900">
+              Atividade (últimos 30 dias)
+            </h2>
+            <dl className="mt-2 grid gap-3 border-y border-neutral-200 py-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Indicador
+                rotulo="Mensagens enviadas"
+                valor={numero(totalEnviadas30d)}
+                detalhe="pela equipe, no CRM e automações"
+              />
+              <Indicador
+                rotulo="Lead responde em"
+                valor={
+                  mediaRespostaHoras === null
+                    ? "—"
+                    : mediaRespostaHoras < 1
+                      ? `${Math.round(mediaRespostaHoras * 60)}min`
+                      : `${mediaRespostaHoras.toFixed(1).replace(".", ",")}h`
+                }
+                detalhe="média até a primeira resposta"
+              />
+              <Indicador
+                rotulo="Conversas resolvidas"
+                valor={numero(resolvidas ?? 0)}
+                detalhe="marcadas no chat"
+              />
+              <Indicador
+                rotulo="Aguardando resposta"
+                valor={numero(aguardandoAgora)}
+                detalhe="conversas não lidas agora"
+              />
+            </dl>
+
+            {rankingVendedores.length > 0 ? (
+              <div className="mt-2 overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-0 shadow-sm">
+                <table className="w-full min-w-[480px] border-collapse text-left">
+                  <thead>
+                    <tr className="border-b border-neutral-200 bg-neutral-50">
+                      <th className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                        Vendedor
+                      </th>
+                      <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                        Mensagens (30d)
+                      </th>
+                      <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                        Últimas 24h
+                      </th>
+                      {metasDisponiveis ? (
+                        <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                          Meta/dia
+                        </th>
+                      ) : null}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-200">
+                    {rankingVendedores.map(([nome, atividade]) => {
+                      const meta = metaPorNome.get(nome) ?? 0;
+                      const abaixo = meta > 0 && atividade.ultimas24h < meta;
+                      return (
+                        <tr key={nome} className="h-[40px]">
+                          <td className="px-2 text-sm text-neutral-800">
+                            {nome}
+                          </td>
+                          <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
+                            {numero(atividade.total)}
+                          </td>
+                          <td
+                            className={cn(
+                              "px-2 text-right font-mono text-sm tabular-nums",
+                              abaixo
+                                ? "font-medium text-warning"
+                                : "text-neutral-800",
+                            )}
+                          >
+                            {numero(atividade.ultimas24h)}
+                          </td>
+                          {metasDisponiveis ? (
+                            <td className="px-2 text-right font-mono text-sm text-neutral-600 tabular-nums">
+                              {meta > 0 ? numero(meta) : "—"}
+                            </td>
+                          ) : null}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-neutral-600">
+                Nenhuma mensagem enviada nos últimos 30 dias — os números
+                aparecem conforme a equipe usa o chat.
+              </p>
+            )}
+          </section>
 
           <div className="mt-3 grid items-start gap-3 lg:grid-cols-2">
             {/* Leads por etapa */}

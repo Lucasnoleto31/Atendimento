@@ -305,7 +305,12 @@ const PARAMETROS_VALIDOS = new Set([
   "queda_lotes_percentual",
   "dias_sem_giro",
   "dias_sem_resposta",
+  "minutos_alerta_espera",
+  "distribuicao_automatica",
 ]);
+
+// Parâmetros liga/desliga aceitam 0; os demais exigem número positivo.
+const PARAMETROS_BINARIOS = new Set(["distribuicao_automatica"]);
 
 export async function salvarParametro(formData: FormData) {
   await exigirGestor();
@@ -313,13 +318,91 @@ export async function salvarParametro(formData: FormData) {
   const valor = normalizarNumero(String(formData.get("valor") ?? ""));
 
   if (!PARAMETROS_VALIDOS.has(chave)) terminar("Parâmetro desconhecido.");
-  if (valor === null || valor <= 0) terminar("Informe um número maior que zero.");
+  if (PARAMETROS_BINARIOS.has(chave)) {
+    if (valor !== 0 && valor !== 1) terminar("Use 0 (desligado) ou 1 (ligado).");
+  } else if (valor === null || valor <= 0) {
+    terminar("Informe um número maior que zero.");
+  }
+
+  const supabase = await createClient();
+  // Upsert: chaves novas ainda não têm linha na tabela settings.
+  const { error } = await supabase
+    .from("settings")
+    .upsert({ chave, valor, atualizado_em: new Date().toISOString() });
+  if (error) terminar(amigavel(error.code, error.message));
+  terminar();
+}
+
+// ===========================================================================
+// Cadência de follow-up
+// ===========================================================================
+
+export async function criarRegraCadencia(formData: FormData) {
+  await exigirGestor();
+  const dias = Number(formData.get("dias"));
+  const escolha = String(formData.get("template") ?? "");
+  const [nome, idioma] = escolha.split("|");
+
+  if (!Number.isInteger(dias) || dias <= 0 || dias > 90) {
+    terminar("Dias inválidos: use um número inteiro entre 1 e 90.");
+  }
+  if (!nome || !idioma) terminar("Escolha um template aprovado.");
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("followup_rules").insert({
+    dias,
+    template_nome: nome,
+    template_idioma: idioma,
+  });
+  if (error) terminar(amigavel(error.code, error.message));
+  terminar();
+}
+
+export async function alternarRegraCadencia(formData: FormData) {
+  await exigirGestor();
+  const id = String(formData.get("id") ?? "");
+  const ativo = formData.get("ativo") === "1";
+  if (!id) terminar("Regra não informada.");
 
   const supabase = await createClient();
   const { error } = await supabase
-    .from("settings")
-    .update({ valor, atualizado_em: new Date().toISOString() })
-    .eq("chave", chave);
+    .from("followup_rules")
+    .update({ ativo })
+    .eq("id", id);
+  if (error) terminar(amigavel(error.code, error.message));
+  terminar();
+}
+
+export async function excluirRegraCadencia(formData: FormData) {
+  await exigirGestor();
+  const id = String(formData.get("id") ?? "");
+  if (!id) terminar("Regra não informada.");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("followup_rules")
+    .delete()
+    .eq("id", id);
+  if (error) terminar(amigavel(error.code, error.message));
+  terminar();
+}
+
+/** Meta diária de contatos por pessoa (coluna da migração 0013). */
+export async function salvarMetaContatos(formData: FormData) {
+  const perfil = await exigirGestor();
+  if (perfil.papel !== "admin") terminar("Só o admin altera metas.");
+
+  const id = String(formData.get("id") ?? "");
+  const contatos = Number(formData.get("contatos"));
+  if (!id || !Number.isInteger(contatos) || contatos < 0 || contatos > 500) {
+    terminar("Meta de contatos inválida: use um número inteiro (0 desliga).");
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ meta_contatos_dia: contatos })
+    .eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
   terminar();
 }

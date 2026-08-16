@@ -26,7 +26,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      {/* suppressHydrationWarning: extensões de navegador injetam atributos
+          no body antes do React hidratar (ex.: inject_newsvd) e disparavam
+          aviso falso. Vale só para atributos deste elemento, nada além. */}
+      <body suppressHydrationWarning className="flex min-h-full flex-col">
+        {children}
+      </body>
     </html>
   );
 }

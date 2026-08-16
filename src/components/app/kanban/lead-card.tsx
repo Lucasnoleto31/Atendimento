@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
 import type { LeadCard as Lead } from "@/lib/types";
 import { formatarTelefone, tempoDesde } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -79,12 +79,25 @@ export function LeadCardItem({
       </p>
 
       <div className="mt-1 flex items-center justify-between gap-1">
-        <span className="truncate text-xs text-neutral-400">
+        <span
+          className={cn(
+            "truncate text-xs",
+            lead.atrasado ? "font-medium text-warning" : "text-neutral-400",
+          )}
+        >
           {naColuna ? `nesta etapa ${naColuna}` : ""}
           {lead.primeira_resposta_em === null ? " · nunca respondeu" : ""}
         </span>
 
         <span className="flex shrink-0 items-center gap-0.5">
+          <Link
+            href={`/chat?lead=${lead.id}`}
+            aria-label={`Abrir conversa com ${lead.nome} no chat`}
+            title="Abrir no chat"
+            className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          >
+            <MessageSquare size={18} strokeWidth={1.5} aria-hidden />
+          </Link>
           <button
             type="button"
             disabled={!podeVoltar}

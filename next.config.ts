@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  experimental: {
+    serverActions: {
+      // Anexos do chat sobem pela server action; o padrão de 1MB não basta.
+      bodySizeLimit: "25mb",
+    },
+  },
 };
 
 export default nextConfig;

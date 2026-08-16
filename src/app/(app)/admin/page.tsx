@@ -7,6 +7,7 @@ import { ExcluirImportacao } from "./excluir-import";
 import { KanbanConfig, type PipelineComEtapas } from "./kanban-config";
 import { Usuarios, type UsuarioLinha } from "./usuarios";
 import { ChatwootImport } from "./chatwoot-import";
+import { HistoricoImport } from "./historico-import";
 import { importarClientes, importarLotes } from "./actions";
 
 export const metadata: Metadata = { title: "Administração · Zeve CRM" };
@@ -176,7 +177,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             base, agente vira responsável (pelo e-mail), labels viram tags e a
             conversa fica vinculada para o envio de mensagens pelo CRM.
           </p>
-          <div className="mt-2">
+          <div className="mt-2 flex flex-col gap-1">
             <ChatwootImport
               configurado={Boolean(
                 process.env.CHATWOOT_BASE_URL &&
@@ -184,6 +185,12 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                   process.env.CHATWOOT_API_TOKEN,
               )}
             />
+            <HistoricoImport />
+            <p className="text-xs text-neutral-600">
+              O histórico traz as mensagens antigas das conversas já vinculadas
+              (com data original e anexos). Rode primeiro a importação de
+              conversas.
+            </p>
           </div>
 
           <dl className="mt-2 divide-y divide-neutral-200 border-t border-neutral-200">

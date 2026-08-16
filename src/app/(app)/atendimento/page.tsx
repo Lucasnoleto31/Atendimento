@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { perfilAtual } from "@/lib/auth";
 import { KanbanBoard, type Coluna } from "@/components/app/kanban/board";
 import type { LeadCard, Stage } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Atendimento · Zeve CRM" };
 
@@ -28,7 +30,10 @@ const CAMPOS = `id, nome, telefone_e164, customer_id, campanha, stage_id, status
   channel:channels(nome),
   responsavel:profiles(nome)`;
 
-function paraCard(l: LinhaLead): LeadCard {
+// Parado na etapa além disso pinta o card de alerta.
+const DIAS_PARADO = 7;
+
+function paraCard(l: LinhaLead, agoraMs: number): LeadCard {
   return {
     id: l.id,
     nome: l.nome,
@@ -41,6 +46,9 @@ function paraCard(l: LinhaLead): LeadCard {
     primeira_resposta_em: l.primeira_resposta_em,
     canal: l.channel?.nome ?? null,
     responsavel: l.responsavel?.nome ?? null,
+    atrasado:
+      agoraMs - new Date(l.entrou_na_etapa_em).getTime() >
+      DIAS_PARADO * 86_400_000,
   };
 }
 
@@ -49,6 +57,10 @@ export default async function AtendimentoPage({
 }: PageProps<"/atendimento">) {
   const supabase = await createClient();
   const params = await searchParams;
+  const perfil = await perfilAtual();
+  const soMeus = params.meus === "1" && perfil !== null;
+  // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
+  const agoraMs = Date.now();
 
   const { data: pipelines } = await supabase
     .from("pipelines")
@@ -76,24 +88,42 @@ export default async function AtendimentoPage({
         .order("ordem")
     : { data: [] };
 
-  const [colunas, { count: totalClientes }, { count: totalSemResposta }] =
+  // Não lidas por coluna: uma consulta só, contada aqui (o PostgREST não
+  // compara coluna com coluna).
+  const consultaNaoLidas = supabase
+    .from("leads")
+    .select("stage_id, ultima_interacao_em, chat_lido_em")
+    .not("chatwoot_conversation_id", "is", null)
+    .not("ultima_interacao_em", "is", null)
+    .limit(2000);
+
+  const [colunas, { data: linhasNaoLidas }, { count: totalClientes }, { count: totalSemResposta }] =
     await Promise.all([
       Promise.all(
         ((stages ?? []) as Stage[]).map(async (stage): Promise<Coluna> => {
-          const { data, count, error } = await supabase
+          let consulta = supabase
             .from("leads")
             .select(CAMPOS, { count: "exact" })
             .eq("stage_id", stage.id)
             .order("entrou_na_etapa_em", { ascending: false })
             .limit(POR_COLUNA);
+          if (soMeus && perfil) {
+            consulta = consulta.eq("responsavel_id", perfil.id);
+          }
+          const { data, count, error } = await consulta;
 
           return {
             stage,
             total: error ? 0 : (count ?? 0),
-            leads: ((data ?? []) as unknown as LinhaLead[]).map(paraCard),
+            leads: ((data ?? []) as unknown as LinhaLead[]).map((l) =>
+              paraCard(l, agoraMs),
+            ),
           };
         }),
       ),
+      soMeus && perfil
+        ? consultaNaoLidas.eq("responsavel_id", perfil.id)
+        : consultaNaoLidas,
       supabase
         .from("leads")
         .select("id", { count: "exact", head: true })
@@ -104,12 +134,56 @@ export default async function AtendimentoPage({
         .is("primeira_resposta_em", null),
     ]);
 
+  const naoLidasPorEtapa = new Map<string, number>();
+  for (const linha of ((linhasNaoLidas ?? []) as {
+    stage_id: string | null;
+    ultima_interacao_em: string;
+    chat_lido_em: string | null;
+  }[]).filter(
+    (l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em,
+  )) {
+    if (linha.stage_id) {
+      naoLidasPorEtapa.set(
+        linha.stage_id,
+        (naoLidasPorEtapa.get(linha.stage_id) ?? 0) + 1,
+      );
+    }
+  }
+  const colunasComBadge = colunas.map((c) => ({
+    ...c,
+    naoLidas: naoLidasPorEtapa.get(c.stage.id) ?? 0,
+  }));
+
   const totalLeads = colunas.reduce((s, c) => s + c.total, 0);
 
   return (
     <div className="flex min-h-full flex-col">
       <header className="px-2 pt-2 pb-2 md:px-3 md:pt-3">
-        <h1 className="text-h1 text-neutral-900">Atendimento</h1>
+        <div className="flex flex-wrap items-center justify-between gap-1">
+          <h1 className="text-h1 text-neutral-900">Atendimento</h1>
+          {perfil ? (
+            <Link
+              href={
+                soMeus
+                  ? pipelineAtivo && !pipelineAtivo.padrao
+                    ? `/atendimento?kanban=${pipelineAtivo.id}`
+                    : "/atendimento"
+                  : pipelineAtivo && !pipelineAtivo.padrao
+                    ? `/atendimento?kanban=${pipelineAtivo.id}&meus=1`
+                    : "/atendimento?meus=1"
+              }
+              aria-pressed={soMeus}
+              className={cn(
+                "inline-flex h-[32px] items-center rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                soMeus
+                  ? "bg-primary-50 font-medium text-primary-900"
+                  : "border border-neutral-300 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
+              )}
+            >
+              {soMeus ? "Vendo só os meus" : "Só meus leads"}
+            </Link>
+          ) : null}
+        </div>
 
         {listaPipelines.length > 1 ? (
           <nav aria-label="Kanbans" className="mt-1">
@@ -157,7 +231,7 @@ export default async function AtendimentoPage({
           </p>
         </div>
       ) : (
-        <KanbanBoard colunas={colunas} limitePorColuna={POR_COLUNA} />
+        <KanbanBoard colunas={colunasComBadge} limitePorColuna={POR_COLUNA} />
       )}
     </div>
   );

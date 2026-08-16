@@ -95,3 +95,213 @@ export async function distribuirLeads() {
     `${atribuidos} lead(s) distribuídos entre ${porPessoa.size} pessoa(s).`,
   );
 }
+
+// ===========================================================================
+// Disparo de template em massa para uma fila
+// ===========================================================================
+
+import { createServiceClient } from "@/lib/supabase/server";
+import {
+  enviarTemplate,
+  iniciarConversaWhatsapp,
+  listarTemplates,
+} from "@/lib/chatwoot";
+
+const LIMITE_MS_DISPARO = 100_000;
+const MAX_POR_EXECUCAO = 30; // ritmo por leva — respeita os limites da Meta
+
+const LISTAS_DISPARO = new Set([
+  "esfriando",
+  "sem_contato_30",
+  "sem_contato_60",
+  "sem_contato_nunca",
+  "nunca_respondeu",
+]);
+
+export type ResultadoDisparo = {
+  ok?: boolean;
+  erro?: string;
+  enviados?: number;
+  pulados?: number;
+  restantes?: number;
+  iniciadoEm?: string;
+};
+
+/**
+ * Envia um template para todos os leads de uma fila, em levas de até 30 por
+ * clique. O envio atualiza ultima_interacao_em, então o lead sai do filtro —
+ * junto com a âncora iniciadoEm, isso garante que ninguém recebe duas vezes.
+ * Variáveis aceitam o token {nome}, trocado pelo nome de cada lead.
+ */
+export async function dispararTemplateLista(
+  _estado: ResultadoDisparo,
+  formData: FormData,
+): Promise<ResultadoDisparo> {
+  const perfil = await perfilAtual();
+  if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
+    return { erro: "Só administração e gestão disparam em massa." };
+  }
+
+  const lista = String(formData.get("lista") ?? "");
+  const nome = String(formData.get("template_nome") ?? "");
+  const idioma = String(formData.get("template_idioma") ?? "");
+  const iniciadoEm =
+    String(formData.get("iniciado_em") ?? "") || new Date().toISOString();
+
+  if (!LISTAS_DISPARO.has(lista)) return { erro: "Fila inválida para disparo." };
+  if (!nome) return { erro: "Escolha um template." };
+
+  let template;
+  try {
+    const templates = await listarTemplates();
+    template = templates.find((t) => t.nome === nome && t.idioma === idioma);
+  } catch (e) {
+    return {
+      erro: `Não deu para carregar os templates: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+  if (!template) return { erro: "Template não encontrado ou não aprovado." };
+
+  const valoresBase: Record<string, string> = {};
+  for (const token of template.parametros) {
+    const valor = String(formData.get(`param_${token}`) ?? "").trim();
+    if (!valor) return { erro: `Preencha a variável {{${token}}}.` };
+    valoresBase[token] = valor;
+  }
+
+  const service = createServiceClient();
+
+  function consultaFila(modo: "dados" | "contagem") {
+    const d7 = new Date(Date.parse(iniciadoEm) - 7 * 86_400_000).toISOString();
+    const d30 = new Date(Date.parse(iniciadoEm) - 30 * 86_400_000).toISOString();
+    const d60 = new Date(Date.parse(iniciadoEm) - 60 * 86_400_000).toISOString();
+
+    let q =
+      modo === "contagem"
+        ? service.from("leads").select("id", { count: "exact", head: true })
+        : service
+            .from("leads")
+            .select(
+              "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
+            );
+
+    q = q
+      .not("status", "in", "(ganho,perdido)")
+      .not("telefone_e164", "is", null);
+
+    if (lista === "esfriando")
+      q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);
+    if (lista === "sem_contato_30")
+      q = q.lt("ultima_interacao_em", d30).gte("ultima_interacao_em", d60);
+    if (lista === "sem_contato_60") q = q.lt("ultima_interacao_em", d60);
+    if (lista === "sem_contato_nunca") q = q.is("ultima_interacao_em", null);
+    if (lista === "nunca_respondeu")
+      q = q
+        .is("primeira_resposta_em", null)
+        .or(`ultima_interacao_em.is.null,ultima_interacao_em.lt.${iniciadoEm}`);
+
+    return q;
+  }
+
+  const inicio = Date.now();
+  let enviados = 0;
+  let pulados = 0;
+
+  while (
+    enviados + pulados < MAX_POR_EXECUCAO &&
+    Date.now() - inicio < LIMITE_MS_DISPARO
+  ) {
+    const { data: lote } = await consultaFila("dados")
+      .order("criado_em", { ascending: true })
+      .limit(Math.min(10, MAX_POR_EXECUCAO - enviados - pulados));
+
+    const leads = (lote ?? []) as {
+      id: string;
+      nome: string;
+      telefone_e164: string;
+      chatwoot_contact_id: number | null;
+      chatwoot_conversation_id: number | null;
+    }[];
+    if (leads.length === 0) break;
+
+    for (const lead of leads) {
+      const agora = new Date().toISOString();
+      try {
+        let conversaId = lead.chatwoot_conversation_id;
+        if (!conversaId) {
+          const criada = await iniciarConversaWhatsapp({
+            nome: lead.nome,
+            telefone: lead.telefone_e164,
+            contatoId: lead.chatwoot_contact_id,
+          });
+          conversaId = criada.conversaId;
+          await service
+            .from("leads")
+            .update({
+              chatwoot_contact_id: criada.contatoId,
+              chatwoot_conversation_id: conversaId,
+            })
+            .eq("id", lead.id);
+        }
+
+        const valores = Object.fromEntries(
+          Object.entries(valoresBase).map(([token, valor]) => [
+            token,
+            valor.replaceAll("{nome}", lead.nome),
+          ]),
+        );
+
+        const resposta = await enviarTemplate(conversaId, template, valores);
+
+        if (resposta?.id) {
+          await service.from("webhook_events").insert({
+            origem: "chatwoot",
+            evento_id: `cw-msg-${resposta.id}`,
+            payload: { via: "disparo", lead_id: lead.id },
+            processado: true,
+          });
+        }
+
+        const conteudo = template.corpo.replace(
+          /\{\{\s*([^{}]+?)\s*\}\}/g,
+          (bloco, token: string) => valores[token] ?? bloco,
+        );
+
+        await service.from("lead_interactions").insert({
+          lead_id: lead.id,
+          tipo: "mensagem_enviada",
+          conteudo,
+          autor_id: perfil.id,
+          metadados: {
+            chatwoot_message_id: resposta?.id ?? null,
+            via: "disparo",
+            template: template.nome,
+            lista,
+          },
+        });
+
+        enviados++;
+      } catch {
+        pulados++;
+      }
+      // Sucesso ou falha, o lead sai da fila desta rodada — sem loop infinito.
+      await service
+        .from("leads")
+        .update({ ultima_interacao_em: agora, chat_lido_em: agora })
+        .eq("id", lead.id);
+    }
+  }
+
+  const { count: restantes } = await consultaFila("contagem");
+
+  revalidatePath("/leads");
+  revalidatePath("/chat");
+
+  return {
+    ok: true,
+    enviados,
+    pulados,
+    restantes: restantes ?? 0,
+    iniciadoEm,
+  };
+}

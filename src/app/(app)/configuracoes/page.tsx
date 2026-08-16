@@ -6,21 +6,26 @@ import { perfilAtual } from "@/lib/auth";
 import { formatarReais, formatarTelefone } from "@/lib/format";
 import { CAMPO, BOTAO_ICONE, BOTAO_ICONE_PERIGO } from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
+import { listarTemplates, type TemplateWhatsapp } from "@/lib/chatwoot";
 import {
   alternarInstancia,
   alternarProduto,
+  alternarRegraCadencia,
   atualizarInstancia,
   atualizarMensagem,
   atualizarProduto,
   criarInstancia,
   criarMensagem,
   criarProduto,
+  criarRegraCadencia,
   criarTag,
   excluirInstancia,
   excluirMensagem,
   excluirProduto,
+  excluirRegraCadencia,
   excluirTag,
   salvarMeta,
+  salvarMetaContatos,
   salvarParametro,
 } from "./actions";
 
@@ -47,6 +52,16 @@ const PARAMETROS = [
     chave: "dias_sem_resposta",
     rotulo: "Dias sem resposta",
     ajuda: "Dias sem resposta do lead para marcá-lo como sem resposta.",
+  },
+  {
+    chave: "minutos_alerta_espera",
+    rotulo: "Alerta de espera (min)",
+    ajuda: "Minutos aguardando resposta para destacar a conversa no Chat.",
+  },
+  {
+    chave: "distribuicao_automatica",
+    rotulo: "Distribuição automática (0/1)",
+    ajuda: "1 = lead novo do WhatsApp vai para o vendedor com menos atendimentos.",
   },
 ];
 
@@ -104,6 +119,35 @@ export default async function ConfiguracoesPage({
     papel: string;
     meta_mensal_centavos: number;
   }[];
+
+  // Recursos da migração 0013 e templates: tolerantes a ambiente incompleto.
+  const [{ data: regrasCadencia }, { data: metasContato }, templatesWhatsapp] =
+    await Promise.all([
+      supabase
+        .from("followup_rules")
+        .select("id, dias, template_nome, template_idioma, ativo")
+        .order("dias"),
+      supabase.from("profiles").select("id, meta_contatos_dia"),
+      listarTemplates().catch(() => [] as TemplateWhatsapp[]),
+    ]);
+
+  const cadenciaDisponivel = regrasCadencia !== null;
+  const listaRegras = (regrasCadencia ?? []) as {
+    id: string;
+    dias: number;
+    template_nome: string;
+    template_idioma: string;
+    ativo: boolean;
+  }[];
+  const metaContatosPorPessoa = new Map(
+    ((metasContato ?? []) as { id: string; meta_contatos_dia: number }[]).map(
+      (m) => [m.id, m.meta_contatos_dia],
+    ),
+  );
+  const metaContatosDisponivel = metasContato !== null;
+  const templatesAutomatizaveis = templatesWhatsapp.filter(
+    (t) => t.parametros.length <= 1,
+  );
 
   return (
     <div className="p-2 md:p-3">
@@ -606,44 +650,194 @@ export default async function ConfiguracoesPage({
         ) : (
           <div className="mt-2 flex flex-col gap-1">
             {listaEquipe.map((vendedor) => (
-              <form
-                key={vendedor.id}
-                action={salvarMeta}
-                className="flex items-center gap-1"
-              >
-                <input type="hidden" name="id" value={vendedor.id} />
+              <div key={vendedor.id} className="flex flex-wrap items-center gap-1">
                 <span className="w-[220px] truncate text-sm text-neutral-800">
                   {vendedor.nome}
                   <span className="ml-0.5 text-xs text-neutral-400 capitalize">
                     {vendedor.papel}
                   </span>
                 </span>
-                <label htmlFor={`meta-${vendedor.id}`} className="sr-only">
-                  Meta mensal de {vendedor.nome} em reais
-                </label>
-                <input
-                  id={`meta-${vendedor.id}`}
-                  name="meta"
-                  defaultValue={(vendedor.meta_mensal_centavos / 100)
-                    .toFixed(2)
-                    .replace(".", ",")}
-                  inputMode="decimal"
-                  className={cn(CAMPO, "w-[128px] text-right font-mono tabular-nums")}
-                />
-                <button
-                  type="submit"
-                  aria-label={`Salvar meta de ${vendedor.nome}`}
-                  className={BOTAO_ICONE}
-                >
-                  <Check size={18} strokeWidth={1.5} aria-hidden />
-                </button>
-              </form>
+                <form action={salvarMeta} className="flex items-center gap-1">
+                  <input type="hidden" name="id" value={vendedor.id} />
+                  <label htmlFor={`meta-${vendedor.id}`} className="sr-only">
+                    Meta mensal de {vendedor.nome} em reais
+                  </label>
+                  <input
+                    id={`meta-${vendedor.id}`}
+                    name="meta"
+                    defaultValue={(vendedor.meta_mensal_centavos / 100)
+                      .toFixed(2)
+                      .replace(".", ",")}
+                    inputMode="decimal"
+                    className={cn(CAMPO, "w-[128px] text-right font-mono tabular-nums")}
+                  />
+                  <button
+                    type="submit"
+                    aria-label={`Salvar meta de ${vendedor.nome}`}
+                    className={BOTAO_ICONE}
+                  >
+                    <Check size={18} strokeWidth={1.5} aria-hidden />
+                  </button>
+                </form>
+                {metaContatosDisponivel ? (
+                  <form
+                    action={salvarMetaContatos}
+                    className="flex items-center gap-1"
+                  >
+                    <input type="hidden" name="id" value={vendedor.id} />
+                    <label
+                      htmlFor={`meta-contatos-${vendedor.id}`}
+                      className="text-xs text-neutral-600"
+                    >
+                      contatos/dia
+                    </label>
+                    <input
+                      id={`meta-contatos-${vendedor.id}`}
+                      name="contatos"
+                      type="number"
+                      min={0}
+                      max={500}
+                      defaultValue={metaContatosPorPessoa.get(vendedor.id) ?? 0}
+                      className={cn(CAMPO, "w-[80px] text-right font-mono tabular-nums")}
+                    />
+                    <button
+                      type="submit"
+                      aria-label={`Salvar meta de contatos de ${vendedor.nome}`}
+                      className={BOTAO_ICONE}
+                    >
+                      <Check size={18} strokeWidth={1.5} aria-hidden />
+                    </button>
+                  </form>
+                ) : null}
+              </div>
             ))}
           </div>
         )}
       </section>
 
       {/* Parâmetros --------------------------------------------------------- */}
+      {/* Cadência de follow-up ------------------------------------------- */}
+      <section className="mt-4" aria-labelledby="cadencia-titulo">
+        <h2 id="cadencia-titulo" className="text-h3 text-neutral-900">
+          Cadência de follow-up
+        </h2>
+        <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
+          Lead que nunca respondeu recebe automaticamente o template escolhido
+          N dias depois de criado — no máximo um disparo por regra por lead.
+          Templates com uma variável têm a variável preenchida com o nome do
+          lead.
+        </p>
+
+        {!cadenciaDisponivel ? (
+          <p className="mt-2 max-w-[68ch] rounded-md bg-warning-bg px-1.5 py-1 text-sm text-warning">
+            Rode a migração 0013 (supabase/migrations/0013_engajamento.sql) no
+            SQL Editor para habilitar a cadência.
+          </p>
+        ) : (
+          <div className="mt-2 flex flex-col gap-1">
+            {listaRegras.map((regra) => (
+              <div key={regra.id} className="flex items-center gap-1">
+                <span className="w-[220px] text-sm text-neutral-800">
+                  Dia{" "}
+                  <span className="font-mono tabular-nums">{regra.dias}</span> ·{" "}
+                  {regra.template_nome}
+                </span>
+                <form action={alternarRegraCadencia}>
+                  <input type="hidden" name="id" value={regra.id} />
+                  <input
+                    type="hidden"
+                    name="ativo"
+                    value={regra.ativo ? "0" : "1"}
+                  />
+                  <button
+                    type="submit"
+                    className={cn(
+                      "inline-flex h-[32px] items-center rounded-md px-1.5 text-sm font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                      regra.ativo
+                        ? "bg-success-bg text-success"
+                        : "bg-neutral-100 text-neutral-600",
+                    )}
+                  >
+                    {regra.ativo ? "Ativa" : "Pausada"}
+                  </button>
+                </form>
+                <form action={excluirRegraCadencia}>
+                  <input type="hidden" name="id" value={regra.id} />
+                  <button
+                    type="submit"
+                    aria-label={`Excluir regra do dia ${regra.dias}`}
+                    className={cn(BOTAO_ICONE, BOTAO_ICONE_PERIGO)}
+                  >
+                    <Trash2 size={18} strokeWidth={1.5} aria-hidden />
+                  </button>
+                </form>
+              </div>
+            ))}
+
+            {templatesAutomatizaveis.length === 0 ? (
+              <p className="text-sm text-neutral-600">
+                Nenhum template automatizável (sem variável ou com uma) — crie
+                um no painel da Meta.
+              </p>
+            ) : (
+              <form
+                action={criarRegraCadencia}
+                className="flex flex-wrap items-end gap-1"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <label
+                    htmlFor="cadencia-dias"
+                    className="text-sm font-medium text-neutral-800"
+                  >
+                    Dias após criação
+                  </label>
+                  <input
+                    id="cadencia-dias"
+                    name="dias"
+                    type="number"
+                    min={1}
+                    max={90}
+                    required
+                    placeholder="3"
+                    className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+                  />
+                </div>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <label
+                    htmlFor="cadencia-template"
+                    className="text-sm font-medium text-neutral-800"
+                  >
+                    Template
+                  </label>
+                  <select
+                    id="cadencia-template"
+                    name="template"
+                    required
+                    className={cn(CAMPO, "w-[240px]")}
+                  >
+                    {templatesAutomatizaveis.map((t) => (
+                      <option
+                        key={`${t.nome}|${t.idioma}`}
+                        value={`${t.nome}|${t.idioma}`}
+                      >
+                        {t.nome} ({t.idioma})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  className="inline-flex h-[40px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-2 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  <Plus size={18} strokeWidth={1.5} aria-hidden />
+                  Criar regra
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+      </section>
+
       <section className="mt-4 mb-3" aria-labelledby="parametros-titulo">
         <h2 id="parametros-titulo" className="text-h3 text-neutral-900">
           Parâmetros da reativação

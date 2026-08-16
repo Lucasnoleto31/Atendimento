@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 export type Coluna = {
   stage: Stage;
   total: number;
+  naoLidas?: number;
   leads: Lead[];
 };
 
@@ -126,8 +127,18 @@ export function KanbanBoard({
               <h2 className="text-xs tracking-[0.06em] text-neutral-600 uppercase">
                 {coluna.stage.nome}
               </h2>
-              <span className="font-mono text-xs text-neutral-600 tabular-nums">
-                {coluna.total}
+              <span className="inline-flex items-center gap-0.5">
+                {coluna.naoLidas ? (
+                  <span
+                    title={`${coluna.naoLidas} conversa(s) não lida(s)`}
+                    className="inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-full bg-primary-600 px-0.5 font-mono text-xs font-medium text-neutral-0 tabular-nums"
+                  >
+                    {coluna.naoLidas}
+                  </span>
+                ) : null}
+                <span className="font-mono text-xs text-neutral-600 tabular-nums">
+                  {coluna.total}
+                </span>
               </span>
             </header>
 

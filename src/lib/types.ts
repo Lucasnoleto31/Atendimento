@@ -24,6 +24,8 @@ export type LeadCard = {
   primeira_resposta_em: string | null;
   canal: string | null;
   responsavel: string | null;
+  /** Parado na etapa há mais de 7 dias — calculado no servidor. */
+  atrasado?: boolean;
 };
 
 export const ROTULO_STATUS: Record<LeadStatus, string> = {

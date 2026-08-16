@@ -1,12 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus, Search } from "lucide-react";
+import { Download, MessageSquare, Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { formatarTelefone } from "@/lib/format";
+import { formatarTelefone, tempoDesde } from "@/lib/format";
+import { listarTemplates, type TemplateWhatsapp } from "@/lib/chatwoot";
 import { Button } from "@/components/ui/button";
 import { DistribuirLeads } from "./distribuir";
+import { DispararTemplate } from "./disparar-template";
 import { cn } from "@/lib/utils";
+
+const LISTAS_DISPARO = new Set<string>([
+  "esfriando",
+  "sem_contato_30",
+  "sem_contato_60",
+  "sem_contato_nunca",
+  "nunca_respondeu",
+]);
 
 export const metadata: Metadata = { title: "Leads · Zeve CRM" };
 
@@ -22,7 +32,38 @@ const LISTAS = [
   { chave: "nunca_respondeu", rotulo: "Nunca responderam" },
 ] as const;
 
-type ChaveLista = (typeof LISTAS)[number]["chave"];
+// Listas por tempo desde a última interação (exclui ganhos e perdidos).
+// São as filas de contato da equipe: quem esfriou aparece antes de sumir.
+const LISTAS_CONTATO = [
+  { chave: "ativos_24h", rotulo: "Ativos (24h)" },
+  { chave: "esfriando", rotulo: "Esfriando (7–30d)" },
+  { chave: "sem_contato_30", rotulo: "30–60d sem contato" },
+  { chave: "sem_contato_60", rotulo: "+60d sem contato" },
+  { chave: "sem_contato_nunca", rotulo: "Nunca contatados" },
+] as const;
+
+type ChaveLista =
+  | (typeof LISTAS)[number]["chave"]
+  | (typeof LISTAS_CONTATO)[number]["chave"];
+
+const CAMPOS_CONTATO = `id, nome, telefone_e164, status, criado_em, customer_id, campanha,
+  ultima_interacao_em, primeira_resposta_em,
+  responsavel:profiles(nome), channel:channels(nome), stage:pipeline_stages(nome)`;
+
+type LinhaContatoBruta = {
+  id: string;
+  nome: string;
+  telefone_e164: string | null;
+  status: string;
+  criado_em: string;
+  customer_id: string | null;
+  campanha: string | null;
+  ultima_interacao_em: string | null;
+  primeira_resposta_em: string | null;
+  responsavel: { nome: string } | null;
+  channel: { nome: string } | null;
+  stage: { nome: string } | null;
+};
 
 type Linha = {
   lead_id: string;
@@ -39,6 +80,7 @@ type Linha = {
   nunca_respondeu: boolean;
   lotes_30d: number | null;
   ultimo_giro_em: string | null;
+  ultima_interacao_em?: string | null;
 };
 
 function urlLista(lista: ChaveLista, busca: string) {
@@ -51,9 +93,15 @@ function urlLista(lista: ChaveLista, busca: string) {
 
 export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const params = await searchParams;
+  const chavesValidas = [...LISTAS, ...LISTAS_CONTATO].map(
+    (l) => l.chave as string,
+  );
   const listaAtiva = (
-    LISTAS.some((l) => l.chave === params.lista) ? params.lista : "todos"
+    typeof params.lista === "string" && chavesValidas.includes(params.lista)
+      ? params.lista
+      : "todos"
   ) as ChaveLista;
+  const ehListaContato = LISTAS_CONTATO.some((l) => l.chave === listaAtiva);
   const busca = typeof params.busca === "string" ? params.busca.trim() : "";
   const pagina = Math.max(1, Number(params.pagina) || 1);
   const aviso = typeof params.aviso === "string" ? params.aviso : null;
@@ -61,6 +109,44 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const supabase = await createClient();
   const perfil = await perfilAtual();
   const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
+
+  // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
+  const agoraMs = Date.now();
+  const dataAtras = (dias: number) =>
+    new Date(agoraMs - dias * 86_400_000).toISOString();
+  const d1 = dataAtras(1);
+  const d7 = dataAtras(7);
+  const d30 = dataAtras(30);
+  const d60 = dataAtras(60);
+
+  function consultaContato(chave: ChaveLista, modo: "dados" | "contagem") {
+    let q =
+      modo === "contagem"
+        ? supabase.from("leads").select("id", { count: "exact", head: true })
+        : supabase.from("leads").select(CAMPOS_CONTATO, { count: "exact" });
+
+    // Ganhos e perdidos ficam fora da fila de contato.
+    q = q.not("status", "in", "(ganho,perdido)");
+
+    if (chave === "ativos_24h") q = q.gte("ultima_interacao_em", d1);
+    if (chave === "esfriando")
+      q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);
+    if (chave === "sem_contato_30")
+      q = q.lt("ultima_interacao_em", d30).gte("ultima_interacao_em", d60);
+    if (chave === "sem_contato_60") q = q.lt("ultima_interacao_em", d60);
+    if (chave === "sem_contato_nunca") q = q.is("ultima_interacao_em", null);
+
+    if (modo === "dados" && busca) {
+      const termo = busca.replace(/[,()]/g, " ").trim();
+      const digitos = termo.replace(/\D/g, "");
+      q =
+        digitos.length >= 4
+          ? q.or(`nome.ilike.%${termo}%,telefone_e164.ilike.%${digitos}%`)
+          : q.ilike("nome", `%${termo}%`);
+    }
+
+    return q;
+  }
 
   function consultaBase() {
     let q = supabase
@@ -87,10 +173,22 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
 
   const de = (pagina - 1) * POR_PAGINA;
 
+  // Filas de contato: quem está parado há mais tempo aparece primeiro.
+  const ordemContato =
+    listaAtiva === "ativos_24h"
+      ? { coluna: "ultima_interacao_em", ascendente: false }
+      : listaAtiva === "sem_contato_nunca"
+        ? { coluna: "criado_em", ascendente: true }
+        : { coluna: "ultima_interacao_em", ascendente: true };
+
   const [{ data, count, error }, { count: semResponsavel }, { count: equipeAtiva }, ...contagens] = await Promise.all([
-    consultaBase()
-      .order("criado_em", { ascending: false })
-      .range(de, de + POR_PAGINA - 1),
+    ehListaContato
+      ? consultaContato(listaAtiva, "dados")
+          .order(ordemContato.coluna, { ascending: ordemContato.ascendente })
+          .range(de, de + POR_PAGINA - 1)
+      : consultaBase()
+          .order("criado_em", { ascending: false })
+          .range(de, de + POR_PAGINA - 1),
     supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
@@ -108,9 +206,38 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
       const { count: total } = await q;
       return { chave: l.chave, total: total ?? 0 };
     }),
+    ...LISTAS_CONTATO.map(async (l) => {
+      const { count: total } = await consultaContato(l.chave, "contagem");
+      return { chave: l.chave as string, total: total ?? 0 };
+    }),
   ]);
 
-  const linhas = (data ?? []) as unknown as Linha[];
+  const templatesDisparo =
+    ehGestor && LISTAS_DISPARO.has(listaAtiva)
+      ? await listarTemplates().catch(() => [] as TemplateWhatsapp[])
+      : [];
+
+  const linhas = ehListaContato
+    ? ((data ?? []) as unknown as LinhaContatoBruta[]).map(
+        (l): Linha => ({
+          lead_id: l.id,
+          nome: l.nome,
+          telefone_e164: l.telefone_e164,
+          status: l.status,
+          criado_em: l.criado_em,
+          customer_id: l.customer_id,
+          campanha: l.campanha,
+          responsavel_nome: l.responsavel?.nome ?? null,
+          canal_nome: l.channel?.nome ?? null,
+          etapa_nome: l.stage?.nome ?? null,
+          lista: listaAtiva,
+          nunca_respondeu: l.primeira_resposta_em === null,
+          lotes_30d: null,
+          ultimo_giro_em: null,
+          ultima_interacao_em: l.ultima_interacao_em,
+        }),
+      )
+    : ((data ?? []) as unknown as Linha[]);
   const total = count ?? 0;
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const totalPorLista = new Map(contagens.map((c) => [c.chave, c.total]));
@@ -147,37 +274,45 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
         </p>
       ) : null}
 
-      <nav aria-label="Listas de atendimento" className="mt-2">
-        <ul className="flex flex-wrap gap-1">
-          {LISTAS.map((l) => {
-            const ativa = l.chave === listaAtiva;
-            return (
-              <li key={l.chave}>
-                <Link
-                  href={urlLista(l.chave, busca)}
-                  aria-current={ativa ? "page" : undefined}
-                  className={cn(
-                    "inline-flex h-[32px] items-center gap-1 rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
-                    ativa
-                      ? "bg-primary-50 font-medium text-primary-900"
-                      : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
-                  )}
-                >
-                  {l.rotulo}
-                  <span
+      {[
+        { rotulo: "Listas da base", listas: LISTAS },
+        { rotulo: "Filas de contato", listas: LISTAS_CONTATO },
+      ].map((grupo) => (
+        <nav aria-label={grupo.rotulo} key={grupo.rotulo} className="mt-2">
+          <p className="text-xs font-medium tracking-[0.06em] text-neutral-400 uppercase">
+            {grupo.rotulo}
+          </p>
+          <ul className="mt-0.5 flex flex-wrap gap-1">
+            {grupo.listas.map((l) => {
+              const ativa = l.chave === listaAtiva;
+              return (
+                <li key={l.chave}>
+                  <Link
+                    href={urlLista(l.chave, busca)}
+                    aria-current={ativa ? "page" : undefined}
                     className={cn(
-                      "font-mono text-xs tabular-nums",
-                      ativa ? "text-primary-600" : "text-neutral-400",
+                      "inline-flex h-[32px] items-center gap-1 rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                      ativa
+                        ? "bg-primary-50 font-medium text-primary-900"
+                        : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
                     )}
                   >
-                    {totalPorLista.get(l.chave) ?? 0}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
+                    {l.rotulo}
+                    <span
+                      className={cn(
+                        "font-mono text-xs tabular-nums",
+                        ativa ? "text-primary-600" : "text-neutral-400",
+                      )}
+                    >
+                      {totalPorLista.get(l.chave) ?? 0}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      ))}
 
       <form action="/leads" method="get" className="mt-2 flex max-w-[400px] gap-1">
         {listaAtiva !== "todos" ? (
@@ -201,6 +336,28 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
           <Search size={18} strokeWidth={1.5} aria-hidden />
         </button>
       </form>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {ehGestor && LISTAS_DISPARO.has(listaAtiva) ? (
+          <DispararTemplate
+            lista={listaAtiva}
+            rotuloLista={
+              [...LISTAS, ...LISTAS_CONTATO].find((l) => l.chave === listaAtiva)
+                ?.rotulo ?? listaAtiva
+            }
+            total={total}
+            templates={templatesDisparo}
+          />
+        ) : null}
+        <a
+          href={`/api/exportar/leads?lista=${listaAtiva}${busca ? `&busca=${encodeURIComponent(busca)}` : ""}`}
+          download
+          className="inline-flex h-[40px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-2 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+        >
+          <Download size={18} strokeWidth={1.5} aria-hidden />
+          Exportar CSV
+        </a>
+      </div>
 
       {error ? (
         <p
@@ -229,9 +386,18 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                   <Th>Situação</Th>
                   <Th>Origem</Th>
                   <Th>Etapa</Th>
-                  <Th alinhar="right">Lotes 30d</Th>
-                  <Th alinhar="right">Último giro</Th>
+                  {ehListaContato ? (
+                    <Th alinhar="right">Último contato</Th>
+                  ) : (
+                    <>
+                      <Th alinhar="right">Lotes 30d</Th>
+                      <Th alinhar="right">Último giro</Th>
+                    </>
+                  )}
                   <Th>Responsável</Th>
+                  <Th>
+                    <span className="sr-only">Ações</span>
+                  </Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200">
@@ -274,18 +440,38 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                     <td className="px-2 text-sm text-neutral-600">
                       {linha.etapa_nome ?? "—"}
                     </td>
-                    <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
-                      {linha.customer_id ? (linha.lotes_30d ?? 0) : "—"}
-                    </td>
-                    <td className="px-2 text-right font-mono text-sm text-neutral-600 tabular-nums">
-                      {linha.ultimo_giro_em
-                        ? new Date(
-                            `${linha.ultimo_giro_em}T12:00:00`,
-                          ).toLocaleDateString("pt-BR")
-                        : "—"}
-                    </td>
+                    {ehListaContato ? (
+                      <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
+                        {linha.ultima_interacao_em
+                          ? tempoDesde(linha.ultima_interacao_em)
+                          : "nunca"}
+                      </td>
+                    ) : (
+                      <>
+                        <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
+                          {linha.customer_id ? (linha.lotes_30d ?? 0) : "—"}
+                        </td>
+                        <td className="px-2 text-right font-mono text-sm text-neutral-600 tabular-nums">
+                          {linha.ultimo_giro_em
+                            ? new Date(
+                                `${linha.ultimo_giro_em}T12:00:00`,
+                              ).toLocaleDateString("pt-BR")
+                            : "—"}
+                        </td>
+                      </>
+                    )}
                     <td className="max-w-[160px] truncate px-2 text-sm text-neutral-600">
                       {linha.responsavel_nome ?? "—"}
+                    </td>
+                    <td className="px-2">
+                      <Link
+                        href={`/chat?lead=${linha.lead_id}`}
+                        aria-label={`Abrir conversa com ${linha.nome} no chat`}
+                        title="Abrir no chat"
+                        className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                      >
+                        <MessageSquare size={16} strokeWidth={1.5} aria-hidden />
+                      </Link>
                     </td>
                   </tr>
                 ))}

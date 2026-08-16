@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { sair } from "@/app/entrar/actions";
 import { cn } from "@/lib/utils";
+import { ContadorNaoLidas } from "./nao-lidas";
 
 export const MODULOS = [
   { href: "/atendimento", label: "Atendimento", icon: Columns3 },
@@ -141,6 +142,7 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
                   className={ativo ? "text-primary-600" : "text-neutral-400"}
                 />
                 {item.label}
+                {item.href === "/chat" ? <ContadorNaoLidas /> : null}
               </Link>
             </li>
           );
