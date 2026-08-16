@@ -10,6 +10,7 @@ import {
   CreditCard,
   LogOut,
   Menu,
+  MessageSquare,
   Settings,
   ShieldCheck,
   Users,
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 
 export const MODULOS = [
   { href: "/atendimento", label: "Atendimento", icon: Columns3 },
+  { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/pagamentos", label: "Pagamentos", icon: CreditCard },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
