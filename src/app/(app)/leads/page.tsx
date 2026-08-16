@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { perfilAtual } from "@/lib/auth";
 import { formatarTelefone } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { DistribuirLeads } from "./distribuir";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Leads · Zeve CRM" };
@@ -54,8 +56,11 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   ) as ChaveLista;
   const busca = typeof params.busca === "string" ? params.busca.trim() : "";
   const pagina = Math.max(1, Number(params.pagina) || 1);
+  const aviso = typeof params.aviso === "string" ? params.aviso : null;
 
   const supabase = await createClient();
+  const perfil = await perfilAtual();
+  const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
 
   function consultaBase() {
     let q = supabase
@@ -82,10 +87,18 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
 
   const de = (pagina - 1) * POR_PAGINA;
 
-  const [{ data, count, error }, ...contagens] = await Promise.all([
+  const [{ data, count, error }, { count: semResponsavel }, { count: equipeAtiva }, ...contagens] = await Promise.all([
     consultaBase()
       .order("criado_em", { ascending: false })
       .range(de, de + POR_PAGINA - 1),
+    supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .is("responsavel_id", null),
+    supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .eq("ativo", true),
     ...LISTAS.map(async (l) => {
       let q = supabase
         .from("v_listas_atendimento")
@@ -111,11 +124,28 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
             As listas que a equipe trabalha, cruzadas com o giro de lotes da base.
           </p>
         </div>
-        <Button href="/leads/novo" size="md">
-          <Plus size={18} strokeWidth={1.5} aria-hidden />
-          Novo lead
-        </Button>
+        <div className="flex flex-wrap items-start gap-1">
+          {ehGestor ? (
+            <DistribuirLeads
+              semResponsavel={semResponsavel ?? 0}
+              equipe={equipeAtiva ?? 0}
+            />
+          ) : null}
+          <Button href="/leads/novo" size="md">
+            <Plus size={18} strokeWidth={1.5} aria-hidden />
+            Novo lead
+          </Button>
+        </div>
       </header>
+
+      {aviso ? (
+        <p
+          role="status"
+          className="mt-2 max-w-[68ch] rounded-md border border-neutral-200 bg-neutral-50 px-1.5 py-1 text-sm text-neutral-800"
+        >
+          {aviso}
+        </p>
+      ) : null}
 
       <nav aria-label="Listas de atendimento" className="mt-2">
         <ul className="flex flex-wrap gap-1">
