@@ -204,10 +204,13 @@ export async function criarInstancia(formData: FormData) {
     terminar(`Limite de ${MAX_INSTANCIAS} instâncias atingido.`);
   }
 
+  const phoneNumberId = String(formData.get("meta_phone_number_id") ?? "").trim();
+
   const { error } = await supabase.from("whatsapp_instances").insert({
     nome,
     telefone_e164: telefone,
     vendedor_id: vendedorId || null,
+    meta_phone_number_id: phoneNumberId || null,
   });
   if (error)
     terminar(
@@ -225,10 +228,16 @@ export async function atualizarInstancia(formData: FormData) {
   const vendedorId = String(formData.get("vendedor_id") ?? "");
   if (!id || !nome) terminar("Nome inválido.");
 
+  const phoneNumberId = String(formData.get("meta_phone_number_id") ?? "").trim();
+
   const supabase = await createClient();
   const { error } = await supabase
     .from("whatsapp_instances")
-    .update({ nome, vendedor_id: vendedorId || null })
+    .update({
+      nome,
+      vendedor_id: vendedorId || null,
+      meta_phone_number_id: phoneNumberId || null,
+    })
     .eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
   terminar();

@@ -15,9 +15,23 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
 
   const { data: perfil } = await supabase
     .from("profiles")
-    .select("nome, email, papel")
+    .select("nome, email, papel, ativo")
     .eq("id", user.id)
     .single();
+
+  if (perfil && !perfil.ativo) {
+    return (
+      <main className="flex flex-1 items-center justify-center px-2 py-8">
+        <div className="max-w-[68ch] rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm">
+          <h1 className="text-h3 text-neutral-900">Acesso desativado</h1>
+          <p className="mt-1 text-sm text-neutral-600">
+            Sua conta foi desativada pela administração. Fale com o gestor da
+            equipe para reativar.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   // Usuário existe no Auth mas sem perfil: o gatilho não rodou ou foi apagado.
   if (!perfil) {

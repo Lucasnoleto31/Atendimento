@@ -5,6 +5,7 @@ import { perfilAtual } from "@/lib/auth";
 import { ImportForm } from "./import-form";
 import { ExcluirImportacao } from "./excluir-import";
 import { KanbanConfig, type PipelineComEtapas } from "./kanban-config";
+import { Usuarios, type UsuarioLinha } from "./usuarios";
 import { importarClientes, importarLotes } from "./actions";
 
 export const metadata: Metadata = { title: "Administração · Zeve CRM" };
@@ -28,6 +29,20 @@ const ROTULO_STATUS: Record<Importacao["status"], string> = {
   falhou: "Falhou",
 };
 
+function StatusEnv({ definido }: { definido: boolean }) {
+  return (
+    <span
+      className={
+        definido
+          ? "inline-flex h-[20px] items-center rounded-sm bg-success-bg px-1 text-xs text-success"
+          : "inline-flex h-[20px] items-center rounded-sm bg-warning-bg px-1 text-xs text-warning"
+      }
+    >
+      {definido ? "configurado" : "pendente"}
+    </span>
+  );
+}
+
 export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   const perfil = await perfilAtual();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
@@ -39,24 +54,37 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
 
   const supabase = await createClient();
 
-  const [{ data: importacoes }, { data: pipelinesBrutos }, { data: etapas }] =
-    await Promise.all([
-      supabase
-        .from("imports")
-        .select(
-          "id, tipo, arquivo_nome, referencia_data, status, total_linhas, linhas_ok, linhas_erro, criado_em, autor:profiles(nome)",
-        )
-        .order("criado_em", { ascending: false })
-        .limit(20),
-      supabase
-        .from("pipelines")
-        .select("id, nome, padrao")
-        .order("criado_em"),
-      supabase
-        .from("pipeline_stages")
-        .select("id, nome, ordem, is_final, pipeline_id")
-        .order("ordem"),
-    ]);
+  const [
+    { data: importacoes },
+    { data: pipelinesBrutos },
+    { data: etapas },
+    { data: usuarios },
+    { data: instancias },
+  ] = await Promise.all([
+    supabase
+      .from("imports")
+      .select(
+        "id, tipo, arquivo_nome, referencia_data, status, total_linhas, linhas_ok, linhas_erro, criado_em, autor:profiles(nome)",
+      )
+      .order("criado_em", { ascending: false })
+      .limit(20),
+    supabase
+      .from("pipelines")
+      .select("id, nome, padrao")
+      .order("criado_em"),
+    supabase
+      .from("pipeline_stages")
+      .select("id, nome, ordem, is_final, pipeline_id")
+      .order("ordem"),
+    supabase
+      .from("profiles")
+      .select("id, nome, email, papel, ativo")
+      .order("nome"),
+    supabase
+      .from("whatsapp_instances")
+      .select("id, nome, meta_phone_number_id")
+      .order("nome"),
+  ]);
 
   // Quantos leads em cada etapa (trava a exclusão de etapa em uso).
   const contagens = new Map<string, number>();
@@ -127,7 +155,76 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
         />
       </div>
 
+      {perfil.papel === "admin" ? (
+        <Usuarios
+          usuarios={(usuarios ?? []) as UsuarioLinha[]}
+          meuId={perfil.id}
+        />
+      ) : null}
+
       <KanbanConfig pipelines={pipelines} />
+
+      {/* Webhook da Meta */}
+      <section className="mt-3" aria-labelledby="webhook-titulo">
+        <h2 id="webhook-titulo" className="text-h3 text-neutral-900">
+          Webhook do WhatsApp (Meta)
+        </h2>
+        <div className="mt-2 max-w-[68ch] rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm">
+          <dl className="divide-y divide-neutral-200">
+            <div className="flex items-baseline justify-between gap-2 py-1">
+              <dt className="text-sm text-neutral-600">Endpoint</dt>
+              <dd className="font-mono text-sm text-neutral-800">
+                /api/webhooks/meta
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2 py-1">
+              <dt className="text-sm text-neutral-600">Token de verificação</dt>
+              <dd>
+                <StatusEnv definido={Boolean(process.env.META_WEBHOOK_VERIFY_TOKEN)} />
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2 py-1">
+              <dt className="text-sm text-neutral-600">
+                App secret (assinatura dos eventos)
+              </dt>
+              <dd>
+                <StatusEnv definido={Boolean(process.env.META_APP_SECRET)} />
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2 py-1">
+              <dt className="text-sm text-neutral-600">
+                Instâncias com phone_number_id
+              </dt>
+              <dd className="font-mono text-sm text-neutral-800 tabular-nums">
+                {
+                  ((instancias ?? []) as { meta_phone_number_id: string | null }[]).filter(
+                    (i) => i.meta_phone_number_id,
+                  ).length
+                }
+                /{(instancias ?? []).length}
+              </dd>
+            </div>
+          </dl>
+
+          <ol className="mt-2 flex flex-col gap-0.5 border-t border-neutral-200 pt-2 text-sm text-neutral-600">
+            <li>
+              1. Preencha META_WEBHOOK_VERIFY_TOKEN (frase à sua escolha) e
+              META_APP_SECRET no ambiente e reinicie.
+            </li>
+            <li>
+              2. No painel Meta for Developers, configure o webhook do WhatsApp
+              apontando para o endpoint acima (URL pública + o token).
+            </li>
+            <li>
+              3. Assine o campo <code className="font-mono text-xs">messages</code>.
+            </li>
+            <li>
+              4. Em Configurações, preencha o phone_number_id de cada instância
+              — é ele que define o vendedor do lead que chega.
+            </li>
+          </ol>
+        </div>
+      </section>
 
       <section className="mt-3">
         <h2 className="text-h3 text-neutral-900">Últimas importações</h2>

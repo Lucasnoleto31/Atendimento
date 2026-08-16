@@ -81,7 +81,7 @@ export default async function ConfiguracoesPage({
       .order("titulo"),
     supabase
       .from("whatsapp_instances")
-      .select("id, nome, telefone_e164, vendedor_id, ativa")
+      .select("id, nome, telefone_e164, vendedor_id, ativa, meta_phone_number_id")
       .order("nome"),
     supabase
       .from("profiles")
@@ -447,6 +447,7 @@ export default async function ConfiguracoesPage({
             telefone_e164: string;
             vendedor_id: string | null;
             ativa: boolean;
+            meta_phone_number_id: string | null;
           }[]).map((inst) => (
             <div key={inst.id} className="flex flex-wrap items-center gap-1">
               <form
@@ -483,6 +484,16 @@ export default async function ConfiguracoesPage({
                     </option>
                   ))}
                 </select>
+                <label htmlFor={`inst-pnid-${inst.id}`} className="sr-only">
+                  phone_number_id da Meta
+                </label>
+                <input
+                  id={`inst-pnid-${inst.id}`}
+                  name="meta_phone_number_id"
+                  defaultValue={inst.meta_phone_number_id ?? ""}
+                  placeholder="phone_number_id (Meta)"
+                  className={cn(CAMPO, "w-[180px] font-mono text-xs")}
+                />
                 <button
                   type="submit"
                   aria-label={`Salvar instância ${inst.nome}`}
@@ -560,6 +571,15 @@ export default async function ConfiguracoesPage({
                 </option>
               ))}
             </select>
+            <label htmlFor="nova-inst-pnid" className="sr-only">
+              phone_number_id da Meta
+            </label>
+            <input
+              id="nova-inst-pnid"
+              name="meta_phone_number_id"
+              placeholder="phone_number_id (Meta)"
+              className={cn(CAMPO, "w-[180px] font-mono text-xs")}
+            />
             <button
               type="submit"
               aria-label="Adicionar instância"
