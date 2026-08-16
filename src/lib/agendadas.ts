@@ -1,5 +1,10 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarMensagem } from "@/lib/chatwoot";
+import { enviarTextoMeta } from "@/lib/whatsapp";
+import { canalAtivo } from "@/lib/canal";
+
+const INTERVALO_MIN_MS = 10_000;
+let ultimaVarredura = 0;
 
 /**
  * Processa as mensagens agendadas vencidas. Roda no heartbeat do chat
@@ -8,6 +13,9 @@ import { enviarMensagem } from "@/lib/chatwoot";
  * enviado_em (a falha fica registrada em `erro`, visível no compositor).
  */
 export async function processarAgendadas(): Promise<number> {
+  if (Date.now() - ultimaVarredura < INTERVALO_MIN_MS) return 0;
+  ultimaVarredura = Date.now();
+
   const service = createServiceClient();
   const agora = new Date().toISOString();
 
@@ -41,33 +49,50 @@ export async function processarAgendadas(): Promise<number> {
       .maybeSingle();
     if (!reservada) continue;
 
+    const canal = canalAtivo();
     const { data: lead } = await service
       .from("leads")
-      .select("chatwoot_conversation_id")
+      .select("telefone_e164, chatwoot_conversation_id")
       .eq("id", agendada.lead_id)
       .maybeSingle();
 
-    if (!lead?.chatwoot_conversation_id) {
+    const destinoOk =
+      canal === "meta"
+        ? lead?.telefone_e164 != null
+        : lead?.chatwoot_conversation_id != null;
+    if (!lead || !destinoOk) {
       await service
         .from("scheduled_messages")
-        .update({ erro: "Lead sem conversa vinculada na hora do envio." })
+        .update({
+          erro:
+            canal === "meta"
+              ? "Lead sem telefone na hora do envio."
+              : "Lead sem conversa vinculada na hora do envio.",
+        })
         .eq("id", agendada.id);
       continue;
     }
 
     try {
-      const resposta = await enviarMensagem(
-        lead.chatwoot_conversation_id,
-        agendada.texto,
-      );
+      let idMensagem: string | number | null = null;
 
-      if (resposta?.id) {
-        await service.from("webhook_events").insert({
-          origem: "chatwoot",
-          evento_id: `cw-msg-${resposta.id}`,
-          payload: { via: "agendada", lead_id: agendada.lead_id },
-          processado: true,
-        });
+      if (canal === "meta") {
+        idMensagem = await enviarTextoMeta(lead.telefone_e164!, agendada.texto);
+      } else {
+        const resposta = await enviarMensagem(
+          lead.chatwoot_conversation_id!,
+          agendada.texto,
+        );
+        idMensagem = resposta?.id ?? null;
+
+        if (typeof idMensagem === "number") {
+          await service.from("webhook_events").insert({
+            origem: "chatwoot",
+            evento_id: `cw-msg-${idMensagem}`,
+            payload: { via: "agendada", lead_id: agendada.lead_id },
+            processado: true,
+          });
+        }
       }
 
       await service.from("lead_interactions").insert({
@@ -76,7 +101,9 @@ export async function processarAgendadas(): Promise<number> {
         conteudo: agendada.texto,
         autor_id: agendada.autor_id,
         metadados: {
-          chatwoot_message_id: resposta?.id ?? null,
+          ...(canal === "meta"
+            ? { message_id: idMensagem }
+            : { chatwoot_message_id: idMensagem }),
           via: "agendada",
         },
       });

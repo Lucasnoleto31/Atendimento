@@ -2,8 +2,9 @@ import { createServiceClient } from "@/lib/supabase/server";
 import {
   enviarTemplate,
   iniciarConversaWhatsapp,
-  listarTemplates,
 } from "@/lib/chatwoot";
+import { enviarTemplateMeta } from "@/lib/whatsapp";
+import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 
 /**
  * Cadência de follow-up: cada regra diz "N dias depois de criado, lead que
@@ -54,7 +55,8 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
     return { enviados: 0, pulados: 0, regras: 0 };
   }
 
-  const templates = await listarTemplates();
+  const canal = canalAtivo();
+  const templates = await listarTemplatesCanal();
   let enviados = 0;
   let pulados = 0;
 
@@ -101,37 +103,48 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
       if (dupErro) continue;
 
       try {
-        let conversaId = lead.chatwoot_conversation_id;
-        if (!conversaId) {
-          const inicio = await iniciarConversaWhatsapp({
-            nome: lead.nome,
-            telefone: lead.telefone_e164,
-            contatoId: lead.chatwoot_contact_id,
-          });
-          conversaId = inicio.conversaId;
-          await service
-            .from("leads")
-            .update({
-              chatwoot_contact_id: inicio.contatoId,
-              chatwoot_conversation_id: conversaId,
-            })
-            .eq("id", lead.id);
-        }
-
         const valores: Record<string, string> =
           template.parametros.length === 1
             ? { [template.parametros[0]]: lead.nome }
             : {};
 
-        const resposta = await enviarTemplate(conversaId, template, valores);
+        let idMensagem: string | number | null = null;
 
-        if (resposta?.id) {
-          await service.from("webhook_events").insert({
-            origem: "chatwoot",
-            evento_id: `cw-msg-${resposta.id}`,
-            payload: { via: "cadencia", lead_id: lead.id },
-            processado: true,
-          });
+        if (canal === "meta") {
+          idMensagem = await enviarTemplateMeta(
+            lead.telefone_e164,
+            template,
+            valores,
+          );
+        } else {
+          let conversaId = lead.chatwoot_conversation_id;
+          if (!conversaId) {
+            const inicio = await iniciarConversaWhatsapp({
+              nome: lead.nome,
+              telefone: lead.telefone_e164,
+              contatoId: lead.chatwoot_contact_id,
+            });
+            conversaId = inicio.conversaId;
+            await service
+              .from("leads")
+              .update({
+                chatwoot_contact_id: inicio.contatoId,
+                chatwoot_conversation_id: conversaId,
+              })
+              .eq("id", lead.id);
+          }
+
+          const resposta = await enviarTemplate(conversaId, template, valores);
+          idMensagem = resposta?.id ?? null;
+
+          if (typeof idMensagem === "number") {
+            await service.from("webhook_events").insert({
+              origem: "chatwoot",
+              evento_id: `cw-msg-${idMensagem}`,
+              payload: { via: "cadencia", lead_id: lead.id },
+              processado: true,
+            });
+          }
         }
 
         const conteudo = template.corpo.replace(
@@ -145,7 +158,9 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
           tipo: "mensagem_enviada",
           conteudo,
           metadados: {
-            chatwoot_message_id: resposta?.id ?? null,
+            ...(canal === "meta"
+              ? { message_id: idMensagem }
+              : { chatwoot_message_id: idMensagem }),
             via: "cadencia",
             template: template.nome,
             regra_dias: regra.dias,

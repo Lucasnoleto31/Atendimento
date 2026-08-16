@@ -4,7 +4,8 @@ import { Download, MessageSquare, Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { formatarTelefone, tempoDesde } from "@/lib/format";
-import { listarTemplates, type TemplateWhatsapp } from "@/lib/chatwoot";
+import { type TemplateWhatsapp } from "@/lib/chatwoot";
+import { listarTemplatesCanal } from "@/lib/canal";
 import { Button } from "@/components/ui/button";
 import { DistribuirLeads } from "./distribuir";
 import { DispararTemplate } from "./disparar-template";
@@ -214,7 +215,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
 
   const templatesDisparo =
     ehGestor && LISTAS_DISPARO.has(listaAtiva)
-      ? await listarTemplates().catch(() => [] as TemplateWhatsapp[])
+      ? await listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[])
       : [];
 
   const linhas = ehListaContato

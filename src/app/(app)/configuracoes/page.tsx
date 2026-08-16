@@ -6,7 +6,8 @@ import { perfilAtual } from "@/lib/auth";
 import { formatarReais, formatarTelefone } from "@/lib/format";
 import { CAMPO, BOTAO_ICONE, BOTAO_ICONE_PERIGO } from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
-import { listarTemplates, type TemplateWhatsapp } from "@/lib/chatwoot";
+import { type TemplateWhatsapp } from "@/lib/chatwoot";
+import { listarTemplatesCanal } from "@/lib/canal";
 import {
   alternarInstancia,
   alternarProduto,
@@ -128,7 +129,7 @@ export default async function ConfiguracoesPage({
         .select("id, dias, template_nome, template_idioma, ativo")
         .order("dias"),
       supabase.from("profiles").select("id, meta_contatos_dia"),
-      listarTemplates().catch(() => [] as TemplateWhatsapp[]),
+      listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[]),
     ]);
 
   const cadenciaDisponivel = regrasCadencia !== null;

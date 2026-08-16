@@ -6,12 +6,13 @@ import { perfilAtual } from "@/lib/auth";
 import { formatarTelefone } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
-  listarTemplates,
   obterStatusConversa,
   type StatusConversa,
   type TemplateWhatsapp,
 } from "@/lib/chatwoot";
-import { sincronizarChatwoot } from "@/lib/chatwoot-sync";
+import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+import { processarCadencia } from "@/lib/cadencia";
+import { processarAgendadas } from "@/lib/agendadas";
 import {
   Janela,
   type Agendada,
@@ -87,9 +88,11 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const perfil = await perfilAtual();
   const supabase = await createClient();
 
-  // Puxa novidades do Chatwoot mesmo sem o webhook apontar para cá
-  // (no máximo a cada 10s; o dedup garante que nada duplica).
-  await sincronizarChatwoot().catch(() => {});
+  // Heartbeat: cadência de follow-up e mensagens agendadas pegam carona na
+  // atualização da tela. As mensagens chegam pelo webhook da Meta.
+  const canal = canalAtivo();
+  processarCadencia().catch(() => {});
+  processarAgendadas().catch(() => {});
 
   let consulta = supabase
     .from("leads")
@@ -260,9 +263,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             .eq("customer_id", atual.customer_id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
-      // Chatwoot fora do ar não derruba a página: segue sem template/status.
-      listarTemplates().catch(() => [] as TemplateWhatsapp[]),
-      atual.chatwoot_conversation_id !== null
+      // Canal fora do ar não derruba a página: segue sem template/status.
+      listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[]),
+      canal === "chatwoot" && atual.chatwoot_conversation_id !== null
         ? obterStatusConversa(atual.chatwoot_conversation_id).catch(() => null)
         : Promise.resolve(null),
     ]);
@@ -361,6 +364,13 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       pendente: a.enviado_em === null,
     }));
   }
+
+  // Na Meta o "thread" é o telefone; no Chatwoot, a conversa vinculada.
+  const temCanalEnvio = atual
+    ? canal === "meta"
+      ? atual.telefone_e164 !== null
+      : atual.chatwoot_conversation_id !== null
+    : false;
 
   const horaCurta = (iso: string | null) => {
     if (!iso) return "";
@@ -571,7 +581,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
 
             <FerramentasConversa
               leadId={atual.id}
-              temConversa={atual.chatwoot_conversation_id !== null}
+              temConversa={temCanalEnvio}
               statusConversa={statusConversa}
               responsavelId={atual.responsavel_id}
               equipe={equipe}
@@ -583,7 +593,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
 
             <Janela
               leadId={atual.id}
-              temConversa={atual.chatwoot_conversation_id !== null}
+              temConversa={temCanalEnvio}
               mensagens={mensagens}
               mensagensPadrao={mensagensPadrao}
               templates={templates}

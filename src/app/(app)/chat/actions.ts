@@ -12,8 +12,13 @@ import {
   enviarNotaPrivada,
   enviarTemplate,
   iniciarConversaWhatsapp,
-  listarTemplates,
 } from "@/lib/chatwoot";
+import {
+  enviarMidiaMeta,
+  enviarTemplateMeta,
+  enviarTextoMeta,
+} from "@/lib/whatsapp";
+import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 
 const MAX_ANEXOS = 5;
 const MAX_TAMANHO_ANEXO = 16 * 1024 * 1024; // teto do WhatsApp para mídia
@@ -103,7 +108,7 @@ export async function enviarMensagemLead(
     if (!lead) return { erro: "Lead não encontrado." };
 
     let notaId: number | null = null;
-    if (lead.chatwoot_conversation_id) {
+    if (canalAtivo() === "chatwoot" && lead.chatwoot_conversation_id) {
       try {
         const resposta = await enviarNotaPrivada(
           lead.chatwoot_conversation_id,
@@ -145,39 +150,67 @@ export async function enviarMensagemLead(
 
   const lead = await leadComConversa(leadId);
   if (!lead) return { erro: "Lead não encontrado." };
-  if (!lead.chatwoot_conversation_id) {
-    return {
-      erro: "Este lead não tem conversa vinculada no Chatwoot — ele precisa mandar a primeira mensagem no WhatsApp.",
-    };
-  }
 
-  let mensagemId: number | null = null;
+  const canal = canalAtivo();
+  let mensagemId: string | number | null = null;
   let anexos: { tipo: string; url: string }[] = [];
-  try {
-    if (arquivos.length > 0) {
-      const resposta = await enviarMensagemComAnexos(
-        lead.chatwoot_conversation_id,
-        texto,
-        arquivos,
-      );
-      mensagemId = resposta?.id ?? null;
-      anexos = (resposta?.attachments ?? []).flatMap((a) =>
-        a.data_url ? [{ tipo: a.file_type ?? "file", url: a.data_url }] : [],
-      );
-    } else {
-      const resposta = await enviarMensagem(
-        lead.chatwoot_conversation_id,
-        texto,
-      );
-      mensagemId = resposta?.id ?? null;
-    }
-  } catch (e) {
-    return {
-      erro: `O Chatwoot recusou o envio: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template aprovado chega — use o botão Template.`,
-    };
-  }
 
-  if (mensagemId !== null) await marcarEcoProcessado(mensagemId, leadId);
+  if (canal === "meta") {
+    if (!lead.telefone_e164) {
+      return { erro: "Este lead não tem telefone para receber WhatsApp." };
+    }
+    try {
+      if (arquivos.length > 0) {
+        // Texto vira legenda do primeiro anexo; áudio não aceita legenda.
+        for (const [i, arquivo] of arquivos.entries()) {
+          mensagemId = await enviarMidiaMeta(
+            lead.telefone_e164,
+            arquivo,
+            i === 0 && texto ? texto : undefined,
+          );
+        }
+      } else {
+        mensagemId = await enviarTextoMeta(lead.telefone_e164, texto);
+      }
+    } catch (e) {
+      return {
+        erro: `A Meta recusou o envio: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template aprovado chega — use o botão Template.`,
+      };
+    }
+  } else {
+    if (!lead.chatwoot_conversation_id) {
+      return {
+        erro: "Este lead não tem conversa vinculada no Chatwoot — ele precisa mandar a primeira mensagem no WhatsApp.",
+      };
+    }
+    try {
+      if (arquivos.length > 0) {
+        const resposta = await enviarMensagemComAnexos(
+          lead.chatwoot_conversation_id,
+          texto,
+          arquivos,
+        );
+        mensagemId = resposta?.id ?? null;
+        anexos = (resposta?.attachments ?? []).flatMap((a) =>
+          a.data_url ? [{ tipo: a.file_type ?? "file", url: a.data_url }] : [],
+        );
+      } else {
+        const resposta = await enviarMensagem(
+          lead.chatwoot_conversation_id,
+          texto,
+        );
+        mensagemId = resposta?.id ?? null;
+      }
+    } catch (e) {
+      return {
+        erro: `O Chatwoot recusou o envio: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template aprovado chega — use o botão Template.`,
+      };
+    }
+
+    if (typeof mensagemId === "number") {
+      await marcarEcoProcessado(mensagemId, leadId);
+    }
+  }
 
   // Sem texto, o histórico guarda o rótulo do primeiro anexo como prévia.
   const conteudo =
@@ -195,9 +228,13 @@ export async function enviarMensagemLead(
     conteudo,
     autor_id: perfil.id,
     metadados: {
-      chatwoot_message_id: mensagemId,
-      chatwoot_conversation_id: lead.chatwoot_conversation_id,
       via: "crm",
+      ...(canal === "meta"
+        ? { message_id: mensagemId }
+        : {
+            chatwoot_message_id: mensagemId,
+            chatwoot_conversation_id: lead.chatwoot_conversation_id,
+          }),
       ...(anexos.length > 0 ? { anexos } : {}),
     },
   });
@@ -230,7 +267,7 @@ export async function enviarTemplateLead(
 
   let template;
   try {
-    const templates = await listarTemplates();
+    const templates = await listarTemplatesCanal();
     template = templates.find((t) => t.nome === nome && t.idioma === idioma);
   } catch (e) {
     return {
@@ -250,48 +287,71 @@ export async function enviarTemplateLead(
   if (!lead) return { erro: "Lead não encontrado." };
 
   const supabase = await createClient();
+  const canal = canalAtivo();
+  let mensagemId: string | number | null = null;
+  let conversaId: number | null = lead.chatwoot_conversation_id;
 
-  // Sem conversa? Template é justamente o jeito certo de puxar assunto:
-  // cria contato + conversa no Chatwoot e vincula ao lead.
-  let conversaId = lead.chatwoot_conversation_id;
-  if (!conversaId) {
+  if (canal === "meta") {
+    // Na Meta o template abre conversa direto: só precisa do telefone.
     if (!lead.telefone_e164) {
       return {
         erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp.",
       };
     }
     try {
-      const inicio = await iniciarConversaWhatsapp({
-        nome: lead.nome,
-        telefone: lead.telefone_e164,
-        contatoId: lead.chatwoot_contact_id,
-      });
-      conversaId = inicio.conversaId;
-      await supabase
-        .from("leads")
-        .update({
-          chatwoot_contact_id: inicio.contatoId,
-          chatwoot_conversation_id: conversaId,
-        })
-        .eq("id", leadId);
+      mensagemId = await enviarTemplateMeta(
+        lead.telefone_e164,
+        template,
+        valores,
+      );
     } catch (e) {
       return {
-        erro: `Não deu para abrir a conversa no Chatwoot: ${e instanceof Error ? e.message : String(e)}`,
+        erro: `A Meta recusou o template: ${e instanceof Error ? e.message : String(e)}`,
       };
     }
-  }
+  } else {
+    // Sem conversa? Template é justamente o jeito certo de puxar assunto:
+    // cria contato + conversa no Chatwoot e vincula ao lead.
+    if (!conversaId) {
+      if (!lead.telefone_e164) {
+        return {
+          erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp.",
+        };
+      }
+      try {
+        const inicio = await iniciarConversaWhatsapp({
+          nome: lead.nome,
+          telefone: lead.telefone_e164,
+          contatoId: lead.chatwoot_contact_id,
+        });
+        conversaId = inicio.conversaId;
+        await supabase
+          .from("leads")
+          .update({
+            chatwoot_contact_id: inicio.contatoId,
+            chatwoot_conversation_id: conversaId,
+          })
+          .eq("id", leadId);
+      } catch (e) {
+        return {
+          erro: `Não deu para abrir a conversa no Chatwoot: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+    }
 
-  let mensagemId: number | null = null;
-  try {
-    const resposta = await enviarTemplate(conversaId, template, valores);
-    mensagemId = resposta?.id ?? null;
-  } catch (e) {
-    return {
-      erro: `O Chatwoot recusou o template: ${e instanceof Error ? e.message : String(e)}`,
-    };
-  }
+    try {
+      const resposta = await enviarTemplate(conversaId, template, valores);
+      mensagemId = resposta?.id ?? null;
+    } catch (e) {
+      return {
+        erro: `O Chatwoot recusou o template: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
 
-  if (mensagemId !== null) await marcarEcoProcessado(mensagemId, leadId);
+    if (typeof mensagemId === "number") {
+      await marcarEcoProcessado(mensagemId, leadId);
+    }
+  }
 
   const conteudo = template.corpo.replace(
     /\{\{\s*([^{}]+?)\s*\}\}/g,
@@ -305,10 +365,14 @@ export async function enviarTemplateLead(
     conteudo,
     autor_id: perfil.id,
     metadados: {
-      chatwoot_message_id: mensagemId,
-      chatwoot_conversation_id: conversaId,
       via: "crm",
       template: template.nome,
+      ...(canal === "meta"
+        ? { message_id: mensagemId }
+        : {
+            chatwoot_message_id: mensagemId,
+            chatwoot_conversation_id: conversaId,
+          }),
     },
   });
 
@@ -361,15 +425,17 @@ export async function definirResponsavelChat(
   });
 
   // Espelho no Chatwoot é melhor esforço: falha lá não desfaz o CRM.
-  const lead = await leadComConversa(leadId);
-  if (lead?.chatwoot_conversation_id) {
-    try {
-      await atribuirConversaPorEmail(
-        lead.chatwoot_conversation_id,
-        responsavel?.email ?? null,
-      );
-    } catch {
-      // segue o jogo — o CRM é a fonte de verdade
+  if (canalAtivo() === "chatwoot") {
+    const lead = await leadComConversa(leadId);
+    if (lead?.chatwoot_conversation_id) {
+      try {
+        await atribuirConversaPorEmail(
+          lead.chatwoot_conversation_id,
+          responsavel?.email ?? null,
+        );
+      } catch {
+        // segue o jogo — o CRM é a fonte de verdade
+      }
     }
   }
 
@@ -404,19 +470,21 @@ export async function alternarEtiquetaChat(
     if (error) return { erro: error.message };
   }
 
-  const lead = await leadComConversa(leadId);
-  if (lead?.chatwoot_conversation_id) {
-    const { data: linhas } = await supabase
-      .from("lead_tags")
-      .select("tag:tags(nome)")
-      .eq("lead_id", leadId);
-    const nomes = ((linhas ?? []) as unknown as { tag: { nome: string } }[])
-      .map((l) => l.tag?.nome)
-      .filter(Boolean);
-    try {
-      await definirEtiquetasConversa(lead.chatwoot_conversation_id, nomes);
-    } catch {
-      // melhor esforço
+  if (canalAtivo() === "chatwoot") {
+    const lead = await leadComConversa(leadId);
+    if (lead?.chatwoot_conversation_id) {
+      const { data: linhas } = await supabase
+        .from("lead_tags")
+        .select("tag:tags(nome)")
+        .eq("lead_id", leadId);
+      const nomes = ((linhas ?? []) as unknown as { tag: { nome: string } }[])
+        .map((l) => l.tag?.nome)
+        .filter(Boolean);
+      try {
+        await definirEtiquetasConversa(lead.chatwoot_conversation_id, nomes);
+      } catch {
+        // melhor esforço
+      }
     }
   }
 
@@ -435,16 +503,20 @@ export async function alterarStatusConversaChat(
 
   const lead = await leadComConversa(leadId);
   if (!lead) return { erro: "Lead não encontrado." };
-  if (!lead.chatwoot_conversation_id) {
-    return { erro: "Este lead não tem conversa vinculada no Chatwoot." };
-  }
 
-  try {
-    await alterarStatusConversa(lead.chatwoot_conversation_id, status);
-  } catch (e) {
-    return {
-      erro: `O Chatwoot recusou a mudança de status: ${e instanceof Error ? e.message : String(e)}`,
-    };
+  // No canal Meta o status é controle interno do CRM (vira nota); no
+  // Chatwoot ele também resolve/reabre a conversa de lá.
+  if (canalAtivo() === "chatwoot") {
+    if (!lead.chatwoot_conversation_id) {
+      return { erro: "Este lead não tem conversa vinculada no Chatwoot." };
+    }
+    try {
+      await alterarStatusConversa(lead.chatwoot_conversation_id, status);
+    } catch (e) {
+      return {
+        erro: `O Chatwoot recusou a mudança de status: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
   }
 
   const supabase = await createClient();

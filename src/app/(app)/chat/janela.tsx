@@ -1131,8 +1131,8 @@ export function Janela({
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-1 border-t border-neutral-200 bg-neutral-50 px-2 py-1.5">
           <p className="text-sm text-neutral-600">
-            Sem conversa no WhatsApp ainda — o primeiro contato da empresa
-            precisa ser um template aprovado (regra do WhatsApp).
+            Sem canal de envio para este lead (falta telefone ou conversa) —
+            o primeiro contato da empresa precisa ser um template aprovado.
           </p>
           <BotaoTemplates leadId={leadId} templates={templates} />
         </div>

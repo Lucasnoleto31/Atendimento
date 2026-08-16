@@ -1,6 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { escolherVendedor } from "@/lib/distribuicao";
+import { hospedarMidiaMeta } from "@/lib/whatsapp";
 
 /**
  * Webhook do WhatsApp Cloud API (Meta).
@@ -39,18 +41,47 @@ function assinaturaValida(corpo: string, assinatura: string | null): boolean {
   return timingSafeEqual(Buffer.from(esperada), Buffer.from(recebida));
 }
 
+type MidiaMeta = {
+  id?: string;
+  mime_type?: string;
+  caption?: string;
+  filename?: string;
+};
+
 type MensagemMeta = {
   id: string;
   from: string;
   type: string;
   timestamp?: string;
   text?: { body?: string };
+  image?: MidiaMeta;
+  audio?: MidiaMeta;
+  video?: MidiaMeta;
+  document?: MidiaMeta;
+  sticker?: MidiaMeta;
+};
+
+type StatusMeta = {
+  id?: string;
+  status?: string;
+  errors?: { title?: string; message?: string }[];
 };
 
 type ValorMeta = {
   metadata?: { phone_number_id?: string };
   contacts?: { wa_id?: string; profile?: { name?: string } }[];
   messages?: MensagemMeta[];
+  statuses?: StatusMeta[];
+};
+
+const ROTULO_TIPO_META: Record<string, string> = {
+  image: "[imagem]",
+  audio: "[áudio]",
+  video: "[vídeo]",
+  document: "[arquivo]",
+  sticker: "[figurinha]",
+  location: "[localização]",
+  contacts: "[contato]",
 };
 
 export async function POST(request: NextRequest) {
@@ -72,7 +103,35 @@ export async function POST(request: NextRequest) {
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
       const valor = change.value;
-      if (!valor?.messages?.length) continue; // recibos de status etc.
+
+      // Recibos: sent/delivered/read/failed viram os ✓✓ do chat.
+      for (const status of valor?.statuses ?? []) {
+        if (!status.id || !status.status) continue;
+        if (!["sent", "delivered", "read", "failed"].includes(status.status)) {
+          continue;
+        }
+        const { data: linha } = await service
+          .from("lead_interactions")
+          .select("id, metadados")
+          .eq("metadados->>message_id", status.id)
+          .maybeSingle();
+        if (linha) {
+          const erro =
+            status.errors?.[0]?.title ?? status.errors?.[0]?.message ?? null;
+          await service
+            .from("lead_interactions")
+            .update({
+              metadados: {
+                ...((linha.metadados as Record<string, unknown>) ?? {}),
+                status_envio: status.status,
+                ...(erro ? { erro_envio: erro } : {}),
+              },
+            })
+            .eq("id", linha.id);
+        }
+      }
+
+      if (!valor?.messages?.length) continue;
 
       for (const mensagem of valor.messages) {
         // Dedup: a Meta reenvia em caso de timeout; o id da mensagem é único.
@@ -114,8 +173,41 @@ async function processarMensagem(
   if (!telefone) throw new Error("Mensagem sem telefone.");
 
   const nomePerfil = valor.contacts?.[0]?.profile?.name?.trim();
+
+  // Mídia: baixa da Meta (a URL deles expira) e hospeda no Storage.
+  const midia =
+    mensagem.image ??
+    mensagem.audio ??
+    mensagem.video ??
+    mensagem.document ??
+    mensagem.sticker ??
+    null;
+  let anexos: { tipo: string; url: string }[] = [];
+  if (midia?.id) {
+    try {
+      const hospedada = await hospedarMidiaMeta(midia.id);
+      if (hospedada) {
+        const prefixo = hospedada.mime.split("/")[0];
+        anexos = [
+          {
+            tipo:
+              prefixo === "image" || prefixo === "audio" || prefixo === "video"
+                ? prefixo
+                : "file",
+            url: hospedada.url,
+          },
+        ];
+      }
+    } catch {
+      // sem a mídia, a mensagem ainda entra com o rótulo
+    }
+  }
+
   const texto =
-    mensagem.text?.body?.trim() || `[${mensagem.type ?? "mensagem"} recebida]`;
+    mensagem.text?.body?.trim() ||
+    midia?.caption?.trim() ||
+    ROTULO_TIPO_META[mensagem.type] ||
+    `[${mensagem.type ?? "mensagem"} recebida]`;
 
   // Instância que recebeu: define vendedor responsável do lead novo.
   const phoneNumberId = valor.metadata?.phone_number_id ?? null;
@@ -150,7 +242,7 @@ async function processarMensagem(
       })
       .eq("id", leadId);
   } else {
-    const [{ data: canal }, { data: etapa }] = await Promise.all([
+    const [{ data: canal }, { data: etapa }, vendedor] = await Promise.all([
       service.from("channels").select("id").eq("slug", "whatsapp").maybeSingle(),
       service
         .from("pipeline_stages")
@@ -159,6 +251,8 @@ async function processarMensagem(
         .order("ordem")
         .limit(1)
         .maybeSingle(),
+      // Instância manda; sem vendedor nela, cai no round-robin.
+      instancia?.vendedor_id ? Promise.resolve(null) : escolherVendedor(service),
     ]);
 
     const { data: novo, error } = await service
@@ -170,7 +264,7 @@ async function processarMensagem(
         stage_id: etapa?.id ?? null,
         status: "em_atendimento",
         entrada_motivo: "webhook_meta",
-        responsavel_id: instancia?.vendedor_id ?? null,
+        responsavel_id: instancia?.vendedor_id ?? vendedor?.id ?? null,
         whatsapp_instance_id: instancia?.id ?? null,
         primeira_resposta_em: agora,
         ultima_interacao_em: agora,
@@ -180,6 +274,15 @@ async function processarMensagem(
 
     if (error) throw new Error(error.message);
     leadId = novo.id;
+
+    if (!instancia?.vendedor_id && vendedor) {
+      await service.from("lead_interactions").insert({
+        lead_id: leadId,
+        tipo: "atribuicao",
+        conteudo: `Atendimento atribuído a ${vendedor.nome} (distribuição automática)`,
+        metadados: { via: "distribuicao_automatica" },
+      });
+    }
   }
 
   await service.from("lead_interactions").insert({
@@ -190,6 +293,7 @@ async function processarMensagem(
       message_id: mensagem.id,
       tipo: mensagem.type,
       phone_number_id: phoneNumberId,
+      ...(anexos.length > 0 ? { anexos } : {}),
     },
   });
 }

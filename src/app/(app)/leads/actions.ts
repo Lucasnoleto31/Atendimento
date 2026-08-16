@@ -104,8 +104,9 @@ import { createServiceClient } from "@/lib/supabase/server";
 import {
   enviarTemplate,
   iniciarConversaWhatsapp,
-  listarTemplates,
 } from "@/lib/chatwoot";
+import { enviarTemplateMeta } from "@/lib/whatsapp";
+import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 
 const LIMITE_MS_DISPARO = 100_000;
 const MAX_POR_EXECUCAO = 30; // ritmo por leva — respeita os limites da Meta
@@ -153,7 +154,7 @@ export async function dispararTemplateLista(
 
   let template;
   try {
-    const templates = await listarTemplates();
+    const templates = await listarTemplatesCanal();
     template = templates.find((t) => t.nome === nome && t.idioma === idioma);
   } catch (e) {
     return {
@@ -224,26 +225,10 @@ export async function dispararTemplateLista(
     }[];
     if (leads.length === 0) break;
 
+    const canal = canalAtivo();
     for (const lead of leads) {
       const agora = new Date().toISOString();
       try {
-        let conversaId = lead.chatwoot_conversation_id;
-        if (!conversaId) {
-          const criada = await iniciarConversaWhatsapp({
-            nome: lead.nome,
-            telefone: lead.telefone_e164,
-            contatoId: lead.chatwoot_contact_id,
-          });
-          conversaId = criada.conversaId;
-          await service
-            .from("leads")
-            .update({
-              chatwoot_contact_id: criada.contatoId,
-              chatwoot_conversation_id: conversaId,
-            })
-            .eq("id", lead.id);
-        }
-
         const valores = Object.fromEntries(
           Object.entries(valoresBase).map(([token, valor]) => [
             token,
@@ -251,15 +236,43 @@ export async function dispararTemplateLista(
           ]),
         );
 
-        const resposta = await enviarTemplate(conversaId, template, valores);
+        let idMensagem: string | number | null = null;
 
-        if (resposta?.id) {
-          await service.from("webhook_events").insert({
-            origem: "chatwoot",
-            evento_id: `cw-msg-${resposta.id}`,
-            payload: { via: "disparo", lead_id: lead.id },
-            processado: true,
-          });
+        if (canal === "meta") {
+          idMensagem = await enviarTemplateMeta(
+            lead.telefone_e164,
+            template,
+            valores,
+          );
+        } else {
+          let conversaId = lead.chatwoot_conversation_id;
+          if (!conversaId) {
+            const criada = await iniciarConversaWhatsapp({
+              nome: lead.nome,
+              telefone: lead.telefone_e164,
+              contatoId: lead.chatwoot_contact_id,
+            });
+            conversaId = criada.conversaId;
+            await service
+              .from("leads")
+              .update({
+                chatwoot_contact_id: criada.contatoId,
+                chatwoot_conversation_id: conversaId,
+              })
+              .eq("id", lead.id);
+          }
+
+          const resposta = await enviarTemplate(conversaId, template, valores);
+          idMensagem = resposta?.id ?? null;
+
+          if (typeof idMensagem === "number") {
+            await service.from("webhook_events").insert({
+              origem: "chatwoot",
+              evento_id: `cw-msg-${idMensagem}`,
+              payload: { via: "disparo", lead_id: lead.id },
+              processado: true,
+            });
+          }
         }
 
         const conteudo = template.corpo.replace(
@@ -273,7 +286,9 @@ export async function dispararTemplateLista(
           conteudo,
           autor_id: perfil.id,
           metadados: {
-            chatwoot_message_id: resposta?.id ?? null,
+            ...(canal === "meta"
+              ? { message_id: idMensagem }
+              : { chatwoot_message_id: idMensagem }),
             via: "disparo",
             template: template.nome,
             lista,
