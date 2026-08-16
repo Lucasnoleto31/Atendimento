@@ -973,7 +973,60 @@ export function Janela({
             </div>
           ) : null}
 
-          <div className="flex items-end gap-1">
+          <label htmlFor="texto-mensagem" className="sr-only">
+            Mensagem para o lead
+          </label>
+          <textarea
+            id="texto-mensagem"
+            name="texto"
+            rows={3}
+            ref={textareaRef}
+            value={texto}
+            onChange={(e) => atualizarTexto(e.target.value)}
+            onKeyDown={(e) => {
+              if (painelAberto && prontasFiltradas.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setIdxSel((i) =>
+                    Math.min(i + 1, prontasFiltradas.length - 1),
+                  );
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setIdxSel((i) => Math.max(i - 1, 0));
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  aplicarPronta(prontasFiltradas[idxAtivo]);
+                  return;
+                }
+              }
+              if (e.key === "Escape" && painelAberto) {
+                e.preventDefault();
+                fecharPainel();
+                return;
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (podeEnviar) formRef.current?.requestSubmit();
+              }
+            }}
+            placeholder={
+              modo === "nota"
+                ? "Nota interna — o lead não vê… (Enter salva)"
+                : 'Escreva a mensagem… ("/" para prontas, Enter envia)'
+            }
+            className={cn(
+              "field-sizing-content max-h-[240px] min-h-[88px] w-full resize-y rounded-md border px-1.5 py-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+              modo === "nota"
+                ? "border-accent-300 bg-accent-100/60"
+                : "border-neutral-300 bg-neutral-0",
+            )}
+          />
+
+          <div className="flex items-center gap-1">
             <button
               type="button"
               aria-label='Mensagens prontas (atalho "/")'
@@ -1059,62 +1112,12 @@ export function Janela({
               onChange={(e) => adicionarArquivos(e.target.files)}
             />
 
-            <label htmlFor="texto-mensagem" className="sr-only">
-              Mensagem para o lead
-            </label>
-            <textarea
-              id="texto-mensagem"
-              name="texto"
-              rows={2}
-              ref={textareaRef}
-              value={texto}
-              onChange={(e) => atualizarTexto(e.target.value)}
-              onKeyDown={(e) => {
-                if (painelAberto && prontasFiltradas.length > 0) {
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setIdxSel((i) =>
-                      Math.min(i + 1, prontasFiltradas.length - 1),
-                    );
-                    return;
-                  }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setIdxSel((i) => Math.max(i - 1, 0));
-                    return;
-                  }
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    aplicarPronta(prontasFiltradas[idxAtivo]);
-                    return;
-                  }
-                }
-                if (e.key === "Escape" && painelAberto) {
-                  e.preventDefault();
-                  fecharPainel();
-                  return;
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (podeEnviar) formRef.current?.requestSubmit();
-                }
-              }}
-              placeholder={
-                modo === "nota"
-                  ? "Nota interna — o lead não vê… (Enter salva)"
-                  : 'Escreva a mensagem… ("/" para prontas, Enter envia)'
-              }
-              className={cn(
-                "min-h-[56px] min-w-0 flex-1 rounded-md border px-1.5 py-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
-                modo === "nota"
-                  ? "border-accent-300 bg-accent-100/60"
-                  : "border-neutral-300 bg-neutral-0",
-              )}
-            />
-            {modo === "responder" ? (
-              <BotaoTemplates leadId={leadId} templates={templates} />
-            ) : null}
-            <BotaoEnviar desabilitado={!podeEnviar} nota={modo === "nota"} />
+            <span className="ml-auto flex items-center gap-1">
+              {modo === "responder" ? (
+                <BotaoTemplates leadId={leadId} templates={templates} />
+              ) : null}
+              <BotaoEnviar desabilitado={!podeEnviar} nota={modo === "nota"} />
+            </span>
           </div>
 
           {avisoArquivo ? (
