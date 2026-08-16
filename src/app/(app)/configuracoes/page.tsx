@@ -64,7 +64,24 @@ const PARAMETROS = [
     rotulo: "Distribuição automática (0/1)",
     ajuda: "1 = lead novo do WhatsApp vai para o vendedor com menos atendimentos.",
   },
+  {
+    chave: "dias_churn",
+    rotulo: "Dias para churn",
+    ajuda: "Dias sem giro para considerar o cliente perdido (padrão 60).",
+  },
+  {
+    chave: "receita_por_lote",
+    rotulo: "Receita por lote (R$)",
+    ajuda: "Receita média da assessoria por lote girado; habilita LTV e receita em risco (0 desliga).",
+  },
 ];
+
+const ROTULO_ANCORA: Record<string, string> = {
+  lead_criado: "Lead sem resposta",
+  conta_aberta: "Conta aberta sem 1º giro",
+  sem_giro: "Cliente sem giro (repete mensal)",
+  queda_lotes: "Queda de lotes (repete mensal)",
+};
 
 export default async function ConfiguracoesPage({
   searchParams,
@@ -126,7 +143,7 @@ export default async function ConfiguracoesPage({
     await Promise.all([
       supabase
         .from("followup_rules")
-        .select("id, dias, template_nome, template_idioma, ativo")
+        .select("id, dias, template_nome, template_idioma, ativo, ancora")
         .order("dias"),
       supabase.from("profiles").select("id, meta_contatos_dia"),
       listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[]),
@@ -139,6 +156,7 @@ export default async function ConfiguracoesPage({
     template_nome: string;
     template_idioma: string;
     ativo: boolean;
+    ancora?: string | null;
   }[];
   const metaContatosPorPessoa = new Map(
     ((metasContato ?? []) as { id: string; meta_contatos_dia: number }[]).map(
@@ -731,15 +749,19 @@ export default async function ConfiguracoesPage({
 
         {!cadenciaDisponivel ? (
           <p className="mt-2 max-w-[68ch] rounded-md bg-warning-bg px-1.5 py-1 text-sm text-warning">
-            Rode a migração 0013 (supabase/migrations/0013_engajamento.sql) no
-            SQL Editor para habilitar a cadência.
+            Rode as migrações 0013 e 0015 (supabase/migrations/) no SQL Editor
+            para habilitar a cadência.
           </p>
         ) : (
           <div className="mt-2 flex flex-col gap-1">
             {listaRegras.map((regra) => (
-              <div key={regra.id} className="flex items-center gap-1">
-                <span className="w-[220px] text-sm text-neutral-800">
-                  Dia{" "}
+              <div key={regra.id} className="flex flex-wrap items-center gap-1">
+                <span className="w-[320px] text-sm text-neutral-800">
+                  <span className="text-neutral-600">
+                    {ROTULO_ANCORA[regra.ancora ?? "lead_criado"] ??
+                      regra.ancora}
+                  </span>{" "}
+                  · dia{" "}
                   <span className="font-mono tabular-nums">{regra.dias}</span> ·{" "}
                   {regra.template_nome}
                 </span>
@@ -787,10 +809,30 @@ export default async function ConfiguracoesPage({
               >
                 <div className="flex flex-col gap-0.5">
                   <label
+                    htmlFor="cadencia-ancora"
+                    className="text-sm font-medium text-neutral-800"
+                  >
+                    Gatilho
+                  </label>
+                  <select
+                    id="cadencia-ancora"
+                    name="ancora"
+                    required
+                    className={cn(CAMPO, "w-[220px]")}
+                  >
+                    {Object.entries(ROTULO_ANCORA).map(([chave, rotulo]) => (
+                      <option key={chave} value={chave}>
+                        {rotulo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <label
                     htmlFor="cadencia-dias"
                     className="text-sm font-medium text-neutral-800"
                   >
-                    Dias após criação
+                    Dias
                   </label>
                   <input
                     id="cadencia-dias"

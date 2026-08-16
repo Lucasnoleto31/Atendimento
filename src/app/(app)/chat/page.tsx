@@ -27,7 +27,12 @@ import {
   type PessoaEquipe,
 } from "./ferramentas";
 import { FiltroEtiqueta } from "./filtros";
-import { PainelLead, type DetalheLead, type GiroCliente } from "./painel";
+import {
+  PainelLead,
+  type DetalheLead,
+  type GiroCliente,
+  type ReceitaCliente,
+} from "./painel";
 import { type TarefaLead } from "./tarefas-lead";
 import { marcarChatLido } from "./actions";
 
@@ -206,6 +211,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   let restanteJanela: number | null = null;
   let detalhe: DetalheLead | null = null;
   let giro: GiroCliente | null = null;
+  let receita: ReceitaCliente | null = null;
   let urlMaisAntigas: string | null = null;
   let tarefas: TarefaLead[] = [];
   let tarefasDisponiveis = false;
@@ -222,6 +228,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       { data: etapasFunil },
       { data: leadDetalhe },
       { data: giroCliente },
+      { data: receitaCliente },
       templatesInbox,
       statusAtual,
     ] = await Promise.all([
@@ -260,6 +267,14 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         ? supabase
             .from("v_customer_giro")
             .select("lotes_30d, lotes_30d_anterior, ultimo_giro_em")
+            .eq("customer_id", atual.customer_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      // Receita estimada (migração 0015 + taxa configurada; tolerante).
+      atual.customer_id !== null
+        ? supabase
+            .from("v_customer_receita")
+            .select("receita_30d_centavos, ltv_centavos")
             .eq("customer_id", atual.customer_id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
@@ -315,6 +330,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     statusConversa = statusAtual;
     detalhe = (leadDetalhe ?? null) as DetalheLead | null;
     giro = (giroCliente ?? null) as GiroCliente | null;
+    receita = (receitaCliente ?? null) as ReceitaCliente | null;
 
     // Janela de 24h do WhatsApp: conta a partir da última mensagem do lead.
     const ultimaRecebida = [...mensagens]
@@ -618,6 +634,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
           leadId={atual.id}
           detalhe={detalhe}
           giro={giro}
+          receita={receita}
           tarefas={tarefas}
           tarefasDisponiveis={tarefasDisponiveis}
         />

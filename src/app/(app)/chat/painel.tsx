@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatarReais } from "@/lib/format";
 import { TarefasLead, type TarefaLead } from "./tarefas-lead";
+
+export type ReceitaCliente = {
+  receita_30d_centavos: number | null;
+  ltv_centavos: number | null;
+};
 
 const ROTULO_MOTIVO: Record<string, string> = {
   manual: "Cadastro manual",
@@ -46,12 +52,14 @@ export function PainelLead({
   leadId,
   detalhe,
   giro,
+  receita,
   tarefas,
   tarefasDisponiveis,
 }: {
   leadId: string;
   detalhe: DetalheLead | null;
   giro: GiroCliente | null;
+  receita: ReceitaCliente | null;
   tarefas: TarefaLead[];
   tarefasDisponiveis: boolean;
 }) {
@@ -125,6 +133,20 @@ export function PainelLead({
             <Linha rotulo="Último giro">
               {dataCurta(giro?.ultimo_giro_em ?? null)}
             </Linha>
+            {(receita?.receita_30d_centavos ?? 0) > 0 ? (
+              <Linha rotulo="Receita (30d)">
+                <span className="font-mono tabular-nums">
+                  {formatarReais(receita?.receita_30d_centavos ?? 0)}
+                </span>
+              </Linha>
+            ) : null}
+            {(receita?.ltv_centavos ?? 0) > 0 ? (
+              <Linha rotulo="LTV">
+                <span className="font-mono tabular-nums">
+                  {formatarReais(receita?.ltv_centavos ?? 0)}
+                </span>
+              </Linha>
+            ) : null}
           </dl>
         ) : (
           <p className="mt-0.5 text-sm text-neutral-600">

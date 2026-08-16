@@ -144,6 +144,44 @@ export default async function RelatoriosPage({
   const metasDisponiveis = metasEquipe !== null;
   const totalEnviadas30d = (enviadas ?? []).length;
 
+  // Retenção da carteira (migração 0015; tolerante à ausência das views).
+  const [
+    { data: carteiraLinhas, error: carteiraErro },
+    { data: retencaoMeses },
+  ] = await Promise.all([
+    supabase
+      .from("v_carteira")
+      .select("status, receita_30d_centavos")
+      .order("customer_id")
+      .limit(2000),
+    supabase
+      .from("v_retencao_mensal")
+      .select("mes, churns, reativacoes, resgates")
+      .order("mes", { ascending: false })
+      .limit(6),
+  ]);
+  const retencaoDisponivel = carteiraErro === null;
+  const carteira = (carteiraLinhas ?? []) as {
+    status: string;
+    receita_30d_centavos: number | null;
+  }[];
+  const totalCarteira = carteira.length;
+  const contagemStatus = (s: string) =>
+    carteira.filter((c) => c.status === s).length;
+  const girando = contagemStatus("ativo") + contagemStatus("reativado");
+  const receitaCarteira = carteira.reduce(
+    (s, c) => s + (c.receita_30d_centavos ?? 0),
+    0,
+  );
+  const mesesRetencao = (retencaoMeses ?? []) as {
+    mes: string;
+    churns: number;
+    reativacoes: number;
+    resgates: number;
+  }[];
+  const somaReativacoes = mesesRetencao.reduce((s, m) => s + m.reativacoes, 0);
+  const somaResgates = mesesRetencao.reduce((s, m) => s + m.resgates, 0);
+
   return (
     <div className="p-2 md:p-3">
       <header className="border-b border-neutral-200 pb-2">
@@ -305,6 +343,100 @@ export default async function RelatoriosPage({
                 Nenhuma mensagem enviada nos últimos 30 dias — os números
                 aparecem conforme a equipe usa o chat.
               </p>
+            )}
+          </section>
+
+          {/* Retenção da carteira */}
+          <section className="mt-3" aria-labelledby="retencao-titulo">
+            <h2 id="retencao-titulo" className="text-h3 text-neutral-900">
+              Retenção da carteira
+            </h2>
+            {!retencaoDisponivel ? (
+              <p className="mt-2 max-w-[68ch] rounded-md bg-warning-bg px-1.5 py-1 text-sm text-warning">
+                Rode a migração 0015 (supabase/migrations/0015_retencao.sql) no
+                SQL Editor para habilitar as métricas de retenção.
+              </p>
+            ) : totalCarteira === 0 ? (
+              <p className="mt-2 text-sm text-neutral-600">
+                A carteira enche com a importação diária de clientes e lotes.
+              </p>
+            ) : (
+              <>
+                <dl className="mt-2 grid gap-3 border-y border-neutral-200 py-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Indicador
+                    rotulo="Carteira girando"
+                    valor={percentual(girando, totalCarteira)}
+                    detalhe={`${numero(girando)} de ${numero(totalCarteira)} clientes`}
+                  />
+                  <Indicador
+                    rotulo="Em risco agora"
+                    valor={numero(contagemStatus("em_risco"))}
+                    detalhe="queda ou sem giro detectados"
+                  />
+                  <Indicador
+                    rotulo="Churn"
+                    valor={numero(contagemStatus("churn"))}
+                    detalhe="sem giro além do limite"
+                  />
+                  <Indicador
+                    rotulo="Taxa de resgate"
+                    valor={percentual(somaResgates, somaReativacoes)}
+                    detalhe={`${numero(somaResgates)} voltaram a girar de ${numero(somaReativacoes)} acionados`}
+                  />
+                </dl>
+                {receitaCarteira > 0 ? (
+                  <p className="mt-1 text-sm text-neutral-600">
+                    Receita estimada da carteira (30d):{" "}
+                    <span className="font-mono font-medium text-neutral-800 tabular-nums">
+                      {formatarReais(receitaCarteira)}
+                    </span>
+                  </p>
+                ) : null}
+
+                {mesesRetencao.length > 0 ? (
+                  <div className="mt-2 overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-0 shadow-sm">
+                    <table className="w-full min-w-[420px] border-collapse text-left">
+                      <thead>
+                        <tr className="border-b border-neutral-200 bg-neutral-50">
+                          <th className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                            Mês
+                          </th>
+                          <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                            Acionados
+                          </th>
+                          <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                            Resgatados
+                          </th>
+                          <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                            Churns
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-200">
+                        {mesesRetencao.map((m) => (
+                          <tr key={m.mes} className="h-[40px]">
+                            <td className="px-2 font-mono text-sm text-neutral-800 tabular-nums">
+                              {new Date(`${m.mes.slice(0, 10)}T12:00:00`).toLocaleDateString(
+                                "pt-BR",
+                                { month: "short", year: "numeric" },
+                              )}
+                            </td>
+                            <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
+                              {numero(m.reativacoes)}
+                            </td>
+                            <td className="px-2 text-right font-mono text-sm text-success tabular-nums">
+                              {numero(m.resgates)}
+                            </td>
+                            <td className="px-2 text-right font-mono text-sm text-danger tabular-nums">
+                              {numero(m.churns)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
             )}
           </section>
 

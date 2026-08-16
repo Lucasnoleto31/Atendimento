@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 import { sair } from "@/app/entrar/actions";
@@ -23,6 +24,7 @@ import { ContadorNaoLidas } from "./nao-lidas";
 export const MODULOS = [
   { href: "/atendimento", label: "Atendimento", icon: Columns3 },
   { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/carteira", label: "Carteira", icon: Wallet },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/pagamentos", label: "Pagamentos", icon: CreditCard },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3 },

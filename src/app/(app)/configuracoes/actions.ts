@@ -307,10 +307,14 @@ const PARAMETROS_VALIDOS = new Set([
   "dias_sem_resposta",
   "minutos_alerta_espera",
   "distribuicao_automatica",
+  "dias_churn",
+  "receita_por_lote",
 ]);
 
 // Parâmetros liga/desliga aceitam 0; os demais exigem número positivo.
 const PARAMETROS_BINARIOS = new Set(["distribuicao_automatica"]);
+// Zero desliga o recurso (ex.: receita por lote sem taxa definida).
+const PARAMETROS_ZERO_OK = new Set(["receita_por_lote"]);
 
 export async function salvarParametro(formData: FormData) {
   await exigirGestor();
@@ -320,6 +324,8 @@ export async function salvarParametro(formData: FormData) {
   if (!PARAMETROS_VALIDOS.has(chave)) terminar("Parâmetro desconhecido.");
   if (PARAMETROS_BINARIOS.has(chave)) {
     if (valor !== 0 && valor !== 1) terminar("Use 0 (desligado) ou 1 (ligado).");
+  } else if (PARAMETROS_ZERO_OK.has(chave)) {
+    if (valor === null || valor < 0) terminar("Informe um número (0 desliga).");
   } else if (valor === null || valor <= 0) {
     terminar("Informe um número maior que zero.");
   }
@@ -337,24 +343,40 @@ export async function salvarParametro(formData: FormData) {
 // Cadência de follow-up
 // ===========================================================================
 
+const ANCORAS_VALIDAS = new Set([
+  "lead_criado",
+  "conta_aberta",
+  "sem_giro",
+  "queda_lotes",
+]);
+
 export async function criarRegraCadencia(formData: FormData) {
   await exigirGestor();
   const dias = Number(formData.get("dias"));
   const escolha = String(formData.get("template") ?? "");
+  const ancora = String(formData.get("ancora") ?? "lead_criado");
   const [nome, idioma] = escolha.split("|");
 
   if (!Number.isInteger(dias) || dias <= 0 || dias > 90) {
     terminar("Dias inválidos: use um número inteiro entre 1 e 90.");
   }
   if (!nome || !idioma) terminar("Escolha um template aprovado.");
+  if (!ANCORAS_VALIDAS.has(ancora)) terminar("Gatilho inválido.");
 
   const supabase = await createClient();
   const { error } = await supabase.from("followup_rules").insert({
     dias,
     template_nome: nome,
     template_idioma: idioma,
+    ancora,
   });
-  if (error) terminar(amigavel(error.code, error.message));
+  if (error) {
+    terminar(
+      error.message.includes("ancora")
+        ? "Gatilhos de cliente dependem da migração 0015 — rode-a no SQL Editor."
+        : amigavel(error.code, error.message),
+    );
+  }
   terminar();
 }
 
