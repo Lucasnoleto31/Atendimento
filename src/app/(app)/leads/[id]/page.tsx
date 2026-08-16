@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { Button } from "@/components/ui/button";
 import { formatarTelefone, tempoDesde } from "@/lib/format";
 import { LotesChart, type PontoLote } from "@/components/app/lotes-chart";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
@@ -10,7 +11,12 @@ import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Lead · Zeve CRM" };
 
-const DIAS_GRAFICO = 90;
+const PERIODOS = [
+  { dias: 30, rotulo: "30 dias" },
+  { dias: 90, rotulo: "90 dias" },
+  { dias: 180, rotulo: "6 meses" },
+  { dias: 365, rotulo: "12 meses" },
+];
 
 const ROTULO_MOTIVO: Record<string, string> = {
   manual: "Cadastro manual",
@@ -48,8 +54,15 @@ type LeadDetalhe = {
   } | null;
 };
 
-export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
+export default async function LeadPage({
+  params,
+  searchParams,
+}: PageProps<"/leads/[id]">) {
   const { id } = await params;
+  const busca = await searchParams;
+  const diasGrafico = PERIODOS.some((p) => p.dias === Number(busca.periodo))
+    ? Number(busca.periodo)
+    : 90;
   const supabase = await createClient();
 
   const { data } = await supabase
@@ -81,7 +94,7 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
 
   if (lead.customer_id) {
     const inicio = new Date();
-    inicio.setDate(inicio.getDate() - DIAS_GRAFICO);
+    inicio.setDate(inicio.getDate() - diasGrafico);
     const inicioIso = inicio.toISOString().slice(0, 10);
     const inicio30 = new Date();
     inicio30.setDate(inicio30.getDate() - 30);
@@ -117,9 +130,9 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
         (porDia.get(l.referencia_data) ?? 0) + Number(l.quantidade),
       );
     }
-    pontos = Array.from({ length: DIAS_GRAFICO }, (_, i) => {
+    pontos = Array.from({ length: diasGrafico }, (_, i) => {
       const d = new Date();
-      d.setDate(d.getDate() - (DIAS_GRAFICO - 1 - i));
+      d.setDate(d.getDate() - (diasGrafico - 1 - i));
       const iso = d.toISOString().slice(0, 10);
       return { data: iso, quantidade: porDia.get(iso) ?? 0 };
     });
@@ -178,6 +191,10 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
               nunca respondeu
             </span>
           ) : null}
+          <Button href={`/leads/${lead.id}/editar`} variant="secondary" size="sm">
+            <Pencil size={14} strokeWidth={1.5} aria-hidden />
+            Editar
+          </Button>
         </div>
       </header>
 
@@ -289,6 +306,34 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
             </span>
           </div>
 
+          <nav aria-label="Período do gráfico" className="mt-2">
+            <ul className="flex flex-wrap gap-1">
+              {PERIODOS.map((p) => {
+                const ativo = p.dias === diasGrafico;
+                return (
+                  <li key={p.dias}>
+                    <Link
+                      href={
+                        p.dias === 90
+                          ? `/leads/${lead.id}`
+                          : `/leads/${lead.id}?periodo=${p.dias}`
+                      }
+                      aria-current={ativo ? "true" : undefined}
+                      className={cn(
+                        "inline-flex h-[32px] items-center rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                        ativo
+                          ? "bg-primary-50 font-medium text-primary-900"
+                          : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
+                      )}
+                    >
+                      {p.rotulo}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+
           <dl className="mt-2 grid grid-cols-3 gap-2 border-y border-neutral-200 py-2">
             <div>
               <dt className="text-xs tracking-[0.06em] text-neutral-600 uppercase">
@@ -324,7 +369,7 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
             <div className="mt-2 overflow-hidden rounded-md border border-neutral-200">
               <table className="w-full border-collapse text-left">
                 <caption className="sr-only">
-                  Lotes por conta nos últimos 90 e 30 dias
+                  Lotes por conta nos últimos {diasGrafico} e 30 dias
                 </caption>
                 <thead>
                   <tr className="border-b border-neutral-200 bg-neutral-50">
@@ -344,7 +389,7 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
                       scope="col"
                       className="px-1.5 py-0.5 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
                     >
-                      Período (90d)
+                      Período ({diasGrafico}d)
                     </th>
                   </tr>
                 </thead>
@@ -381,7 +426,7 @@ export default async function LeadPage({ params }: PageProps<"/leads/[id]">) {
           ) : null}
 
           <div className="mt-2">
-            <LotesChart pontos={pontos} />
+            <LotesChart pontos={pontos} dias={diasGrafico} />
           </div>
         </section>
       ) : null}

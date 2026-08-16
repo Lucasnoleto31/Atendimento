@@ -14,7 +14,13 @@ const M = { topo: 8, direita: 8, base: 24, esquerda: 40 };
  * grade recessiva, crosshair com tooltip no hover e tabela de dados como
  * alternativa acessível.
  */
-export function LotesChart({ pontos }: { pontos: PontoLote[] }) {
+export function LotesChart({
+  pontos,
+  dias = 90,
+}: {
+  pontos: PontoLote[];
+  dias?: number;
+}) {
   const tituloId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
   const [ativo, setAtivo] = useState<number | null>(null);
@@ -87,7 +93,7 @@ export function LotesChart({ pontos }: { pontos: PontoLote[] }) {
     <figure>
       <figcaption id={tituloId} className="text-sm font-medium text-neutral-800">
         Lotes girados por dia{" "}
-        <span className="font-normal text-neutral-600">— últimos 90 dias</span>
+        <span className="font-normal text-neutral-600">— últimos {dias} dias</span>
       </figcaption>
 
       <div className="relative mt-1">
