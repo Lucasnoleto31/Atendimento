@@ -6,6 +6,7 @@ import { ImportForm } from "./import-form";
 import { ExcluirImportacao } from "./excluir-import";
 import { KanbanConfig, type PipelineComEtapas } from "./kanban-config";
 import { Usuarios, type UsuarioLinha } from "./usuarios";
+import { ChatwootImport } from "./chatwoot-import";
 import { importarClientes, importarLotes } from "./actions";
 
 export const metadata: Metadata = { title: "Administração · Zeve CRM" };
@@ -163,6 +164,29 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       ) : null}
 
       <KanbanConfig pipelines={pipelines} />
+
+      {/* Chatwoot */}
+      <section className="mt-3" aria-labelledby="chatwoot-titulo">
+        <h2 id="chatwoot-titulo" className="text-h3 text-neutral-900">
+          Chatwoot
+        </h2>
+        <div className="mt-2 max-w-[68ch] rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm">
+          <p className="text-sm text-neutral-600">
+            Importa as conversas do WhatsApp como leads: telefone cruzado com a
+            base, agente vira responsável (pelo e-mail), labels viram tags e a
+            conversa fica vinculada para o envio de mensagens pelo CRM.
+          </p>
+          <div className="mt-2">
+            <ChatwootImport
+              configurado={Boolean(
+                process.env.CHATWOOT_BASE_URL &&
+                  process.env.CHATWOOT_ACCOUNT_ID &&
+                  process.env.CHATWOOT_API_TOKEN,
+              )}
+            />
+          </div>
+        </div>
+      </section>
 
       {/* Webhook da Meta */}
       <section className="mt-3" aria-labelledby="webhook-titulo">
