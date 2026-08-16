@@ -134,6 +134,34 @@ export default async function AtendimentoPage({
         .is("primeira_resposta_em", null),
     ]);
 
+  // Etiquetas dos cartões visíveis, numa consulta só.
+  const idsVisiveis = colunas.flatMap((c) => c.leads.map((l) => l.id));
+  if (idsVisiveis.length > 0) {
+    const { data: vinculos } = await supabase
+      .from("lead_tags")
+      .select("lead_id, tag:tags(id, nome, cor)")
+      .in("lead_id", idsVisiveis);
+
+    const porLead = new Map<
+      string,
+      { id: string; nome: string; cor?: string | null }[]
+    >();
+    for (const vinculo of (vinculos ?? []) as unknown as {
+      lead_id: string;
+      tag: { id: string; nome: string; cor?: string | null } | null;
+    }[]) {
+      if (!vinculo.tag) continue;
+      const atuais = porLead.get(vinculo.lead_id) ?? [];
+      atuais.push(vinculo.tag);
+      porLead.set(vinculo.lead_id, atuais);
+    }
+    for (const coluna of colunas) {
+      for (const lead of coluna.leads) {
+        lead.etiquetas = porLead.get(lead.id) ?? [];
+      }
+    }
+  }
+
   const naoLidasPorEtapa = new Map<string, number>();
   for (const linha of ((linhasNaoLidas ?? []) as {
     stage_id: string | null;

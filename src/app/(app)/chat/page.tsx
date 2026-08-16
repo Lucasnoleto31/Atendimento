@@ -11,6 +11,7 @@ import {
   type TemplateWhatsapp,
 } from "@/lib/chatwoot";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+import { estiloEtiqueta } from "@/lib/etiquetas";
 import { processarCadencia } from "@/lib/cadencia";
 import { processarAgendadas } from "@/lib/agendadas";
 import {
@@ -140,8 +141,18 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   }
 
   // Etiquetas (filtro e ferramentas) e parâmetro do alerta de espera.
+  // Sem a migração 0016 não existe coluna cor — a lista continua, sem cor.
   const [{ data: tagsAtivas }, { data: alertaCfg }] = await Promise.all([
-    supabase.from("tags").select("id, nome").eq("ativo", true).order("nome"),
+    supabase
+      .from("tags")
+      .select("id, nome, cor")
+      .eq("ativo", true)
+      .order("nome")
+      .then((r) =>
+        r.error
+          ? supabase.from("tags").select("id, nome").eq("ativo", true).order("nome")
+          : r,
+      ),
     supabase
       .from("settings")
       .select("valor")
@@ -164,6 +175,29 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     c.ultima_interacao_em
       ? Math.floor((agoraMs - new Date(c.ultima_interacao_em).getTime()) / 60_000)
       : 0;
+
+  // Etiquetas das conversas listadas, numa consulta só — a cor aparece na
+  // faixa lateral e nos chips, para reconhecer a conversa de relance.
+  const etiquetasPorLead = new Map<string, Etiqueta[]>();
+  if (conversas.length > 0) {
+    const { data: vinculos } = await supabase
+      .from("lead_tags")
+      .select("lead_id, tag:tags(id, nome, cor)")
+      .in(
+        "lead_id",
+        conversas.map((c) => c.id),
+      );
+
+    for (const vinculo of (vinculos ?? []) as unknown as {
+      lead_id: string;
+      tag: Etiqueta | null;
+    }[]) {
+      if (!vinculo.tag) continue;
+      const atuais = etiquetasPorLead.get(vinculo.lead_id) ?? [];
+      atuais.push(vinculo.tag);
+      etiquetasPorLead.set(vinculo.lead_id, atuais);
+    }
+  }
 
   // Prévia da última mensagem, numa consulta só.
   const previas = new Map<string, string>();
@@ -483,16 +517,23 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               const pendente = naoLida(conversa) && !selecionada;
               const espera = pendente ? minutosAguardando(conversa) : 0;
               const emAlerta = pendente && espera >= minutosAlerta;
+              const etiquetasDaConversa = etiquetasPorLead.get(conversa.id) ?? [];
+              // A faixa lateral herda a cor da primeira etiqueta; a seleção
+              // continua mandando na cor quando a conversa está aberta.
+              const faixa = selecionada
+                ? "border-primary-600"
+                : etiquetasDaConversa.length > 0
+                  ? estiloEtiqueta(etiquetasDaConversa[0].cor).faixa
+                  : "border-transparent";
               return (
                 <li key={conversa.id}>
                   <Link
                     href={urlChat(filtro, busca, etiquetaFiltro, conversa.id)}
                     aria-current={selecionada ? "true" : undefined}
                     className={cn(
-                      "flex items-center gap-1 px-1.5 py-1 transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500",
-                      selecionada
-                        ? "border-l-2 border-primary-600 bg-primary-50"
-                        : "border-l-2 border-transparent hover:bg-neutral-50",
+                      "flex items-center gap-1 border-l-4 px-1.5 py-1 transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500",
+                      faixa,
+                      selecionada ? "bg-primary-50" : "hover:bg-neutral-50",
                     )}
                   >
                     <span
@@ -539,6 +580,27 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                           />
                         ) : null}
                       </span>
+
+                      {etiquetasDaConversa.length > 0 ? (
+                        <span className="mt-0.5 flex flex-wrap items-center gap-0.5">
+                          {etiquetasDaConversa.slice(0, 3).map((etiqueta) => (
+                            <span
+                              key={etiqueta.id}
+                              className={cn(
+                                "inline-flex h-[20px] items-center rounded-sm px-1 text-xs font-medium",
+                                estiloEtiqueta(etiqueta.cor).chip,
+                              )}
+                            >
+                              {etiqueta.nome}
+                            </span>
+                          ))}
+                          {etiquetasDaConversa.length > 3 ? (
+                            <span className="text-xs text-neutral-400">
+                              +{etiquetasDaConversa.length - 3}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                     </span>
                   </Link>
                 </li>

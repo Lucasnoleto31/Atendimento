@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Mail, RotateCcw, Tag, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { estiloEtiqueta } from "@/lib/etiquetas";
 import type { StatusConversa } from "@/lib/chatwoot";
 import {
   alterarEtapaChat,
@@ -14,7 +15,7 @@ import {
 } from "./actions";
 
 export type PessoaEquipe = { id: string; nome: string };
-export type Etiqueta = { id: string; nome: string };
+export type Etiqueta = { id: string; nome: string; cor?: string | null };
 export type EtapaFunil = { id: string; nome: string };
 
 const ROTULO_STATUS: Record<StatusConversa, { texto: string; classe: string }> =
@@ -188,7 +189,10 @@ export function FerramentasConversa({
         {chips.map((etiqueta) => (
           <span
             key={etiqueta.id}
-            className="inline-flex h-[20px] items-center gap-0.5 rounded-sm bg-neutral-100 px-1 text-xs font-medium text-neutral-600"
+            className={cn(
+              "inline-flex h-[20px] items-center gap-0.5 rounded-sm px-1 text-xs font-medium",
+              estiloEtiqueta(etiqueta.cor).chip,
+            )}
           >
             {etiqueta.nome}
             <button
@@ -198,7 +202,7 @@ export function FerramentasConversa({
               onClick={() =>
                 executar(() => alternarEtiquetaChat(leadId, etiqueta.id, false))
               }
-              className="inline-flex h-[16px] w-[16px] items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] hover:bg-neutral-200 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
+              className="inline-flex h-[16px] w-[16px] items-center justify-center rounded-sm opacity-70 transition-opacity duration-[120ms] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
             >
               <X size={12} strokeWidth={1.5} aria-hidden />
             </button>
@@ -255,6 +259,13 @@ export function FerramentasConversa({
                               )
                             }
                             className="h-[16px] w-[16px] accent-primary-600"
+                          />
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "h-1 w-1 shrink-0 rounded-full",
+                              estiloEtiqueta(etiqueta.cor).ponto,
+                            )}
                           />
                           {etiqueta.nome}
                         </label>

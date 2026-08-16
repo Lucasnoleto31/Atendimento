@@ -8,6 +8,8 @@ import { CAMPO, BOTAO_ICONE, BOTAO_ICONE_PERIGO } from "@/components/app/form-st
 import { cn } from "@/lib/utils";
 import { type TemplateWhatsapp } from "@/lib/chatwoot";
 import { listarTemplatesCanal } from "@/lib/canal";
+import { CORES_ETIQUETA, estiloEtiqueta } from "@/lib/etiquetas";
+import { SeletorCorTag } from "./cor-tag";
 import {
   alternarInstancia,
   alternarProduto,
@@ -107,7 +109,13 @@ export default async function ConfiguracoesPage({
       .from("products")
       .select("id, codigo, nome, valor_comissao_centavos, recorrencia, ativo")
       .order("codigo"),
-    supabase.from("tags").select("id, nome").order("nome"),
+    supabase
+      .from("tags")
+      .select("id, nome, cor")
+      .order("nome")
+      .then((r) =>
+        r.error ? supabase.from("tags").select("id, nome").order("nome") : r,
+      ),
     supabase
       .from("quick_replies")
       .select("id, titulo, corpo")
@@ -357,19 +365,29 @@ export default async function ConfiguracoesPage({
         <h2 id="tags-titulo" className="text-h3 text-neutral-900">
           Tags de atendimento
         </h2>
+        <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
+          A cor da etiqueta pinta a faixa lateral da conversa no Chat e o
+          cartão no Atendimento — a equipe reconhece o assunto de relance.
+        </p>
         <div className="mt-2 flex flex-wrap items-center gap-1">
-          {((tags ?? []) as { id: string; nome: string }[]).map((tag) => (
+          {(
+            (tags ?? []) as { id: string; nome: string; cor?: string | null }[]
+          ).map((tag) => (
             <span
               key={tag.id}
-              className="inline-flex items-center gap-0.5 rounded-sm bg-neutral-100 py-0.5 pr-0.5 pl-1 text-sm text-neutral-800"
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded-sm py-0.5 pr-0.5 pl-1 text-sm",
+                estiloEtiqueta(tag.cor).chip,
+              )}
             >
               {tag.nome}
+              <SeletorCorTag id={tag.id} nome={tag.nome} cor={tag.cor} />
               <form action={excluirTag} className="flex">
                 <input type="hidden" name="id" value={tag.id} />
                 <button
                   type="submit"
                   aria-label={`Excluir tag ${tag.nome}`}
-                  className="inline-flex h-[20px] w-[20px] items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] hover:bg-danger-bg hover:text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  className="inline-flex h-[20px] w-[20px] items-center justify-center rounded-sm opacity-70 transition-opacity duration-[120ms] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                 >
                   <Trash2 size={12} strokeWidth={1.5} aria-hidden />
                 </button>
@@ -388,6 +406,21 @@ export default async function ConfiguracoesPage({
               required
               className={cn(CAMPO, "w-[160px]")}
             />
+            <label htmlFor="nova-tag-cor" className="sr-only">
+              Cor da nova tag
+            </label>
+            <select
+              id="nova-tag-cor"
+              name="cor"
+              defaultValue="azul"
+              className={cn(CAMPO, "w-[112px]")}
+            >
+              {CORES_ETIQUETA.map((c) => (
+                <option key={c.chave} value={c.chave}>
+                  {c.rotulo}
+                </option>
+              ))}
+            </select>
             <button type="submit" aria-label="Adicionar tag" className={BOTAO_ICONE}>
               <Plus size={18} strokeWidth={1.5} aria-hidden />
             </button>

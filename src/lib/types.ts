@@ -26,6 +26,7 @@ export type LeadCard = {
   responsavel: string | null;
   /** Parado na etapa há mais de 7 dias — calculado no servidor. */
   atrasado?: boolean;
+  etiquetas?: { id: string; nome: string; cor?: string | null }[];
 };
 
 export const ROTULO_STATUS: Record<LeadStatus, string> = {

@@ -114,17 +114,40 @@ export async function excluirProduto(formData: FormData) {
 // Tags
 // ===========================================================================
 
+const CORES_VALIDAS = new Set(["azul", "ambar", "verde", "vermelho", "neutro"]);
+
 export async function criarTag(formData: FormData) {
   await exigirGestor();
   const nome = String(formData.get("nome") ?? "").trim();
+  const cor = String(formData.get("cor") ?? "neutro");
   if (!nome) terminar("Dê um nome à tag.");
+  if (!CORES_VALIDAS.has(cor)) terminar("Cor inválida.");
 
   const supabase = await createClient();
-  const { error } = await supabase.from("tags").insert({ nome });
-  if (error)
+  const { error } = await supabase.from("tags").insert({ nome, cor });
+  if (error) {
     terminar(
-      error.code === "23505" ? `A tag “${nome}” já existe.` : error.message,
+      error.code === "23505"
+        ? `A tag “${nome}” já existe.`
+        : error.message.includes("cor")
+          ? "Cores de etiqueta dependem da migração 0016 — rode-a no SQL Editor."
+          : error.message,
     );
+  }
+  terminar();
+}
+
+/** Troca a cor da etiqueta — o rótulo continua sendo o nome. */
+export async function alterarCorTag(formData: FormData) {
+  await exigirGestor();
+  const id = String(formData.get("id") ?? "");
+  const cor = String(formData.get("cor") ?? "");
+  if (!id) terminar("Etiqueta não informada.");
+  if (!CORES_VALIDAS.has(cor)) terminar("Cor inválida.");
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("tags").update({ cor }).eq("id", id);
+  if (error) terminar(amigavel(error.code, error.message));
   terminar();
 }
 

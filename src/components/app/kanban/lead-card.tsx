@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
 import type { LeadCard as Lead } from "@/lib/types";
 import { formatarTelefone, tempoDesde } from "@/lib/format";
+import { estiloEtiqueta } from "@/lib/etiquetas";
 import { cn } from "@/lib/utils";
 
 export function LeadCardItem({
@@ -29,6 +30,7 @@ export function LeadCardItem({
 }) {
   const ehCliente = lead.customer_id !== null;
   const naColuna = tempoDesde(lead.entrou_na_etapa_em);
+  const etiquetas = lead.etiquetas ?? [];
 
   return (
     <li
@@ -44,6 +46,10 @@ export function LeadCardItem({
         arrastando
           ? "border-primary-300 opacity-60"
           : "border-neutral-200 hover:border-neutral-300",
+        // A primeira etiqueta pinta a lateral do cartão.
+        etiquetas.length > 0
+          ? cn("border-l-4", estiloEtiqueta(etiquetas[0].cor).faixaLateral)
+          : "",
       )}
     >
       <div className="flex items-start justify-between gap-1">
@@ -77,6 +83,27 @@ export function LeadCardItem({
         {lead.canal ?? "Sem canal"}
         {lead.campanha ? ` · ${lead.campanha}` : ""}
       </p>
+
+      {etiquetas.length > 0 ? (
+        <div className="mt-1 flex flex-wrap items-center gap-0.5">
+          {etiquetas.slice(0, 3).map((etiqueta) => (
+            <span
+              key={etiqueta.id}
+              className={cn(
+                "inline-flex h-[20px] items-center rounded-sm px-1 text-xs font-medium",
+                estiloEtiqueta(etiqueta.cor).chip,
+              )}
+            >
+              {etiqueta.nome}
+            </span>
+          ))}
+          {etiquetas.length > 3 ? (
+            <span className="text-xs text-neutral-400">
+              +{etiquetas.length - 3}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-1 flex items-center justify-between gap-1">
         <span
