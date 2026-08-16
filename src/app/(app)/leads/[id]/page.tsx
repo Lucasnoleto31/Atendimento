@@ -3,8 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { perfilAtual } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { formatarTelefone, tempoDesde } from "@/lib/format";
+import { CAMPO } from "@/components/app/form-styles";
+import { registrarVenda } from "@/app/(app)/pagamentos/actions";
+import { formatarReais, formatarTelefone, tempoDesde } from "@/lib/format";
 import { LotesChart, type PontoLote } from "@/components/app/lotes-chart";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -63,7 +66,9 @@ export default async function LeadPage({
   const diasGrafico = PERIODOS.some((p) => p.dias === Number(busca.periodo))
     ? Number(busca.periodo)
     : 90;
+  const aviso = typeof busca.aviso === "string" ? busca.aviso : null;
   const supabase = await createClient();
+  const perfil = await perfilAtual();
 
   const { data } = await supabase
     .from("leads")
@@ -81,6 +86,27 @@ export default async function LeadPage({
 
   if (!data) notFound();
   const lead = data as unknown as LeadDetalhe;
+
+  const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
+
+  const [{ data: produtos }, { data: equipe }, { data: vendasDoLead }] =
+    await Promise.all([
+      supabase
+        .from("products")
+        .select("id, codigo, nome, valor_comissao_centavos")
+        .eq("ativo", true)
+        .order("nome"),
+      ehGestor
+        ? supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome")
+        : Promise.resolve({ data: null }),
+      supabase
+        .from("sales")
+        .select(
+          "id, valor_comissao_centavos, status, ocorreu_em, produto:products(nome), vendedor:profiles(nome)",
+        )
+        .eq("lead_id", id)
+        .order("ocorreu_em", { ascending: false }),
+    ]);
 
   // Giro e histórico de lotes — só quando o lead é cliente.
   type Giro = {
@@ -162,6 +188,20 @@ export default async function LeadPage({
         <ArrowLeft size={16} strokeWidth={1.5} aria-hidden />
         Leads
       </Link>
+
+      {aviso ? (
+        <p
+          role="status"
+          className={cn(
+            "mt-2 max-w-[68ch] rounded-md border px-1.5 py-1 text-sm",
+            aviso === "Venda registrada."
+              ? "border-success bg-success-bg text-success"
+              : "border-warning bg-warning-bg text-warning",
+          )}
+        >
+          {aviso}
+        </p>
+      ) : null}
 
       <header className="mt-1 flex flex-wrap items-start justify-between gap-2 border-b border-neutral-200 pb-2">
         <div>
@@ -283,6 +323,135 @@ export default async function LeadPage({
           )}
         </section>
       </div>
+
+      {/* Venda */}
+      <section
+        aria-labelledby="venda-titulo"
+        className="mt-3 rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm"
+      >
+        <h2 id="venda-titulo" className="text-h3 text-neutral-900">
+          Vendas
+        </h2>
+
+        {(vendasDoLead ?? []).length > 0 ? (
+          <ul className="mt-2 flex flex-col divide-y divide-neutral-200">
+            {(
+              (vendasDoLead ?? []) as unknown as {
+                id: string;
+                valor_comissao_centavos: number;
+                status: "pendente" | "confirmada" | "cancelada";
+                ocorreu_em: string;
+                produto: { nome: string } | null;
+                vendedor: { nome: string } | null;
+              }[]
+            ).map((venda) => (
+              <li key={venda.id} className="flex items-center justify-between gap-2 py-1">
+                <span className="min-w-0 truncate text-sm text-neutral-800">
+                  {venda.produto?.nome ?? "Produto"}
+                  <span className="text-neutral-600">
+                    {" "}
+                    · {venda.vendedor?.nome ?? "—"} ·{" "}
+                    {new Date(venda.ocorreu_em).toLocaleDateString("pt-BR")}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {venda.status === "cancelada" ? (
+                    <span className="inline-flex h-[20px] items-center rounded-sm bg-neutral-100 px-1 text-xs text-neutral-400">
+                      cancelada
+                    </span>
+                  ) : null}
+                  <span
+                    className={cn(
+                      "font-mono text-sm tabular-nums",
+                      venda.status === "cancelada"
+                        ? "text-neutral-400 line-through"
+                        : "text-neutral-900",
+                    )}
+                  >
+                    {formatarReais(venda.valor_comissao_centavos)}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-sm text-neutral-600">
+            Nenhuma venda registrada para este lead.
+          </p>
+        )}
+
+        {(produtos ?? []).length === 0 ? (
+          <p className="mt-2 text-sm text-neutral-600">
+            Cadastre um produto em Configurações para registrar vendas.
+          </p>
+        ) : (
+          <form
+            action={registrarVenda}
+            className="mt-2 flex flex-wrap items-end gap-1 border-t border-neutral-200 pt-2"
+          >
+            <input type="hidden" name="lead_id" value={lead.id} />
+
+            <div className="flex min-w-[200px] flex-1 flex-col gap-1">
+              <label
+                htmlFor="product_id"
+                className="text-sm font-medium text-neutral-800"
+              >
+                Produto vendido
+              </label>
+              <select id="product_id" name="product_id" required className={CAMPO}>
+                {(
+                  (produtos ?? []) as {
+                    id: string;
+                    nome: string;
+                    valor_comissao_centavos: number;
+                  }[]
+                ).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nome} — {formatarReais(p.valor_comissao_centavos)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {ehGestor && equipe ? (
+              <div className="flex min-w-[180px] flex-col gap-1">
+                <label
+                  htmlFor="vendedor_id"
+                  className="text-sm font-medium text-neutral-800"
+                >
+                  Vendedor
+                </label>
+                <select
+                  id="vendedor_id"
+                  name="vendedor_id"
+                  defaultValue={perfil?.id ?? ""}
+                  className={CAMPO}
+                >
+                  {(equipe as { id: string; nome: string }[]).map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+
+            <label className="flex h-[40px] items-center gap-1 text-sm text-neutral-800">
+              <input
+                type="checkbox"
+                name="marcar_ganho"
+                defaultChecked
+                className="h-2 w-2 accent-primary-600"
+              />
+              Marcar lead como ganho
+            </label>
+
+            <Button type="submit" size="md">
+              Registrar venda
+            </Button>
+          </form>
+        )}
+      </section>
 
       {/* Giro */}
       {lead.customer ? (
