@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { buscarTudo } from "@/lib/supabase/paginar";
 import { formatarReais } from "@/lib/format";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -145,26 +146,25 @@ export default async function RelatoriosPage({
   const totalEnviadas30d = (enviadas ?? []).length;
 
   // Retenção da carteira (migração 0015; tolerante à ausência das views).
-  const [
-    { data: carteiraLinhas, error: carteiraErro },
-    { data: retencaoMeses },
-  ] = await Promise.all([
-    supabase
-      .from("v_carteira")
-      .select("status, receita_30d_centavos")
-      .order("customer_id")
-      .limit(2000),
-    supabase
-      .from("v_retencao_mensal")
-      .select("mes, churns, reativacoes, resgates")
-      .order("mes", { ascending: false })
-      .limit(6),
-  ]);
+  // Em lotes: o PostgREST corta em 1000 por resposta e os percentuais sairiam
+  // calculados sobre uma fatia da base.
+  const [{ dados: carteira, erro: carteiraErro }, { data: retencaoMeses }] =
+    await Promise.all([
+      buscarTudo<{ status: string; receita_30d_centavos: number | null }>(
+        (de, ate) =>
+          supabase
+            .from("v_carteira")
+            .select("status, receita_30d_centavos")
+            .order("customer_id")
+            .range(de, ate),
+      ),
+      supabase
+        .from("v_retencao_mensal")
+        .select("mes, churns, reativacoes, resgates")
+        .order("mes", { ascending: false })
+        .limit(6),
+    ]);
   const retencaoDisponivel = carteiraErro === null;
-  const carteira = (carteiraLinhas ?? []) as {
-    status: string;
-    receita_30d_centavos: number | null;
-  }[];
   const totalCarteira = carteira.length;
   const contagemStatus = (s: string) =>
     carteira.filter((c) => c.status === s).length;
