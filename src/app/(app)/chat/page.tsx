@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, Search, UserRound } from "lucide-react";
+import { AlarmClock, ArrowLeft, Search, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { formatarTelefone } from "@/lib/format";
@@ -27,7 +27,7 @@ import {
   type EtapaFunil,
   type PessoaEquipe,
 } from "./ferramentas";
-import { FiltroEtiqueta } from "./filtros";
+import { FiltrosLista } from "./filtros";
 import {
   PainelLead,
   type DetalheLead,
@@ -43,9 +43,12 @@ const FILTROS = [
   { chave: "todas", rotulo: "Todas" },
   { chave: "minhas", rotulo: "Minhas" },
   { chave: "naolidas", rotulo: "Não lidas" },
-  { chave: "semdono", rotulo: "Sem atendente" },
   { chave: "adiadas", rotulo: "Adiadas" },
 ] as const;
+
+// No controle segmentado ficam só os filtros do dia a dia; "adiadas" vive num
+// atalho próprio e "sem atendente"/vendedor viraram o select de atendente.
+const SEGMENTOS = ["todas", "minhas", "naolidas"] as const;
 
 type ChaveFiltro = (typeof FILTROS)[number]["chave"];
 
@@ -71,12 +74,14 @@ function urlChat(
   filtro: ChaveFiltro,
   busca: string,
   etiqueta: string,
+  atendente: string,
   leadId?: string,
 ) {
   const p = new URLSearchParams();
   if (filtro !== "todas") p.set("f", filtro);
   if (busca) p.set("q", busca);
   if (etiqueta) p.set("t", etiqueta);
+  if (atendente) p.set("v", atendente);
   if (leadId) p.set("lead", leadId);
   const q = p.toString();
   return q ? `/chat?${q}` : "/chat";
@@ -89,6 +94,8 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   ) as ChaveFiltro;
   const busca = typeof params.q === "string" ? params.q.trim() : "";
   const etiquetaFiltro = typeof params.t === "string" ? params.t : "";
+  // "sem" = sem atendente; qualquer outro valor é o id do vendedor.
+  const atendenteFiltro = typeof params.v === "string" ? params.v : "";
   const leadSelecionado = typeof params.lead === "string" ? params.lead : null;
   const limiteMensagens = Math.min(
     2000,
@@ -130,7 +137,8 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     }
 
     if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
-    if (filtro === "semdono") q = q.is("responsavel_id", null);
+    if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
+    else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
     if (etiquetaFiltro) q = q.eq("lead_tags.tag_id", etiquetaFiltro);
     if (busca) {
       const termo = busca.replace(/[,()]/g, " ").trim();
@@ -155,26 +163,47 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     conversas = conversas.filter(naoLida);
   }
 
-  // Etiquetas (filtro e ferramentas) e parâmetro do alerta de espera.
+  // Etiquetas (filtro e ferramentas), parâmetro do alerta de espera, equipe
+  // para o filtro de atendente e a contagem do atalho "Adiadas".
   // Sem a migração 0016 não existe coluna cor — a lista continua, sem cor.
-  const [{ data: tagsAtivas }, { data: alertaCfg }] = await Promise.all([
-    supabase
-      .from("tags")
-      .select("id, nome, cor")
-      .eq("ativo", true)
-      .order("nome")
-      .then((r) =>
-        r.error
-          ? supabase.from("tags").select("id, nome").eq("ativo", true).order("nome")
-          : r,
-      ),
-    supabase
-      .from("settings")
-      .select("valor")
-      .eq("chave", "minutos_alerta_espera")
-      .maybeSingle(),
-  ]);
+  const [{ data: tagsAtivas }, { data: alertaCfg }, { data: pessoasFiltro }, totalAdiadas] =
+    await Promise.all([
+      supabase
+        .from("tags")
+        .select("id, nome, cor")
+        .eq("ativo", true)
+        .order("nome")
+        .then((r) =>
+          r.error
+            ? supabase.from("tags").select("id, nome").eq("ativo", true).order("nome")
+            : r,
+        ),
+      supabase
+        .from("settings")
+        .select("valor")
+        .eq("chave", "minutos_alerta_espera")
+        .maybeSingle(),
+      supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome"),
+      (async () => {
+        // Sem a migração 0017 a coluna não existe — o atalho simplesmente some.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesma cadeia condicional da consulta principal
+        let q: any = supabase
+          .from("leads")
+          .select("id", { count: "exact", head: true })
+          .not("chat_adiado_em", "is", null);
+        q =
+          canal === "meta"
+            ? q.not("ultima_interacao_em", "is", null)
+            : q.not("chatwoot_conversation_id", "is", null);
+        if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
+        if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
+        else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
+        const { count, error } = await q;
+        return error ? 0 : (count ?? 0);
+      })(),
+    ]);
   const etiquetas = (tagsAtivas ?? []) as Etiqueta[];
+  const equipeAtendentes = (pessoasFiltro ?? []) as { id: string; nome: string }[];
   const minutosAlerta = Math.max(1, Number(alertaCfg?.valor ?? 15));
 
   // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
@@ -373,7 +402,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       .reverse();
 
     if (linhas.length === limiteMensagens) {
-      urlMaisAntigas = `${urlChat(filtro, busca, etiquetaFiltro, atual.id)}&m=${
+      urlMaisAntigas = `${urlChat(filtro, busca, etiquetaFiltro, atendenteFiltro, atual.id)}&m=${
         limiteMensagens + 300
       }`;
     }
@@ -476,6 +505,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             {etiquetaFiltro ? (
               <input type="hidden" name="t" value={etiquetaFiltro} />
             ) : null}
+            {atendenteFiltro ? (
+              <input type="hidden" name="v" value={atendenteFiltro} />
+            ) : null}
             <label htmlFor="busca-chat" className="sr-only">
               Buscar conversa
             </label>
@@ -495,17 +527,20 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             </button>
           </form>
 
+          {/* Controle segmentado: os três filtros do dia a dia, larguras iguais. */}
           <nav aria-label="Filtro de conversas" className="mt-1">
-            <ul className="flex flex-wrap gap-0.5">
-              {FILTROS.map((f) => {
+            <ul className="grid grid-cols-3 gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 p-0.5">
+              {FILTROS.filter((f) =>
+                (SEGMENTOS as readonly string[]).includes(f.chave),
+              ).map((f) => {
                 const ativo = f.chave === filtro;
                 return (
                   <li key={f.chave}>
                     <Link
-                      href={urlChat(f.chave, busca, etiquetaFiltro)}
+                      href={urlChat(f.chave, busca, etiquetaFiltro, atendenteFiltro)}
                       aria-current={ativo ? "page" : undefined}
                       className={cn(
-                        "inline-flex h-[32px] items-center rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                        "flex h-[32px] items-center justify-center rounded-sm text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
                         ativo
                           ? "bg-primary-50 font-medium text-primary-900"
                           : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
@@ -519,14 +554,38 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             </ul>
           </nav>
 
-          {etiquetas.length > 0 ? (
-            <div className="mt-1">
-              <FiltroEtiqueta
-                etiquetas={etiquetas}
-                filtro={filtro}
-                busca={busca}
-                etiquetaAtual={etiquetaFiltro}
-              />
+          <FiltrosLista
+            etiquetas={etiquetas}
+            equipe={equipeAtendentes}
+            filtro={filtro}
+            busca={busca}
+            etiquetaAtual={etiquetaFiltro}
+            atendenteAtual={atendenteFiltro}
+          />
+
+          {/* Adiadas: fora do fluxo do dia a dia — atalho só quando existir. */}
+          {filtro === "adiadas" || totalAdiadas > 0 ? (
+            <div className="mt-1 flex justify-end">
+              <Link
+                href={urlChat(
+                  filtro === "adiadas" ? "todas" : "adiadas",
+                  busca,
+                  etiquetaFiltro,
+                  atendenteFiltro,
+                )}
+                aria-current={filtro === "adiadas" ? "page" : undefined}
+                className={cn(
+                  "inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                  filtro === "adiadas"
+                    ? "bg-primary-50 font-medium text-primary-900"
+                    : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
+                )}
+              >
+                <AlarmClock size={14} strokeWidth={1.5} aria-hidden />
+                {filtro === "adiadas"
+                  ? "Voltar para a caixa"
+                  : `Adiadas (${totalAdiadas})`}
+              </Link>
             </div>
           ) : null}
         </div>
@@ -553,7 +612,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               return (
                 <li key={conversa.id}>
                   <Link
-                    href={urlChat(filtro, busca, etiquetaFiltro, conversa.id)}
+                    href={urlChat(filtro, busca, etiquetaFiltro, atendenteFiltro, conversa.id)}
                     aria-current={selecionada ? "true" : undefined}
                     className={cn(
                       "flex items-center gap-1 border-l-4 px-1.5 py-1 transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500",
@@ -647,7 +706,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
           <>
             <header className="flex items-center gap-1 border-b border-neutral-200 bg-neutral-0 px-1.5 py-1">
               <Link
-                href={urlChat(filtro, busca, etiquetaFiltro)}
+                href={urlChat(filtro, busca, etiquetaFiltro, atendenteFiltro)}
                 aria-label="Voltar para a lista"
                 className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 lg:hidden"
               >
