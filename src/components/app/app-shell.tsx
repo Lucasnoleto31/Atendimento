@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   BarChart3,
+  CalendarDays,
   Columns3,
   CreditCard,
   LogOut,
@@ -24,6 +25,7 @@ import { ContadorNaoLidas } from "./nao-lidas";
 export const MODULOS = [
   { href: "/atendimento", label: "Atendimento", icon: Columns3 },
   { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/agenda", label: "Agenda", icon: CalendarDays },
   { href: "/carteira", label: "Carteira", icon: Wallet },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/pagamentos", label: "Pagamentos", icon: CreditCard },
