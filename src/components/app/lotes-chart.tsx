@@ -9,7 +9,9 @@ const ALTURA = 200;
 const M = { topo: 8, direita: 8, base: 24, esquerda: 40 };
 
 /**
- * Lotes girados por dia — série única.
+ * Lotes por dia operado — série única. O eixo X lista só os dias em que o
+ * cliente girou: encher o calendário com zeros afundava a linha em todo fim
+ * de semana e escondia a variação do volume real.
  * Linha 2px em primary-500 (validada: contraste e croma ok sobre branco),
  * grade recessiva, crosshair com tooltip no hover e tabela de dados como
  * alternativa acessível.
@@ -79,10 +81,17 @@ export function LotesChart({
       month: "2-digit",
     });
 
+  const dataComDiaSemana = (iso: string) =>
+    new Date(`${iso}T12:00:00`).toLocaleDateString("pt-BR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+    });
+
   if (pontos.length === 0 || maximo === 0) {
     return (
       <p className="rounded-md border border-neutral-200 bg-neutral-50 px-2 py-2 text-sm text-neutral-600">
-        Nenhum lote registrado no período.
+        Nenhum dia operado no período.
       </p>
     );
   }
@@ -92,8 +101,10 @@ export function LotesChart({
   return (
     <figure>
       <figcaption id={tituloId} className="text-sm font-medium text-neutral-800">
-        Lotes girados por dia{" "}
-        <span className="font-normal text-neutral-600">— últimos {dias} dias</span>
+        Lotes por dia operado{" "}
+        <span className="font-normal text-neutral-600">
+          — {pontos.length} dia(s) com giro nos últimos {dias} dias
+        </span>
       </figcaption>
 
       <div className="relative mt-1">
@@ -125,7 +136,7 @@ export function LotesChart({
                 fill="var(--color-neutral-600)"
                 fontFamily="var(--font-mono)"
               >
-                {linha.valor}
+                {linha.valor.toLocaleString("pt-BR")}
               </text>
             </g>
           ))}
@@ -190,10 +201,10 @@ export function LotesChart({
             }}
           >
             <p className="font-mono text-xs whitespace-nowrap text-neutral-600 tabular-nums">
-              {dataCurta(pontoAtivo.data)}
+              {dataComDiaSemana(pontoAtivo.data)}
             </p>
             <p className="font-mono text-sm font-medium whitespace-nowrap text-neutral-900 tabular-nums">
-              {pontoAtivo.quantidade} lote(s)
+              {pontoAtivo.quantidade.toLocaleString("pt-BR")} lote(s)
             </p>
           </div>
         ) : null}
@@ -216,19 +227,16 @@ export function LotesChart({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
-              {[...pontos]
-                .reverse()
-                .filter((p) => p.quantidade > 0)
-                .map((p) => (
-                  <tr key={p.data}>
-                    <td className="px-1.5 py-0.5 font-mono text-xs text-neutral-600 tabular-nums">
-                      {dataCurta(p.data)}
-                    </td>
-                    <td className="px-1.5 py-0.5 text-right font-mono text-xs text-neutral-800 tabular-nums">
-                      {p.quantidade}
-                    </td>
-                  </tr>
-                ))}
+              {[...pontos].reverse().map((p) => (
+                <tr key={p.data}>
+                  <td className="px-1.5 py-0.5 font-mono text-xs text-neutral-600 tabular-nums">
+                    {dataComDiaSemana(p.data)}
+                  </td>
+                  <td className="px-1.5 py-0.5 text-right font-mono text-xs text-neutral-800 tabular-nums">
+                    {p.quantidade.toLocaleString("pt-BR")}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

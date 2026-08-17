@@ -151,7 +151,9 @@ export default async function LeadPage({
       conta: string | null;
     }[];
 
-    // Gráfico: soma de TODAS as contas por dia; dia sem registro conta zero.
+    // Gráfico: soma de TODAS as contas por dia, só nos DIAS OPERADOS. Encher
+    // o calendário com zeros afundava a linha em todo fim de semana, feriado
+    // e dia sem giro — o que interessa é o volume de cada dia em que operou.
     const porDia = new Map<string, number>();
     for (const l of linhas) {
       porDia.set(
@@ -159,12 +161,10 @@ export default async function LeadPage({
         (porDia.get(l.referencia_data) ?? 0) + Number(l.quantidade),
       );
     }
-    pontos = Array.from({ length: diasGrafico }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (diasGrafico - 1 - i));
-      const iso = d.toISOString().slice(0, 10);
-      return { data: iso, quantidade: porDia.get(iso) ?? 0 };
-    });
+    pontos = [...porDia.entries()]
+      .filter(([, quantidade]) => quantidade > 0)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([data, quantidade]) => ({ data, quantidade }));
 
     // Detalhe por conta: total no período do gráfico e nos últimos 30 dias.
     const mapaContas = new Map<string, { total30d: number; totalPeriodo: number }>();
