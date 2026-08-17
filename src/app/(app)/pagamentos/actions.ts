@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { garantirClienteDoLead } from "@/lib/clientes";
 
 /**
  * Registra a venda a partir da ficha do lead. A comissão é copiada do
@@ -17,6 +18,7 @@ export async function registrarVenda(formData: FormData) {
   const productId = String(formData.get("product_id") ?? "");
   const vendedorEscolhido = String(formData.get("vendedor_id") ?? "");
   const marcarGanho = formData.get("marcar_ganho") === "on";
+  const conta = String(formData.get("conta") ?? "");
   const observacao = String(formData.get("observacao") ?? "").trim();
 
   function falhar(aviso: string): never {
@@ -29,6 +31,13 @@ export async function registrarVenda(formData: FormData) {
   const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
   // Vendedor só lança venda no próprio nome (mesma regra do RLS).
   const vendedorId = ehGestor && vendedorEscolhido ? vendedorEscolhido : perfil.id;
+
+  // Ganho vira cliente na hora: cria/encontra o registro na base e grava a
+  // conta — é ela que liga os lotes das próximas importações a este cliente.
+  if (marcarGanho || conta.trim()) {
+    const cliente = await garantirClienteDoLead(leadId, conta);
+    if (cliente.erro) falhar(cliente.erro);
+  }
 
   const supabase = await createClient();
 

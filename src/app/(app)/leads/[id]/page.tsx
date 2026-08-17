@@ -7,6 +7,7 @@ import { perfilAtual } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { CAMPO } from "@/components/app/form-styles";
 import { registrarVenda } from "@/app/(app)/pagamentos/actions";
+import { virarCliente } from "./cliente-actions";
 import { formatarReais, formatarTelefone, tempoDesde } from "@/lib/format";
 import { LotesChart, type PontoLote } from "@/components/app/lotes-chart";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
@@ -196,7 +197,8 @@ export default async function LeadPage({
           role="status"
           className={cn(
             "mt-2 max-w-[68ch] rounded-md border px-1.5 py-1 text-sm",
-            aviso === "Venda registrada."
+            aviso === "Venda registrada." ||
+              aviso === "Lead vinculado à base de clientes."
               ? "border-success bg-success-bg text-success"
               : "border-warning bg-warning-bg text-warning",
           )}
@@ -323,6 +325,38 @@ export default async function LeadPage({
                 valor={lead.customer.ativo ? "Ativa" : "Inativa"}
               />
             </dl>
+          ) : lead.status === "ganho" ? (
+            <div className="mt-2">
+              <p className="text-sm text-neutral-600">
+                Lead ganho ainda sem registro na base. Crie o cliente agora —
+                informando a conta, os lotes das próximas importações já
+                vinculam sozinhos.
+              </p>
+              <form
+                action={virarCliente}
+                className="mt-2 flex flex-wrap items-end gap-1"
+              >
+                <input type="hidden" name="lead_id" value={lead.id} />
+                <div className="flex min-w-[160px] flex-1 flex-col gap-1">
+                  <label
+                    htmlFor="conta-cliente"
+                    className="text-sm font-medium text-neutral-800"
+                  >
+                    Conta na corretora
+                  </label>
+                  <input
+                    id="conta-cliente"
+                    name="conta"
+                    inputMode="numeric"
+                    placeholder="opcional — só números"
+                    className={CAMPO}
+                  />
+                </div>
+                <Button type="submit" variant="secondary" size="md">
+                  Virar cliente
+                </Button>
+              </form>
+            </div>
           ) : (
             <p className="mt-2 text-sm text-neutral-600">
               O telefone deste lead não está na base de clientes. Quando a base
@@ -441,6 +475,24 @@ export default async function LeadPage({
                     </option>
                   ))}
                 </select>
+              </div>
+            ) : null}
+
+            {lead.customer_id === null ? (
+              <div className="flex min-w-[160px] flex-col gap-1">
+                <label
+                  htmlFor="conta"
+                  className="text-sm font-medium text-neutral-800"
+                >
+                  Conta na corretora
+                </label>
+                <input
+                  id="conta"
+                  name="conta"
+                  inputMode="numeric"
+                  placeholder="opcional — só números"
+                  className={CAMPO}
+                />
               </div>
             ) : null}
 
