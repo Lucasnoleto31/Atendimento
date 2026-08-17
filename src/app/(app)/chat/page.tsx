@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlarmClock, ArrowLeft, Search, UserRound } from "lucide-react";
+import { AlarmClock, ArrowLeft, CheckCheck, Search, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { formatarTelefone } from "@/lib/format";
@@ -44,6 +44,7 @@ const FILTROS = [
   { chave: "minhas", rotulo: "Minhas" },
   { chave: "naolidas", rotulo: "Não lidas" },
   { chave: "adiadas", rotulo: "Adiadas" },
+  { chave: "resolvidas", rotulo: "Resolvidas" },
 ] as const;
 
 // No controle segmentado ficam só os filtros do dia a dia; "adiadas" vive num
@@ -63,12 +64,13 @@ type ConversaLinha = {
   chat_lido_em: string | null;
   chatwoot_conversation_id: number | null;
   chat_adiado_em?: string | null;
+  chat_resolvido_em?: string | null;
 };
 
 const CAMPOS_BASE =
   "id, nome, telefone_e164, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em, chatwoot_conversation_id";
 // Sem a migração 0017 a coluna não existe: a consulta cai para os campos base.
-const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em`;
+const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em, chat_resolvido_em`;
 
 function urlChat(
   filtro: ChaveFiltro,
@@ -130,10 +132,14 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         : q.not("chatwoot_conversation_id", "is", null);
 
     if (comAdiado) {
-      q =
-        filtro === "adiadas"
-          ? q.not("chat_adiado_em", "is", null)
-          : q.is("chat_adiado_em", null);
+      // A caixa de entrada mostra só o que falta atender: adiadas e
+      // resolvidas saem daqui e vivem nos atalhos próprios.
+      if (filtro === "adiadas") q = q.not("chat_adiado_em", "is", null);
+      else if (filtro === "resolvidas") {
+        q = q.not("chat_resolvido_em", "is", null);
+      } else {
+        q = q.is("chat_adiado_em", null).is("chat_resolvido_em", null);
+      }
     }
 
     if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
@@ -166,8 +172,32 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   // Etiquetas (filtro e ferramentas), parâmetro do alerta de espera, equipe
   // para o filtro de atendente e a contagem do atalho "Adiadas".
   // Sem a migração 0016 não existe coluna cor — a lista continua, sem cor.
-  const [{ data: tagsAtivas }, { data: alertaCfg }, { data: pessoasFiltro }, totalAdiadas] =
-    await Promise.all([
+  // Contagem dos atalhos fora da caixa (adiadas, resolvidas). Sem as
+  // migrações 0017/0018 a coluna não existe e o atalho simplesmente some.
+  const contarFora = async (coluna: string): Promise<number> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
+    let q: any = supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .not(coluna, "is", null);
+    q =
+      canal === "meta"
+        ? q.not("ultima_interacao_em", "is", null)
+        : q.not("chatwoot_conversation_id", "is", null);
+    if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
+    if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
+    else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
+    const { count, error } = await q;
+    return error ? 0 : (count ?? 0);
+  };
+
+  const [
+    { data: tagsAtivas },
+    { data: alertaCfg },
+    { data: pessoasFiltro },
+    totalAdiadas,
+    totalResolvidas,
+  ] = await Promise.all([
       supabase
         .from("tags")
         .select("id, nome, cor")
@@ -184,23 +214,8 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         .eq("chave", "minutos_alerta_espera")
         .maybeSingle(),
       supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome"),
-      (async () => {
-        // Sem a migração 0017 a coluna não existe — o atalho simplesmente some.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mesma cadeia condicional da consulta principal
-        let q: any = supabase
-          .from("leads")
-          .select("id", { count: "exact", head: true })
-          .not("chat_adiado_em", "is", null);
-        q =
-          canal === "meta"
-            ? q.not("ultima_interacao_em", "is", null)
-            : q.not("chatwoot_conversation_id", "is", null);
-        if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
-        if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
-        else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
-        const { count, error } = await q;
-        return error ? 0 : (count ?? 0);
-      })(),
+      contarFora("chat_adiado_em"),
+      contarFora("chat_resolvido_em"),
     ]);
   const etiquetas = (tagsAtivas ?? []) as Etiqueta[];
   const equipeAtendentes = (pessoasFiltro ?? []) as { id: string; nome: string }[];
@@ -563,7 +578,32 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             atendenteAtual={atendenteFiltro}
           />
 
-          {/* Adiadas: fora do fluxo do dia a dia — atalho só quando existir. */}
+          {/* Fora do fluxo do dia a dia — atalhos só quando existirem. */}
+          {filtro === "resolvidas" || totalResolvidas > 0 ? (
+            <div className="mt-1 flex justify-end">
+              <Link
+                href={urlChat(
+                  filtro === "resolvidas" ? "todas" : "resolvidas",
+                  busca,
+                  etiquetaFiltro,
+                  atendenteFiltro,
+                )}
+                aria-current={filtro === "resolvidas" ? "page" : undefined}
+                className={cn(
+                  "inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                  filtro === "resolvidas"
+                    ? "bg-success-bg font-medium text-success"
+                    : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
+                )}
+              >
+                <CheckCheck size={14} strokeWidth={1.5} aria-hidden />
+                {filtro === "resolvidas"
+                  ? "Voltar para a caixa"
+                  : `Resolvidas (${totalResolvidas})`}
+              </Link>
+            </div>
+          ) : null}
+
           {filtro === "adiadas" || totalAdiadas > 0 ? (
             <div className="mt-1 flex justify-end">
               <Link
@@ -752,6 +792,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               etapas={etapas}
               etapaId={atual.stage_id}
               adiada={atual.chat_adiado_em != null}
+              resolvida={atual.chat_resolvido_em != null}
             />
 
             <Janela

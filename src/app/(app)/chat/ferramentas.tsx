@@ -52,6 +52,7 @@ export function FerramentasConversa({
   etapas,
   etapaId,
   adiada,
+  resolvida,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -63,6 +64,7 @@ export function FerramentasConversa({
   etapas: EtapaFunil[];
   etapaId: string | null;
   adiada: boolean;
+  resolvida: boolean;
 }) {
   const [pendente, iniciar] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
@@ -124,7 +126,7 @@ export function FerramentasConversa({
   const marcadas = new Set(etiquetasLead);
   const chips = etiquetas.filter((e) => marcadas.has(e.id));
   const status = statusConversa ? ROTULO_STATUS[statusConversa] : null;
-  const resolvida = statusConversa === "resolved";
+  const estaResolvida = resolvida || statusConversa === "resolved";
 
   return (
     <div className="border-b border-neutral-200 bg-neutral-0 px-1.5 py-1">
@@ -360,22 +362,27 @@ export function FerramentasConversa({
             <button
               type="button"
               disabled={pendente}
-              onClick={() =>
-                executar(() =>
-                  alterarStatusConversaChat(
+              onClick={() => {
+                setErro(null);
+                iniciar(async () => {
+                  const resultado = await alterarStatusConversaChat(
                     leadId,
-                    resolvida ? "open" : "resolved",
-                  ),
-                )
-              }
+                    estaResolvida ? "open" : "resolved",
+                  );
+                  if (resultado.erro) setErro(resultado.erro);
+                  // Resolvida sai da caixa: volta para a lista, no próximo
+                  // atendimento. Reabrir mantém a conversa na tela.
+                  else if (!estaResolvida) router.push("/chat");
+                });
+              }}
               className="inline-flex h-[32px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
             >
-              {resolvida ? (
+              {estaResolvida ? (
                 <RotateCcw size={14} strokeWidth={1.5} aria-hidden />
               ) : (
                 <Check size={14} strokeWidth={1.5} aria-hidden />
               )}
-              {resolvida ? "Reabrir" : "Resolver"}
+              {estaResolvida ? "Reabrir" : "Resolver"}
             </button>
           ) : null}
         </span>

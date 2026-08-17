@@ -257,12 +257,15 @@ async function processar(
   // Update separado e ignorável — sem a migração 0017 a coluna não existe
   // e a mensagem precisa entrar do mesmo jeito.
   if (tipo === "recebida") {
-    const { error: erroAdiar } = await service
+    const { error: erroFila } = await service
       .from("leads")
-      .update({ chat_adiado_em: null })
+      .update({ chat_adiado_em: null, chat_resolvido_em: null })
       .eq("id", leadId);
-    if (erroAdiar) {
-      // segue sem desadiar
+    if (erroFila) {
+      await service
+        .from("leads")
+        .update({ chat_adiado_em: null })
+        .eq("id", leadId);
     }
   }
 

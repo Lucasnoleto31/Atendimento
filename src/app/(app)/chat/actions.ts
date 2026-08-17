@@ -520,6 +520,26 @@ export async function alterarStatusConversaChat(
   }
 
   const supabase = await createClient();
+  const agora = new Date().toISOString();
+
+  // Resolvida sai da caixa de entrada; reabrir devolve. Guardado local porque
+  // a Meta não tem status de conversa — e é o que a lista consulta.
+  const { error: erroMarca } = await supabase
+    .from("leads")
+    .update(
+      status === "resolved"
+        ? { chat_resolvido_em: agora, chat_lido_em: agora }
+        : { chat_resolvido_em: null },
+    )
+    .eq("id", leadId);
+  if (erroMarca) {
+    return {
+      erro: erroMarca.message.includes("chat_resolvido_em")
+        ? "Resolver depende da migração 0018 — rode supabase/migrations/0018_resolver_conversa.sql no SQL Editor."
+        : erroMarca.message,
+    };
+  }
+
   await supabase.from("lead_interactions").insert({
     lead_id: leadId,
     tipo: "nota",
@@ -581,7 +601,10 @@ export async function contarNaoLidas(): Promise<Pendencias> {
       .order("ultima_interacao_em", { ascending: false })
       .limit(500);
     if (!ehMeta) q = q.not("chatwoot_conversation_id", "is", null);
-    if (ignorandoAdiadas) q = q.is("chat_adiado_em", null);
+    // Adiadas e resolvidas saem da conta: o badge tem que zerar.
+    if (ignorandoAdiadas) {
+      q = q.is("chat_adiado_em", null).is("chat_resolvido_em", null);
+    }
 
     const { data, error } = await q;
     return {

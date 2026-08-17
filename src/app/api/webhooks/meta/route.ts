@@ -329,15 +329,18 @@ async function processarMensagem(
     }
   }
 
-  // Lead respondeu: a conversa adiada volta para a caixa de entrada.
-  // Update separado e ignorável — sem a migração 0017 a coluna não existe
-  // e a mensagem precisa entrar do mesmo jeito.
-  const { error: erroAdiar } = await service
+  // Lead respondeu: conversa adiada OU resolvida volta para a caixa de
+  // entrada. Update separado e ignorável — sem as migrações 0017/0018 as
+  // colunas não existem e a mensagem precisa entrar do mesmo jeito.
+  const { error: erroFila } = await service
     .from("leads")
-    .update({ chat_adiado_em: null })
+    .update({ chat_adiado_em: null, chat_resolvido_em: null })
     .eq("id", leadId);
-  if (erroAdiar) {
-    // segue sem desadiar
+  if (erroFila) {
+    await service
+      .from("leads")
+      .update({ chat_adiado_em: null })
+      .eq("id", leadId);
   }
 
   await service.from("lead_interactions").insert({
