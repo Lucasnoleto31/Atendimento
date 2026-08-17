@@ -439,9 +439,12 @@ export default async function CarteiraPage({
                           className="h-[48px] hover:bg-neutral-50"
                         >
                           <td className="px-2">
-                            <span className="block max-w-[260px] truncate text-sm font-medium text-neutral-800">
+                            <Link
+                              href={`/carteira/${linha.customer_id}`}
+                              className="block max-w-[260px] truncate rounded-sm text-sm font-medium text-neutral-800 underline-offset-2 hover:text-primary-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                            >
                               {linha.nome_completo}
-                            </span>
+                            </Link>
                             <span className="block font-mono text-xs text-neutral-600 tabular-nums">
                               {linha.telefone_e164
                                 ? formatarTelefone(linha.telefone_e164)

@@ -90,3 +90,96 @@ export async function abrirConversaCliente(
   revalidatePath("/chat");
   return { leadId: novo.id };
 }
+
+// ===========================================================================
+// Ficha do cliente
+// ===========================================================================
+
+import { redirect } from "next/navigation";
+import { createServiceClient } from "@/lib/supabase/server";
+import { normalizarTelefone } from "@/lib/csv";
+
+/**
+ * Edição da ficha do cliente — o único lugar onde dá para gravar o telefone
+ * de quem veio pela importação da corretora e nunca teve lead. Salvar o
+ * telefone dispara o gatilho da 0020, que adota o lead daquele número.
+ */
+export async function salvarFichaCliente(formData: FormData) {
+  const perfil = await perfilAtual();
+  if (!perfil) redirect("/entrar");
+
+  const customerId = String(formData.get("customer_id") ?? "");
+  if (!customerId) redirect("/carteira");
+
+  function terminar(aviso: string): never {
+    revalidatePath(`/carteira/${customerId}`);
+    revalidatePath("/carteira");
+    redirect(`/carteira/${customerId}?aviso=${encodeURIComponent(aviso)}`);
+  }
+
+  if (perfil.papel !== "admin" && perfil.papel !== "gestor") {
+    terminar("Só gestor ou admin edita a ficha do cliente.");
+  }
+
+  const nome = String(formData.get("nome_completo") ?? "").trim();
+  if (!nome) terminar("O nome não pode ficar vazio.");
+
+  const telefoneBruto = String(formData.get("telefone") ?? "").trim();
+  let telefone: string | null = null;
+  if (telefoneBruto) {
+    telefone = normalizarTelefone(telefoneBruto);
+    if (!telefone) {
+      terminar(
+        "Telefone inválido. Use DDD + número, por exemplo 62 98181-0004.",
+      );
+    }
+  }
+
+  const documento = String(formData.get("documento") ?? "").replace(/\D/g, "");
+  if (documento && documento.length !== 11 && documento.length !== 14) {
+    terminar("CPF/CNPJ inválido — 11 dígitos (CPF) ou 14 (CNPJ).");
+  }
+
+  const email = String(formData.get("email") ?? "").trim();
+  const abertura = String(formData.get("conta_aberta_em") ?? "").trim();
+  const responsavel = String(formData.get("responsavel_id") ?? "");
+  const ativo = String(formData.get("situacao") ?? "ativa") === "ativa";
+
+  const service = createServiceClient();
+
+  // Telefone é único entre clientes: avisa em vez de estourar erro do banco.
+  if (telefone) {
+    const { data: conflito } = await service
+      .from("customers")
+      .select("id, nome_completo")
+      .eq("telefone_e164", telefone)
+      .neq("id", customerId)
+      .maybeSingle();
+    if (conflito) {
+      terminar(
+        `Este telefone já está no cadastro de ${conflito.nome_completo}. Verifique se não é a mesma pessoa duplicada.`,
+      );
+    }
+  }
+
+  const { error } = await service
+    .from("customers")
+    .update({
+      nome_completo: nome,
+      telefone_e164: telefone,
+      documento: documento || null,
+      email: email || null,
+      conta_aberta_em: abertura || null,
+      responsavel_id: responsavel || null,
+      ativo,
+    })
+    .eq("id", customerId);
+
+  if (error) terminar(`Não deu para salvar: ${error.message}`);
+
+  terminar(
+    telefone
+      ? "Ficha salva. Com o telefone no cadastro, dá para abrir a conversa."
+      : "Ficha salva.",
+  );
+}
