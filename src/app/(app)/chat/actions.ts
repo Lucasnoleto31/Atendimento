@@ -567,14 +567,33 @@ export async function contarNaoLidas(): Promise<Pendencias> {
   if (!perfil) return { naoLidas: 0, tarefasVencidas: 0 };
 
   const supabase = await createClient();
-  const [{ data }, { count: vencidas }] = await Promise.all([
-    supabase
+  const ehMeta = canalAtivo() === "meta";
+
+  // Conversa existente: telefone com histórico (Meta) ou vínculo (Chatwoot).
+  // Adiadas não contam — voltam sozinhas quando o lead responder; sem a
+  // migração 0017 a coluna não existe e a contagem segue sem esse filtro.
+  async function buscarFila(ignorandoAdiadas: boolean) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
+    let q: any = supabase
       .from("leads")
       .select("ultima_interacao_em, chat_lido_em")
-      .not("chatwoot_conversation_id", "is", null)
       .not("ultima_interacao_em", "is", null)
       .order("ultima_interacao_em", { ascending: false })
-      .limit(500),
+      .limit(500);
+    if (!ehMeta) q = q.not("chatwoot_conversation_id", "is", null);
+    if (ignorandoAdiadas) q = q.is("chat_adiado_em", null);
+
+    const { data, error } = await q;
+    return {
+      data: data as
+        | { ultima_interacao_em: string; chat_lido_em: string | null }[]
+        | null,
+      error,
+    };
+  }
+
+  const [fila, { count: vencidas }] = await Promise.all([
+    buscarFila(true).then((r) => (r.error ? buscarFila(false) : r)),
     // Tolerante: sem a migração 0013 a tabela não existe e o count vem null.
     supabase
       .from("lead_tasks")
@@ -583,13 +602,9 @@ export async function contarNaoLidas(): Promise<Pendencias> {
       .lt("vence_em", new Date().toISOString()),
   ]);
 
-  const naoLidas = (
-    (data ?? []) as {
-      ultima_interacao_em: string;
-      chat_lido_em: string | null;
-    }[]
-  ).filter((l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em)
-    .length;
+  const naoLidas = (fila.data ?? []).filter(
+    (l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em,
+  ).length;
 
   return { naoLidas, tarefasVencidas: vencidas ?? 0 };
 }
@@ -727,6 +742,60 @@ export async function marcarChatLido(leadId: string) {
     .from("leads")
     .update({ chat_lido_em: new Date().toISOString() })
     .eq("id", leadId);
+}
+
+/**
+ * Adia a conversa: sai da caixa de entrada até o lead responder (o webhook
+ * de mensagem recebida limpa a marca), ou até alguém trazer de volta à mão.
+ */
+export async function adiarConversa(leadId: string): Promise<ResultadoEnvio> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!leadId) return { erro: "Lead não informado." };
+
+  const supabase = await createClient();
+  const agora = new Date().toISOString();
+  const { error } = await supabase
+    .from("leads")
+    .update({ chat_adiado_em: agora, chat_lido_em: agora })
+    .eq("id", leadId);
+  if (error) {
+    return {
+      erro: error.message.includes("chat_adiado_em")
+        ? "Adiar depende da migração 0017 — rode supabase/migrations/0017_adiar_conversa.sql no SQL Editor."
+        : error.message,
+    };
+  }
+
+  await supabase.from("lead_interactions").insert({
+    lead_id: leadId,
+    tipo: "nota",
+    conteudo: "Conversa adiada até a próxima resposta do lead",
+    autor_id: perfil.id,
+    metadados: { via: "crm" },
+  });
+
+  revalidatePath("/chat");
+  return { ok: true };
+}
+
+/** Traz a conversa adiada de volta à caixa de entrada, sem esperar resposta. */
+export async function reativarConversa(
+  leadId: string,
+): Promise<ResultadoEnvio> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!leadId) return { erro: "Lead não informado." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("leads")
+    .update({ chat_adiado_em: null })
+    .eq("id", leadId);
+  if (error) return { erro: error.message };
+
+  revalidatePath("/chat");
+  return { ok: true };
 }
 
 /** Devolve a conversa para a fila de não lidas. */

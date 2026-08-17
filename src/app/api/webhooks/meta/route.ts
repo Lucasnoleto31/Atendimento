@@ -285,6 +285,17 @@ async function processarMensagem(
     }
   }
 
+  // Lead respondeu: a conversa adiada volta para a caixa de entrada.
+  // Update separado e ignorável — sem a migração 0017 a coluna não existe
+  // e a mensagem precisa entrar do mesmo jeito.
+  const { error: erroAdiar } = await service
+    .from("leads")
+    .update({ chat_adiado_em: null })
+    .eq("id", leadId);
+  if (erroAdiar) {
+    // segue sem desadiar
+  }
+
   await service.from("lead_interactions").insert({
     lead_id: leadId,
     tipo: "mensagem_recebida",

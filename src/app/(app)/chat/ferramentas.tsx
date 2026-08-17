@@ -2,16 +2,27 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Mail, RotateCcw, Tag, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Clock,
+  Inbox,
+  Mail,
+  RotateCcw,
+  Tag,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { estiloEtiqueta } from "@/lib/etiquetas";
 import type { StatusConversa } from "@/lib/chatwoot";
 import {
+  adiarConversa,
   alterarEtapaChat,
   alterarStatusConversaChat,
   alternarEtiquetaChat,
   definirResponsavelChat,
   marcarChatNaoLido,
+  reativarConversa,
 } from "./actions";
 
 export type PessoaEquipe = { id: string; nome: string };
@@ -40,6 +51,7 @@ export function FerramentasConversa({
   etiquetasLead,
   etapas,
   etapaId,
+  adiada,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -50,6 +62,7 @@ export function FerramentasConversa({
   etiquetasLead: string[];
   etapas: EtapaFunil[];
   etapaId: string | null;
+  adiada: boolean;
 }) {
   const [pendente, iniciar] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
@@ -66,6 +79,24 @@ export function FerramentasConversa({
       const resultado = await marcarChatNaoLido(leadId);
       if (resultado.erro) setErro(resultado.erro);
       else router.push("/chat");
+    });
+  };
+
+  // Adiar tira da caixa de entrada; sai da conversa para a lista seguinte.
+  const adiar = () => {
+    setErro(null);
+    iniciar(async () => {
+      const resultado = await adiarConversa(leadId);
+      if (resultado.erro) setErro(resultado.erro);
+      else router.push("/chat");
+    });
+  };
+
+  const reativar = () => {
+    setErro(null);
+    iniciar(async () => {
+      const resultado = await reativarConversa(leadId);
+      if (resultado.erro) setErro(resultado.erro);
     });
   };
 
@@ -299,6 +330,30 @@ export function FerramentasConversa({
             <Mail size={14} strokeWidth={1.5} aria-hidden />
             Não lida
           </button>
+
+          {adiada ? (
+            <button
+              type="button"
+              disabled={pendente}
+              onClick={reativar}
+              title="Trazer de volta para a caixa de entrada agora"
+              className="inline-flex h-[32px] items-center gap-0.5 rounded-md bg-accent-100 px-1.5 text-sm font-medium text-accent-700 transition-colors duration-[120ms] hover:bg-accent-100/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
+            >
+              <Inbox size={14} strokeWidth={1.5} aria-hidden />
+              Adiada · trazer de volta
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={pendente}
+              onClick={adiar}
+              title="Some da caixa de entrada e volta quando o lead responder"
+              className="inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+            >
+              <Clock size={14} strokeWidth={1.5} aria-hidden />
+              Adiar
+            </button>
+          )}
           {temConversa ? (
             <button
               type="button"

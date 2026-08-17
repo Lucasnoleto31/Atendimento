@@ -44,6 +44,7 @@ const FILTROS = [
   { chave: "minhas", rotulo: "Minhas" },
   { chave: "naolidas", rotulo: "Não lidas" },
   { chave: "semdono", rotulo: "Sem atendente" },
+  { chave: "adiadas", rotulo: "Adiadas" },
 ] as const;
 
 type ChaveFiltro = (typeof FILTROS)[number]["chave"];
@@ -58,10 +59,13 @@ type ConversaLinha = {
   ultima_interacao_em: string | null;
   chat_lido_em: string | null;
   chatwoot_conversation_id: number | null;
+  chat_adiado_em?: string | null;
 };
 
-const CAMPOS_CONVERSA =
+const CAMPOS_BASE =
   "id, nome, telefone_e164, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em, chatwoot_conversation_id";
+// Sem a migração 0017 a coluna não existe: a consulta cai para os campos base.
+const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em`;
 
 function urlChat(
   filtro: ChaveFiltro,
@@ -100,36 +104,47 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   processarCadencia().catch(() => {});
   processarAgendadas().catch(() => {});
 
-  let consulta = supabase
-    .from("leads")
-    .select(
-      etiquetaFiltro
-        ? `${CAMPOS_CONVERSA}, lead_tags!inner(tag_id)`
-        : CAMPOS_CONVERSA,
-    )
-    .not("chatwoot_conversation_id", "is", null)
-    .order("ultima_interacao_em", { ascending: false, nullsFirst: false })
-    .limit(100);
+  // A lista da caixa de entrada. `comAdiado` desliga tudo que depende da
+  // coluna chat_adiado_em, para a tela seguir de pé sem a migração 0017.
+  function montarConsulta(comAdiado: boolean) {
+    const campos = comAdiado ? CAMPOS_CONVERSA : CAMPOS_BASE;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder na cadeia condicional
+    let q: any = supabase
+      .from("leads")
+      .select(etiquetaFiltro ? `${campos}, lead_tags!inner(tag_id)` : campos)
+      .order("ultima_interacao_em", { ascending: false, nullsFirst: false })
+      .limit(100);
 
-  if (filtro === "minhas" && perfil) {
-    consulta = consulta.eq("responsavel_id", perfil.id);
-  }
-  if (filtro === "semdono") {
-    consulta = consulta.is("responsavel_id", null);
-  }
-  if (etiquetaFiltro) {
-    consulta = consulta.eq("lead_tags.tag_id", etiquetaFiltro);
-  }
-  if (busca) {
-    const termo = busca.replace(/[,()]/g, " ").trim();
-    const digitos = termo.replace(/\D/g, "");
-    consulta =
-      digitos.length >= 4
-        ? consulta.or(`nome.ilike.%${termo}%,telefone_e164.ilike.%${digitos}%`)
-        : consulta.ilike("nome", `%${termo}%`);
+    // Na Meta a conversa é o próprio telefone (basta ter havido mensagem);
+    // no Chatwoot, o vínculo com a conversa de lá.
+    q =
+      canal === "meta"
+        ? q.not("ultima_interacao_em", "is", null)
+        : q.not("chatwoot_conversation_id", "is", null);
+
+    if (comAdiado) {
+      q =
+        filtro === "adiadas"
+          ? q.not("chat_adiado_em", "is", null)
+          : q.is("chat_adiado_em", null);
+    }
+
+    if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
+    if (filtro === "semdono") q = q.is("responsavel_id", null);
+    if (etiquetaFiltro) q = q.eq("lead_tags.tag_id", etiquetaFiltro);
+    if (busca) {
+      const termo = busca.replace(/[,()]/g, " ").trim();
+      const digitos = termo.replace(/\D/g, "");
+      q =
+        digitos.length >= 4
+          ? q.or(`nome.ilike.%${termo}%,telefone_e164.ilike.%${digitos}%`)
+          : q.ilike("nome", `%${termo}%`);
+    }
+    return q;
   }
 
-  const { data: brutas } = await consulta;
+  let { data: brutas } = await montarConsulta(true);
+  if (brutas === null) ({ data: brutas } = await montarConsulta(false));
   let conversas = (brutas ?? []) as unknown as ConversaLinha[];
 
   const naoLida = (c: ConversaLinha) =>
@@ -224,6 +239,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   }
 
   // Conversa aberta: mensagens + dados do lead; abrir marca como lida.
+  // Conversa aberta: pode estar fora da lista (adiada, outro filtro, busca).
   const atual = leadSelecionado
     ? (conversas.find((c) => c.id === leadSelecionado) ??
       ((
@@ -232,6 +248,15 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
           .select(CAMPOS_CONVERSA)
           .eq("id", leadSelecionado)
           .maybeSingle()
+          .then((r) =>
+            r.error
+              ? supabase
+                  .from("leads")
+                  .select(CAMPOS_BASE)
+                  .eq("id", leadSelecionado)
+                  .maybeSingle()
+              : r,
+          )
       ).data as ConversaLinha | null))
     : null;
 
@@ -667,6 +692,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               etiquetasLead={etiquetasLead}
               etapas={etapas}
               etapaId={atual.stage_id}
+              adiada={atual.chat_adiado_em != null}
             />
 
             <Janela
