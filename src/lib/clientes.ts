@@ -47,7 +47,26 @@ export async function garantirClienteDoLead(
     .maybeSingle();
   if (!lead) return { erro: "Lead não encontrado." };
 
+  // CPF/CNPJ dito no chat (0018) — consulta separada, tolerante à coluna ausente.
+  const { data: docLinha } = await service
+    .from("leads")
+    .select("documento")
+    .eq("id", leadId)
+    .maybeSingle();
+  const documentoLead = (docLinha?.documento as string | null | undefined) ?? null;
+
   let customerId = lead.customer_id as string | null;
+
+  // Documento é a identidade mais forte: se a base já tem o CPF, é ele que manda.
+  if (!customerId && documentoLead) {
+    const { data } = await service
+      .from("customers")
+      .select("id")
+      .eq("documento", documentoLead)
+      .limit(1)
+      .maybeSingle();
+    customerId = (data?.id as string | undefined) ?? null;
+  }
 
   // Conta já cadastrada aponta o dono (lotes importados antes da base).
   if (!customerId && contas.length > 0) {
@@ -76,6 +95,7 @@ export async function garantirClienteDoLead(
       .insert({
         nome_completo: lead.nome,
         telefone_e164: lead.telefone_e164,
+        documento: documentoLead,
         ativo: true,
       })
       .select("id")

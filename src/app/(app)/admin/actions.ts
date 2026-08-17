@@ -432,6 +432,9 @@ export async function importarClientes(
 
     // Leads criados sem telefone herdam o telefone que a base trouxe agora.
     const { data: preenchidos } = await service.rpc("atualizar_telefones_leads");
+    // Leads que ditaram o CPF no chat casam com a base agora (0018 — sem a
+    // migração a função não existe e o erro volta no retorno, ignorado).
+    await service.rpc("atualizar_documentos_leads");
 
     await fecharRegistro(service, registroId, {
       status: "concluida",

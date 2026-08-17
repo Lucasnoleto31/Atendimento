@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { escolherVendedor } from "@/lib/distribuicao";
 import { hospedarMidiaMeta } from "@/lib/whatsapp";
+import { extrairDocumento } from "@/lib/documento";
 
 /**
  * Webhook do WhatsApp Cloud API (Meta).
@@ -350,4 +351,14 @@ async function processarMensagem(
       ...(anexos.length > 0 ? { anexos } : {}),
     },
   });
+
+  // CPF/CNPJ dito na conversa: grava no lead — o gatilho do banco vincula à
+  // base de clientes na hora, ou a próxima importação vincula (0018). Sem a
+  // migração a coluna não existe e o update só devolve erro, sem derrubar.
+  if (mensagem.type === "text") {
+    const documento = extrairDocumento(texto, telefone);
+    if (documento) {
+      await service.from("leads").update({ documento }).eq("id", leadId);
+    }
+  }
 }
