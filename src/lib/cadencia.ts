@@ -213,7 +213,8 @@ async function alvosLeadNovo(
 ): Promise<Alvo[]> {
   const corte = new Date(Date.now() - regra.dias * 86_400_000).toISOString();
 
-  const { data } = await service
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
+  const q: any = service
     .from("leads")
     .select(
       "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
@@ -224,6 +225,11 @@ async function alvosLeadNovo(
     .lte("criado_em", corte)
     .order("criado_em", { ascending: true })
     .limit(VARREDURA_MAXIMA);
+
+  // Quem desligou marketing no WhatsApp não recebe template — insistir só
+  // gera falha. Sem a migração 0019 a coluna não existe e o filtro cai fora.
+  const comFiltro = await q.is("marketing_bloqueado_em", null);
+  const { data } = comFiltro.error ? await q : comFiltro;
 
   return ((data ?? []) as {
     id: string;
@@ -333,24 +339,37 @@ async function alvosCliente(
   if (linhas.length === 0) return [];
 
   // Ids do Chatwoot para o canal de reserva + status do lead (perdido sai).
-  const { data: leadsInfo } = await service
+  type InfoLead = {
+    id: string;
+    status: string;
+    marketing_bloqueado_em?: string | null;
+    chatwoot_contact_id: number | null;
+    chatwoot_conversation_id: number | null;
+  };
+
+  const ids = linhas.map((l) => l.lead_id);
+  // Sem a migração 0019 a coluna não existe: repete a consulta sem ela.
+  const comColuna = await service
     .from("leads")
-    .select("id, status, chatwoot_contact_id, chatwoot_conversation_id")
-    .in(
-      "id",
-      linhas.map((l) => l.lead_id),
-    );
-  const porLead = new Map(
-    ((leadsInfo ?? []) as {
-      id: string;
-      status: string;
-      chatwoot_contact_id: number | null;
-      chatwoot_conversation_id: number | null;
-    }[]).map((l) => [l.id, l]),
-  );
+    .select(
+      "id, status, marketing_bloqueado_em, chatwoot_contact_id, chatwoot_conversation_id",
+    )
+    .in("id", ids);
+  const semColuna = comColuna.error
+    ? await service
+        .from("leads")
+        .select("id, status, chatwoot_contact_id, chatwoot_conversation_id")
+        .in("id", ids)
+    : null;
+  const leadsInfo = ((semColuna?.data ?? comColuna.data ?? []) as unknown) as InfoLead[];
+  const porLead = new Map(leadsInfo.map((l) => [l.id, l]));
 
   return linhas
-    .filter((l) => porLead.get(l.lead_id)?.status !== "perdido")
+    .filter((l) => {
+      const info = porLead.get(l.lead_id);
+      // Lead perdido ou que recusou marketing sai da cadência.
+      return info?.status !== "perdido" && !info?.marketing_bloqueado_em;
+    })
     .map((l) => ({
       leadId: l.lead_id,
       nome: l.nome_completo,

@@ -172,6 +172,15 @@ export async function dispararTemplateLista(
 
   const service = createServiceClient();
 
+  // Quem desligou marketing no WhatsApp não recebe template dessa categoria:
+  // insistir só gera falha e derruba a reputação do número. Checagem única —
+  // sem a migração 0019 a coluna não existe e o filtro é ignorado.
+  const { error: erroColunaBloqueio } = await service
+    .from("leads")
+    .select("marketing_bloqueado_em")
+    .limit(1);
+  const podeFiltrarBloqueio = !erroColunaBloqueio;
+
   function consultaFila(modo: "dados" | "contagem") {
     const d7 = new Date(Date.parse(iniciadoEm) - 7 * 86_400_000).toISOString();
     const d30 = new Date(Date.parse(iniciadoEm) - 30 * 86_400_000).toISOString();
@@ -189,6 +198,7 @@ export async function dispararTemplateLista(
     q = q
       .not("status", "in", "(ganho,perdido)")
       .not("telefone_e164", "is", null);
+    if (podeFiltrarBloqueio) q = q.is("marketing_bloqueado_em", null);
 
     if (lista === "esfriando")
       q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);

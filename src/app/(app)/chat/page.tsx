@@ -65,12 +65,13 @@ type ConversaLinha = {
   chatwoot_conversation_id: number | null;
   chat_adiado_em?: string | null;
   chat_resolvido_em?: string | null;
+  marketing_bloqueado_em?: string | null;
 };
 
 const CAMPOS_BASE =
   "id, nome, telefone_e164, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em, chatwoot_conversation_id";
 // Sem a migração 0017 a coluna não existe: a consulta cai para os campos base.
-const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em, chat_resolvido_em`;
+const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em, chat_resolvido_em, marketing_bloqueado_em`;
 
 function urlChat(
   filtro: ChaveFiltro,
@@ -802,6 +803,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               mensagensPadrao={mensagensPadrao}
               templates={templates}
               restanteJanela={restanteJanela}
+              marketingBloqueado={atual.marketing_bloqueado_em != null}
               urlMaisAntigas={urlMaisAntigas}
               hojeChave={hojeChave}
               ontemChave={ontemChave}

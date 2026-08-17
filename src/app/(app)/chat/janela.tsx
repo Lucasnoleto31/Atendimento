@@ -291,6 +291,7 @@ export function Janela({
   templates,
   restanteJanela,
   urlMaisAntigas,
+  marketingBloqueado,
   hojeChave,
   ontemChave,
   agendadas,
@@ -302,6 +303,7 @@ export function Janela({
   templates: TemplateWhatsapp[];
   restanteJanela: number | null;
   urlMaisAntigas: string | null;
+  marketingBloqueado: boolean;
   hojeChave: string;
   ontemChave: string;
   agendadas: Agendada[];
@@ -734,6 +736,14 @@ export function Janela({
               Assinar com meu nome
             </label>
           </div>
+
+          {modo === "responder" && marketingBloqueado ? (
+            <p className="rounded-md bg-danger-bg px-1.5 py-0.5 text-xs font-medium text-danger">
+              Este cliente desativou mensagens de marketing no WhatsApp.
+              Template de marketing não chega — use template de utilidade, ou
+              responda dentro da janela de 24h depois que ele escrever.
+            </p>
+          ) : null}
 
           {modo === "responder" && restanteJanela !== null ? (
             <BannerJanela restanteInicialMs={restanteJanela} />

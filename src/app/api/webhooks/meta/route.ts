@@ -85,6 +85,10 @@ function descreverErroMeta(erro: NonNullable<StatusMeta["errors"]>[number]) {
       return "Token da Meta inválido ou expirado.";
     case 131026:
       return "Não entregue — o número pode não ter WhatsApp ou bloqueou a empresa.";
+    case 131050:
+      return "O cliente desativou mensagens de marketing da sua empresa no WhatsApp. Template de utilidade e resposta na janela de 24h ainda chegam.";
+    case 131049:
+      return "A Meta segurou o envio para preservar o engajamento (limite de marketing por usuário). Tente mais tarde ou por outro caminho.";
     default:
       return (
         erro.error_data?.details ?? erro.title ?? erro.message ?? "Falha no envio."
@@ -137,13 +141,26 @@ export async function POST(request: NextRequest) {
         }
         const { data: linha } = await service
           .from("lead_interactions")
-          .select("id, metadados")
+          .select("id, lead_id, metadados")
           .eq("metadados->>message_id", status.id)
           .maybeSingle();
         if (linha) {
-          const erro = status.errors?.[0]
-            ? descreverErroMeta(status.errors[0])
-            : null;
+          const falha = status.errors?.[0];
+          const erro = falha ? descreverErroMeta(falha) : null;
+
+          // Recusou marketing: marca o lead para o disparo em massa e a
+          // cadência pularem — falha repetida derruba a reputação do número.
+          const recusouMarketing =
+            falha?.code === 131050 ||
+            /stop receiving marketing/i.test(
+              `${falha?.title ?? ""} ${falha?.message ?? ""} ${falha?.error_data?.details ?? ""}`,
+            );
+          if (recusouMarketing && linha.lead_id) {
+            await service
+              .from("leads")
+              .update({ marketing_bloqueado_em: new Date().toISOString() })
+              .eq("id", linha.lead_id);
+          }
           await service
             .from("lead_interactions")
             .update({
