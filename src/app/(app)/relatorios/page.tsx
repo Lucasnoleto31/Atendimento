@@ -187,27 +187,43 @@ export default async function RelatoriosPage({
   // Retenção da carteira (migração 0015; tolerante à ausência das views).
   // Em lotes: o PostgREST corta em 1000 por resposta e os percentuais sairiam
   // calculados sobre uma fatia da base.
-  const [{ dados: carteira, erro: carteiraErro }, { data: retencaoMeses }] =
-    await Promise.all([
-      buscarTudo<{ status: string; receita_30d_centavos: number | null }>(
-        (de, ate) =>
-          supabase
-            .from("v_carteira")
-            .select("status, receita_30d_centavos")
-            .order("customer_id")
-            .range(de, ate),
+  const [
+    { dados: carteira, erro: carteiraErro },
+    { data: retencaoMeses },
+    { count: totalLotes },
+  ] = await Promise.all([
+      buscarTudo<{
+        status: string;
+        receita_30d_centavos: number | null;
+        lotes_30d: number | null;
+        ultimo_giro_em: string | null;
+      }>((de, ate) =>
+        supabase
+          .from("v_carteira")
+          .select("status, receita_30d_centavos, lotes_30d, ultimo_giro_em")
+          .order("customer_id")
+          .range(de, ate),
       ),
       supabase
         .from("v_retencao_mensal")
         .select("mes, churns, reativacoes, resgates")
         .order("mes", { ascending: false })
         .limit(6),
+      // Sem lote importado não existe giro para medir — e o status de todos
+      // fica no padrão "ativo", o que fazia a tela mostrar 100% girando.
+      supabase
+        .from("customer_lots")
+        .select("id", { count: "exact", head: true }),
     ]);
   const retencaoDisponivel = carteiraErro === null;
   const totalCarteira = carteira.length;
   const contagemStatus = (s: string) =>
     carteira.filter((c) => c.status === s).length;
-  const girando = contagemStatus("ativo") + contagemStatus("reativado");
+  // Girando de verdade: teve lote nos últimos 30 dias. O status é rótulo de
+  // ciclo de vida e só vale depois de a importação rodar o motor.
+  const girando = carteira.filter((c) => (c.lotes_30d ?? 0) > 0).length;
+  const nuncaGirou = carteira.filter((c) => c.ultimo_giro_em === null).length;
+  const semDadoDeGiro = (totalLotes ?? 0) === 0;
   const receitaCarteira = carteira.reduce(
     (s, c) => s + (c.receita_30d_centavos ?? 0),
     0,
@@ -405,28 +421,71 @@ export default async function RelatoriosPage({
               </p>
             ) : (
               <>
+                {semDadoDeGiro ? (
+                  <p className="mt-2 max-w-[68ch] rounded-md border border-warning bg-warning-bg px-1.5 py-1 text-sm text-warning">
+                    <strong className="font-medium">
+                      Nenhum lote importado ainda.
+                    </strong>{" "}
+                    Os {numero(totalCarteira)} clientes já estão na base, mas
+                    sem os lotes não há giro para medir: risco, churn e receita
+                    ficam em zero até a primeira importação de lotes na{" "}
+                    <Link
+                      href="/admin"
+                      className="underline underline-offset-2"
+                    >
+                      Administração
+                    </Link>
+                    .
+                  </p>
+                ) : null}
+
                 <dl className="mt-2 grid gap-3 border-y border-neutral-200 py-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Indicador
                     rotulo="Carteira girando"
-                    valor={percentual(girando, totalCarteira)}
-                    detalhe={`${numero(girando)} de ${numero(totalCarteira)} clientes`}
+                    valor={
+                      semDadoDeGiro ? "—" : percentual(girando, totalCarteira)
+                    }
+                    detalhe={
+                      semDadoDeGiro
+                        ? "sem lotes importados"
+                        : `${numero(girando)} de ${numero(totalCarteira)} giraram nos últimos 30 dias`
+                    }
                   />
                   <Indicador
                     rotulo="Em risco agora"
                     valor={numero(contagemStatus("em_risco"))}
-                    detalhe="queda ou sem giro detectados"
+                    detalhe={
+                      semDadoDeGiro
+                        ? "detecta na importação de lotes"
+                        : "queda ou sem giro detectados"
+                    }
                   />
                   <Indicador
                     rotulo="Churn"
                     valor={numero(contagemStatus("churn"))}
-                    detalhe="sem giro além do limite"
+                    detalhe={
+                      semDadoDeGiro
+                        ? "detecta na importação de lotes"
+                        : "sem giro além do limite"
+                    }
                   />
                   <Indicador
-                    rotulo="Taxa de resgate"
-                    valor={percentual(somaResgates, somaReativacoes)}
-                    detalhe={`${numero(somaResgates)} voltaram a girar de ${numero(somaReativacoes)} acionados`}
+                    rotulo="Nunca giraram"
+                    valor={numero(nuncaGirou)}
+                    detalhe={`de ${numero(totalCarteira)} na carteira`}
                   />
                 </dl>
+
+                {somaReativacoes > 0 ? (
+                  <p className="mt-1 text-sm text-neutral-600">
+                    Taxa de resgate:{" "}
+                    <span className="font-mono font-medium text-neutral-800 tabular-nums">
+                      {percentual(somaResgates, somaReativacoes)}
+                    </span>{" "}
+                    — {numero(somaResgates)} de {numero(somaReativacoes)}{" "}
+                    acionados voltaram a girar.
+                  </p>
+                ) : null}
                 {receitaCarteira > 0 ? (
                   <p className="mt-1 text-sm text-neutral-600">
                     Receita estimada da carteira (30d):{" "}

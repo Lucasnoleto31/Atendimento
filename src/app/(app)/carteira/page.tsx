@@ -51,6 +51,8 @@ type LinhaResumo = {
   status: string;
   receita_30d_centavos: number | null;
   responsavel_nome: string | null;
+  lotes_30d: number | null;
+  ultimo_giro_em: string | null;
 };
 
 export default async function CarteiraPage({
@@ -97,10 +99,19 @@ export default async function CarteiraPage({
       aplicarFiltros(
         supabase
           .from("v_carteira")
-          .select("status, receita_30d_centavos, responsavel_nome")
+          .select(
+            "status, receita_30d_centavos, responsavel_nome, lotes_30d, ultimo_giro_em",
+          )
           .order("customer_id"),
       ).range(de, ate),
   );
+
+  // Sem lote importado não existe giro: o status de todos fica no padrão
+  // "ativo" e a tela pareceria uma carteira saudável.
+  const { count: totalLotes } = await supabase
+    .from("customer_lots")
+    .select("id", { count: "exact", head: true });
+  const semDadoDeGiro = (totalLotes ?? 0) === 0;
 
   // Página visível, ordenada pelo mais parado primeiro.
   const de = (pagina - 1) * POR_PAGINA;
@@ -123,6 +134,8 @@ export default async function CarteiraPage({
     0,
   );
   const temReceita = receita30d > 0;
+  const girando = resumo.filter((l) => (l.lotes_30d ?? 0) > 0).length;
+  const nuncaGirou = resumo.filter((l) => l.ultimo_giro_em === null).length;
 
   // Visão do gestor: saúde por assessor, sobre a base inteira.
   const porAssessor = new Map<
@@ -182,6 +195,21 @@ export default async function CarteiraPage({
         </p>
       ) : (
         <>
+          {semDadoDeGiro ? (
+            <p className="mt-2 max-w-[68ch] rounded-md border border-warning bg-warning-bg px-1.5 py-1 text-sm text-warning">
+              <strong className="font-medium">
+                Nenhum lote importado ainda.
+              </strong>{" "}
+              A situação abaixo é só o padrão de cadastro — a saúde real da
+              carteira (risco, churn, receita) aparece depois da primeira
+              importação de lotes na{" "}
+              <Link href="/admin" className="underline underline-offset-2">
+                Administração
+              </Link>
+              .
+            </p>
+          ) : null}
+
           <dl className="mt-2 grid gap-2 border-b border-neutral-200 pb-2 sm:grid-cols-2 lg:grid-cols-4">
             {(
               [
@@ -207,6 +235,17 @@ export default async function CarteiraPage({
               {total}
             </span>{" "}
             cliente(s) no filtro atual
+            {!semDadoDeGiro ? (
+              <>
+                {" · "}
+                <span className="font-mono font-medium text-neutral-800 tabular-nums">
+                  {girando}
+                </span>{" "}
+                giraram em 30d ·{" "}
+                <span className="font-mono tabular-nums">{nuncaGirou}</span>{" "}
+                nunca giraram
+              </>
+            ) : null}
             {temReceita ? (
               <>
                 {" · receita estimada (30d): "}
