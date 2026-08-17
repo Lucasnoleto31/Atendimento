@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check,
   ChevronDown,
   Clock,
+  Ellipsis,
   Inbox,
   Mail,
   RotateCcw,
   Tag,
-  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { estiloEtiqueta } from "@/lib/etiquetas";
@@ -29,17 +29,17 @@ export type PessoaEquipe = { id: string; nome: string };
 export type Etiqueta = { id: string; nome: string; cor?: string | null };
 export type EtapaFunil = { id: string; nome: string };
 
-const ROTULO_STATUS: Record<StatusConversa, { texto: string; classe: string }> =
-  {
-    open: { texto: "Aberta", classe: "bg-info-bg text-info" },
-    pending: { texto: "Pendente", classe: "bg-warning-bg text-warning" },
-    snoozed: { texto: "Adiada", classe: "bg-warning-bg text-warning" },
-    resolved: { texto: "Resolvida", classe: "bg-success-bg text-success" },
-  };
+const CAMPO =
+  "h-[32px] min-w-0 rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400";
+
+const ITEM_MENU =
+  "flex h-[40px] w-full items-center gap-1 px-1.5 text-left text-sm text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400";
 
 /**
- * Barra de ferramentas da conversa aberta: atendente, etiquetas e status.
- * Tudo grava no CRM e espelha no Chatwoot pelas actions.
+ * Barra da conversa aberta, numa linha: etapa, atendente e etiquetas à
+ * esquerda; a ação do momento à direita. O que é raro (não lida, adiar,
+ * reabrir) fica no menu — antes eram três blocos empilhados competindo
+ * pela atenção de quem só queria responder.
  */
 export function FerramentasConversa({
   leadId,
@@ -68,87 +68,71 @@ export function FerramentasConversa({
 }) {
   const [pendente, iniciar] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
-  const [listaAberta, setListaAberta] = useState(false);
-  const [maisAberto, setMaisAberto] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const gatilhoRef = useRef<HTMLButtonElement>(null);
+  const [aberto, setAberto] = useState<"etiquetas" | "mais" | null>(null);
+  const [expandidoMobile, setExpandidoMobile] = useState(false);
   const router = useRouter();
 
-  // Devolve a conversa à fila e volta à lista — reabrir marcaria como lida.
-  const marcarNaoLida = () => {
-    setErro(null);
-    iniciar(async () => {
-      const resultado = await marcarChatNaoLido(leadId);
-      if (resultado.erro) setErro(resultado.erro);
-      else router.push("/chat");
-    });
-  };
-
-  // Adiar tira da caixa de entrada; sai da conversa para a lista seguinte.
-  const adiar = () => {
-    setErro(null);
-    iniciar(async () => {
-      const resultado = await adiarConversa(leadId);
-      if (resultado.erro) setErro(resultado.erro);
-      else router.push("/chat");
-    });
-  };
-
-  const reativar = () => {
-    setErro(null);
-    iniciar(async () => {
-      const resultado = await reativarConversa(leadId);
-      if (resultado.erro) setErro(resultado.erro);
-    });
-  };
-
-  // Esc fecha o popover e devolve o foco ao gatilho.
+  // Esc fecha o que estiver aberto.
   useEffect(() => {
-    if (!listaAberta) return;
+    if (!aberto) return;
     const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setListaAberta(false);
-        gatilhoRef.current?.focus();
-      }
+      if (e.key === "Escape") setAberto(null);
     };
     document.addEventListener("keydown", aoTeclar);
     return () => document.removeEventListener("keydown", aoTeclar);
-  }, [listaAberta]);
+  }, [aberto]);
 
-  const executar = (acao: () => Promise<{ ok?: boolean; erro?: string }>) => {
+  const executar = (
+    acao: () => Promise<{ ok?: boolean; erro?: string }>,
+    aoConcluir?: () => void,
+  ) => {
     setErro(null);
+    setAberto(null);
     iniciar(async () => {
       const resultado = await acao();
       if (resultado.erro) setErro(resultado.erro);
+      else aoConcluir?.();
     });
   };
 
+  const voltarParaLista = () => router.push("/chat");
+
   const marcadas = new Set(etiquetasLead);
   const chips = etiquetas.filter((e) => marcadas.has(e.id));
-  const status = statusConversa ? ROTULO_STATUS[statusConversa] : null;
   const estaResolvida = resolvida || statusConversa === "resolved";
+
+  const situacao = estaResolvida
+    ? { texto: "Resolvida", classe: "bg-success-bg text-success" }
+    : adiada
+      ? { texto: "Adiada", classe: "bg-accent-100 text-accent-700" }
+      : null;
 
   return (
     <div className="border-b border-neutral-200 bg-neutral-0 px-1.5 py-1">
-      {/* No celular a barra colapsa para não roubar espaço da conversa. */}
+      {/* No celular a barra colapsa: sobra o essencial e o resto abre. */}
       <div className="flex items-center justify-between gap-1 lg:hidden">
-        {status ? (
+        {situacao ? (
           <span
             className={cn(
               "inline-flex h-[20px] items-center rounded-sm px-1 text-xs font-medium",
-              status.classe,
+              situacao.classe,
             )}
           >
-            {status.texto}
+            {situacao.texto}
           </span>
         ) : (
-          <span />
+          <span className="truncate text-xs text-neutral-400">
+            {etapas.find((e) => e.id === etapaId)?.nome ?? "Sem etapa"}
+            {responsavelId
+              ? ` · ${equipe.find((p) => p.id === responsavelId)?.nome ?? ""}`
+              : " · sem atendente"}
+          </span>
         )}
         <button
           type="button"
-          aria-expanded={maisAberto}
-          onClick={() => setMaisAberto((v) => !v)}
-          className="inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          aria-expanded={expandidoMobile}
+          onClick={() => setExpandidoMobile((v) => !v)}
+          className="inline-flex h-[32px] shrink-0 items-center gap-0.5 rounded-md px-1 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         >
           Ferramentas
           <ChevronDown
@@ -157,7 +141,7 @@ export function FerramentasConversa({
             aria-hidden
             className={cn(
               "transition-transform duration-[120ms]",
-              maisAberto ? "rotate-180" : "",
+              expandidoMobile ? "rotate-180" : "",
             )}
           />
         </button>
@@ -165,8 +149,8 @@ export function FerramentasConversa({
 
       <div
         className={cn(
-          "flex-wrap items-center gap-1",
-          maisAberto ? "mt-1 flex" : "hidden lg:flex",
+          "items-center gap-1",
+          expandidoMobile ? "mt-1 flex flex-wrap" : "hidden lg:flex",
         )}
       >
         {etapas.length > 0 ? (
@@ -183,7 +167,7 @@ export function FerramentasConversa({
                   executar(() => alterarEtapaChat(leadId, e.target.value));
                 }
               }}
-              className="h-[32px] w-[144px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+              className={cn(CAMPO, "w-[136px]")}
             >
               <option value="" disabled>
                 Etapa…
@@ -205,11 +189,9 @@ export function FerramentasConversa({
           value={responsavelId ?? ""}
           disabled={pendente}
           onChange={(e) =>
-            executar(() =>
-              definirResponsavelChat(leadId, e.target.value || null),
-            )
+            executar(() => definirResponsavelChat(leadId, e.target.value || null))
           }
-          className="h-[32px] w-[176px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+          className={cn(CAMPO, "w-[144px]")}
         >
           <option value="">Sem atendente</option>
           {equipe.map((pessoa) => (
@@ -219,67 +201,54 @@ export function FerramentasConversa({
           ))}
         </select>
 
+        {/* Etiquetas: os chips já dizem quais são; o botão só adiciona. */}
         {chips.map((etiqueta) => (
           <span
             key={etiqueta.id}
             className={cn(
-              "inline-flex h-[20px] items-center gap-0.5 rounded-sm px-1 text-xs font-medium",
+              "inline-flex h-[24px] items-center rounded-sm px-1 text-xs font-medium",
               estiloEtiqueta(etiqueta.cor).chip,
             )}
           >
             {etiqueta.nome}
-            <button
-              type="button"
-              aria-label={`Remover etiqueta ${etiqueta.nome}`}
-              disabled={pendente}
-              onClick={() =>
-                executar(() => alternarEtiquetaChat(leadId, etiqueta.id, false))
-              }
-              className="inline-flex h-[28px] w-[28px] items-center justify-center rounded-sm opacity-70 transition-opacity duration-[120ms] -m-[6px] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
-            >
-              <X size={12} strokeWidth={1.5} aria-hidden />
-            </button>
           </span>
         ))}
 
-        <div className="relative" ref={popoverRef}>
+        <div className="relative">
           <button
-            ref={gatilhoRef}
             type="button"
-            aria-expanded={listaAberta}
-            aria-haspopup="true"
-            onClick={() => setListaAberta((v) => !v)}
-            className="inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            aria-label="Etiquetas do lead"
+            aria-expanded={aberto === "etiquetas"}
+            title="Etiquetas"
+            onClick={() => setAberto(aberto === "etiquetas" ? null : "etiquetas")}
+            className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
           >
-            <Tag size={14} strokeWidth={1.5} aria-hidden />
-            Etiquetas
+            <Tag size={16} strokeWidth={1.5} aria-hidden />
           </button>
 
-          {listaAberta ? (
+          {aberto === "etiquetas" ? (
             <>
               <button
                 type="button"
-                aria-label="Fechar lista de etiquetas"
+                aria-label="Fechar etiquetas"
                 tabIndex={-1}
-                onClick={() => setListaAberta(false)}
+                onClick={() => setAberto(null)}
                 className="fixed inset-0 z-10 cursor-default"
               />
               <div
                 role="group"
                 aria-label="Etiquetas do lead"
-                // No mobile ancora pela direita — ancorado à esquerda, os
-                // 240px estouravam a borda e criavam rolagem horizontal.
-                className="absolute top-[calc(100%+4px)] z-20 w-[240px] max-w-[calc(100vw-24px)] rounded-[10px] border border-neutral-200 bg-neutral-0 py-0.5 shadow-lg max-lg:right-0 lg:left-0"
+                className="absolute left-0 top-[calc(100%+4px)] z-20 w-[240px] rounded-[10px] border border-neutral-200 bg-neutral-0 py-0.5 shadow-lg"
               >
                 {etiquetas.length === 0 ? (
                   <p className="px-1.5 py-1 text-sm text-neutral-600">
-                    Nenhuma etiqueta cadastrada — crie na Administração.
+                    Nenhuma etiqueta cadastrada — crie em Configurações.
                   </p>
                 ) : (
                   <ul className="max-h-[240px] overflow-y-auto">
                     {etiquetas.map((etiqueta) => (
                       <li key={etiqueta.id}>
-                        <label className="flex h-[32px] cursor-pointer items-center gap-1 px-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
+                        <label className="flex h-[40px] cursor-pointer items-center gap-1 px-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
                           <input
                             type="checkbox"
                             checked={marcadas.has(etiqueta.id)}
@@ -313,69 +282,40 @@ export function FerramentasConversa({
           ) : null}
         </div>
 
-        <span className="ml-auto inline-flex items-center gap-1">
-          {temConversa && status ? (
+        {/* Ação do momento + o resto no menu. */}
+        <span className="ml-auto inline-flex items-center gap-0.5">
+          {situacao ? (
             <span
               className={cn(
                 "hidden h-[20px] items-center rounded-sm px-1 text-xs font-medium lg:inline-flex",
-                status.classe,
+                situacao.classe,
               )}
             >
-              {status.texto}
+              {situacao.texto}
             </span>
           ) : null}
-          <button
-            type="button"
-            disabled={pendente}
-            onClick={marcarNaoLida}
-            title="Marcar como não lida e voltar para a fila"
-            className="inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
-          >
-            <Mail size={14} strokeWidth={1.5} aria-hidden />
-            Não lida
-          </button>
 
-          {adiada ? (
-            <button
-              type="button"
-              disabled={pendente}
-              onClick={reativar}
-              title="Trazer de volta para a caixa de entrada agora"
-              className="inline-flex h-[32px] items-center gap-0.5 rounded-md bg-accent-100 px-1.5 text-sm font-medium text-accent-700 transition-colors duration-[120ms] hover:bg-accent-100/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
-            >
-              <Inbox size={14} strokeWidth={1.5} aria-hidden />
-              Adiada · trazer de volta
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={pendente}
-              onClick={adiar}
-              title="Some da caixa de entrada e volta quando o lead responder"
-              className="inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
-            >
-              <Clock size={14} strokeWidth={1.5} aria-hidden />
-              Adiar
-            </button>
-          )}
           {temConversa ? (
             <button
               type="button"
               disabled={pendente}
-              onClick={() => {
-                setErro(null);
-                iniciar(async () => {
-                  const resultado = await alterarStatusConversaChat(
-                    leadId,
-                    estaResolvida ? "open" : "resolved",
-                  );
-                  if (resultado.erro) setErro(resultado.erro);
-                  // Resolvida sai da caixa: volta para a lista, no próximo
-                  // atendimento. Reabrir mantém a conversa na tela.
-                  else if (!estaResolvida) router.push("/chat");
-                });
-              }}
-              className="inline-flex h-[32px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+              onClick={() =>
+                executar(
+                  () =>
+                    alterarStatusConversaChat(
+                      leadId,
+                      estaResolvida ? "open" : "resolved",
+                    ),
+                  // Resolvida sai da caixa: volta para a lista. Reabrir fica.
+                  estaResolvida ? undefined : voltarParaLista,
+                )
+              }
+              className={cn(
+                "inline-flex h-[32px] items-center gap-0.5 rounded-md px-1.5 text-sm font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60",
+                estaResolvida
+                  ? "border border-neutral-300 bg-neutral-0 text-neutral-800 hover:bg-neutral-100"
+                  : "bg-primary-600 text-neutral-0 hover:bg-primary-700",
+              )}
             >
               {estaResolvida ? (
                 <RotateCcw size={14} strokeWidth={1.5} aria-hidden />
@@ -385,6 +325,88 @@ export function FerramentasConversa({
               {estaResolvida ? "Reabrir" : "Resolver"}
             </button>
           ) : null}
+
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Mais ações da conversa"
+              aria-expanded={aberto === "mais"}
+              onClick={() => setAberto(aberto === "mais" ? null : "mais")}
+              className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            >
+              <Ellipsis size={16} strokeWidth={1.5} aria-hidden />
+            </button>
+
+            {aberto === "mais" ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="Fechar menu"
+                  tabIndex={-1}
+                  onClick={() => setAberto(null)}
+                  className="fixed inset-0 z-10 cursor-default"
+                />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-[calc(100%+4px)] z-20 w-[248px] overflow-hidden rounded-[10px] border border-neutral-200 bg-neutral-0 py-0.5 shadow-lg"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={pendente}
+                    onClick={() =>
+                      executar(() => marcarChatNaoLido(leadId), voltarParaLista)
+                    }
+                    className={ITEM_MENU}
+                  >
+                    <Mail
+                      size={16}
+                      strokeWidth={1.5}
+                      aria-hidden
+                      className="text-neutral-400"
+                    />
+                    Marcar como não lida
+                  </button>
+
+                  {adiada ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={pendente}
+                      onClick={() => executar(() => reativarConversa(leadId))}
+                      className={ITEM_MENU}
+                    >
+                      <Inbox
+                        size={16}
+                        strokeWidth={1.5}
+                        aria-hidden
+                        className="text-accent-700"
+                      />
+                      Trazer de volta agora
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={pendente}
+                      onClick={() =>
+                        executar(() => adiarConversa(leadId), voltarParaLista)
+                      }
+                      className={ITEM_MENU}
+                    >
+                      <Clock
+                        size={16}
+                        strokeWidth={1.5}
+                        aria-hidden
+                        className="text-neutral-400"
+                      />
+                      Adiar até o lead responder
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : null}
+          </div>
         </span>
       </div>
 

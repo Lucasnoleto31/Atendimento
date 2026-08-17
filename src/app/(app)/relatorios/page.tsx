@@ -65,46 +65,72 @@ export default async function RelatoriosPage({
   const d1 = new Date(agoraMs - 86_400_000).toISOString();
 
   const [
-    { data: enviadas },
+    { dados: enviadas },
     { count: resolvidas },
-    { data: primeiras },
-    { data: conversasAbertas },
+    { dados: trocas },
+    { dados: conversasAbertas },
     { data: metasEquipe },
   ] = await Promise.all([
-    supabase
-      .from("lead_interactions")
-      .select("criado_em, autor:profiles(nome)")
-      .eq("tipo", "mensagem_enviada")
-      .gte("criado_em", d30)
-      .limit(10000),
+    // Em lotes: acima de 1000 mensagens no período o PostgREST truncava e a
+    // contagem por vendedor saía menor que a realidade.
+    buscarTudo<{ criado_em: string; autor_id: string | null }>((dei, ate) =>
+      supabase
+        .from("lead_interactions")
+        .select("criado_em, autor_id")
+        .eq("tipo", "mensagem_enviada")
+        .gte("criado_em", d30)
+        .order("criado_em")
+        .range(dei, ate),
+    ),
     supabase
       .from("lead_interactions")
       .select("id", { count: "exact", head: true })
       .eq("tipo", "nota")
       .eq("conteudo", "Conversa resolvida")
       .gte("criado_em", d30),
-    supabase
-      .from("leads")
-      .select("criado_em, primeira_resposta_em")
-      .gte("criado_em", d30)
-      .not("primeira_resposta_em", "is", null)
-      .limit(2000),
-    supabase
-      .from("leads")
-      .select("ultima_interacao_em, chat_lido_em")
-      .not("chatwoot_conversation_id", "is", null)
-      .not("ultima_interacao_em", "is", null)
-      .limit(2000),
+    // Tempo de resposta medido nas mensagens, não em leads: para quem chega
+    // pelo WhatsApp, a primeira mensagem É a criação do lead — a conta antiga
+    // dava negativo em todos e a tela mostrava "—".
+    buscarTudo<{ lead_id: string; tipo: string; criado_em: string }>(
+      (dei, ate) =>
+        supabase
+          .from("lead_interactions")
+          .select("lead_id, tipo, criado_em")
+          .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
+          .gte("criado_em", d30)
+          .order("criado_em")
+          .range(dei, ate),
+    ),
+    // Conversa é histórico de mensagem (vale para Meta e Chatwoot), em lotes.
+    buscarTudo<{ ultima_interacao_em: string; chat_lido_em: string | null }>(
+      (dei, ate) =>
+        supabase
+          .from("leads")
+          .select("ultima_interacao_em, chat_lido_em")
+          .not("ultima_interacao_em", "is", null)
+          .order("id")
+          .range(dei, ate),
+    ),
     // Coluna da migração 0013; sem ela, a coluna de meta some da tabela.
-    supabase.from("profiles").select("nome, meta_contatos_dia").eq("ativo", true),
+    supabase
+      .from("profiles")
+      .select("id, nome, meta_contatos_dia")
+      .eq("ativo", true),
   ]);
 
+  // Sem autor = disparo automático (cadência, agendada, reativação).
+  const nomePorId = new Map(
+    ((metasEquipe ?? []) as { id: string; nome: string }[]).map((p) => [
+      p.id,
+      p.nome,
+    ]),
+  );
+
   const porVendedor = new Map<string, { total: number; ultimas24h: number }>();
-  for (const linha of (enviadas ?? []) as unknown as {
-    criado_em: string;
-    autor: { nome: string } | null;
-  }[]) {
-    const nome = linha.autor?.nome ?? "Automação";
+  for (const linha of enviadas) {
+    const nome = linha.autor_id
+      ? (nomePorId.get(linha.autor_id) ?? "Outro usuário")
+      : "Automação";
     const atual = porVendedor.get(nome) ?? { total: 0, ultimas24h: 0 };
     atual.total++;
     if (linha.criado_em >= d1) atual.ultimas24h++;
@@ -114,26 +140,39 @@ export default async function RelatoriosPage({
     (a, b) => b[1].total - a[1].total,
   );
 
-  const temposResposta = ((primeiras ?? []) as {
-    criado_em: string;
-    primeira_resposta_em: string;
-  }[])
-    .map(
-      (l) =>
-        (new Date(l.primeira_resposta_em).getTime() -
-          new Date(l.criado_em).getTime()) /
-        3_600_000,
-    )
-    .filter((h) => h >= 0 && h <= 24 * 30);
-  const mediaRespostaHoras =
-    temposResposta.length > 0
-      ? temposResposta.reduce((s, h) => s + h, 0) / temposResposta.length
-      : null;
+  // Da mensagem do cliente até a resposta da equipe. Mediana, não média: uma
+  // conversa esquecida no fim de semana distorce a média inteira.
+  const conversasPorLead = new Map<
+    string,
+    { tipo: string; criado_em: string }[]
+  >();
+  for (const msg of trocas) {
+    conversasPorLead.set(msg.lead_id, [
+      ...(conversasPorLead.get(msg.lead_id) ?? []),
+      msg,
+    ]);
+  }
+  const temposMin: number[] = [];
+  for (const msgs of conversasPorLead.values()) {
+    let esperando: string | null = null;
+    for (const msg of msgs) {
+      if (msg.tipo === "mensagem_recebida") {
+        if (esperando === null) esperando = msg.criado_em;
+      } else if (esperando !== null) {
+        const minutos =
+          (Date.parse(msg.criado_em) - Date.parse(esperando)) / 60_000;
+        // Fora do atendimento: negativo (importação) ou além de uma semana
+        // (conversa retomada, não resposta).
+        if (minutos >= 0 && minutos <= 60 * 24 * 7) temposMin.push(minutos);
+        esperando = null;
+      }
+    }
+  }
+  temposMin.sort((a, b) => a - b);
+  const medianaRespostaMin =
+    temposMin.length > 0 ? temposMin[Math.floor(temposMin.length / 2)] : null;
 
-  const aguardandoAgora = ((conversasAbertas ?? []) as {
-    ultima_interacao_em: string;
-    chat_lido_em: string | null;
-  }[]).filter(
+  const aguardandoAgora = conversasAbertas.filter(
     (l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em,
   ).length;
 
@@ -143,7 +182,7 @@ export default async function RelatoriosPage({
     ),
   );
   const metasDisponiveis = metasEquipe !== null;
-  const totalEnviadas30d = (enviadas ?? []).length;
+  const totalEnviadas30d = enviadas.length;
 
   // Retenção da carteira (migração 0015; tolerante à ausência das views).
   // Em lotes: o PostgREST corta em 1000 por resposta e os percentuais sairiam
@@ -262,15 +301,19 @@ export default async function RelatoriosPage({
                 detalhe="pela equipe, no CRM e automações"
               />
               <Indicador
-                rotulo="Lead responde em"
+                rotulo="Equipe responde em"
                 valor={
-                  mediaRespostaHoras === null
+                  medianaRespostaMin === null
                     ? "—"
-                    : mediaRespostaHoras < 1
-                      ? `${Math.round(mediaRespostaHoras * 60)}min`
-                      : `${mediaRespostaHoras.toFixed(1).replace(".", ",")}h`
+                    : medianaRespostaMin < 60
+                      ? `${Math.round(medianaRespostaMin)}min`
+                      : `${(medianaRespostaMin / 60).toFixed(1).replace(".", ",")}h`
                 }
-                detalhe="média até a primeira resposta"
+                detalhe={
+                  temposMin.length > 0
+                    ? `mediana de ${numero(temposMin.length)} resposta(s)`
+                    : "sem respostas medidas no período"
+                }
               />
               <Indicador
                 rotulo="Conversas resolvidas"
