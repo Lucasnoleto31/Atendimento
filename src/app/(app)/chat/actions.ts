@@ -839,3 +839,104 @@ export async function marcarChatNaoLido(
   revalidatePath("/chat");
   return { ok: true };
 }
+
+// ===========================================================================
+// Ações em massa na lista de conversas
+// ===========================================================================
+
+const MAX_EM_MASSA = 200;
+
+async function emMassa(
+  leadIds: string[],
+  mudanca: Record<string, unknown>,
+  nota: string | null,
+): Promise<ResultadoEnvio & { total?: number }> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+
+  const ids = [...new Set(leadIds)].filter(Boolean).slice(0, MAX_EM_MASSA);
+  if (ids.length === 0) return { erro: "Nenhuma conversa selecionada." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("leads").update(mudanca).in("id", ids);
+  if (error) {
+    return {
+      erro:
+        error.message.includes("chat_adiado_em") ||
+        error.message.includes("chat_resolvido_em")
+          ? "Esta ação depende das migrações 0017/0018 — rode-as no SQL Editor."
+          : error.message,
+    };
+  }
+
+  // Uma linha no histórico de cada conversa: quem fez e o quê.
+  if (nota) {
+    await supabase.from("lead_interactions").insert(
+      ids.map((id) => ({
+        lead_id: id,
+        tipo: "nota" as const,
+        conteudo: nota,
+        autor_id: perfil.id,
+        metadados: { via: "crm", em_massa: true },
+      })),
+    );
+  }
+
+  revalidatePath("/chat");
+  return { ok: true, total: ids.length };
+}
+
+export async function adiarConversasEmMassa(leadIds: string[]) {
+  const agora = new Date().toISOString();
+  return emMassa(
+    leadIds,
+    { chat_adiado_em: agora, chat_lido_em: agora },
+    "Conversa adiada até a próxima resposta do lead",
+  );
+}
+
+export async function resolverConversasEmMassa(leadIds: string[]) {
+  const agora = new Date().toISOString();
+  return emMassa(
+    leadIds,
+    { chat_resolvido_em: agora, chat_lido_em: agora },
+    "Conversa resolvida",
+  );
+}
+
+export async function marcarNaoLidasEmMassa(leadIds: string[]) {
+  return emMassa(leadIds, { chat_lido_em: null }, null);
+}
+
+export async function marcarLidasEmMassa(leadIds: string[]) {
+  return emMassa(leadIds, { chat_lido_em: new Date().toISOString() }, null);
+}
+
+/** Atribui (ou tira o dono de) várias conversas de uma vez. */
+export async function atribuirEmMassa(
+  leadIds: string[],
+  responsavelId: string | null,
+) {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+
+  let nome = "ninguém";
+  if (responsavelId) {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("profiles")
+      .select("nome")
+      .eq("id", responsavelId)
+      .maybeSingle();
+    if (!data) return { erro: "Atendente não encontrado." };
+    nome = data.nome;
+  }
+
+  return emMassa(
+    leadIds,
+    { responsavel_id: responsavelId },
+    responsavelId
+      ? `Atendimento atribuído a ${nome}`
+      : "Atendimento ficou sem atendente",
+  );
+}

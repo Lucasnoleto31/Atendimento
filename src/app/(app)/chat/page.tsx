@@ -28,6 +28,7 @@ import {
   type PessoaEquipe,
 } from "./ferramentas";
 import { FiltrosLista } from "./filtros";
+import { ListaConversas, type ItemConversa } from "./lista-conversas";
 import {
   PainelLead,
   type DetalheLead,
@@ -501,6 +502,44 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       : data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   };
 
+  // A lista é um componente cliente (seleção múltipla), então tudo que é
+  // cálculo ou classe vai resolvido daqui.
+  const itensLista: ItemConversa[] = conversas.map((conversa) => {
+    const aberta = conversa.id === atual?.id;
+    const pendente = naoLida(conversa) && !aberta;
+    const espera = pendente ? minutosAguardando(conversa) : 0;
+    const emAlerta = pendente && espera >= minutosAlerta;
+    const etiquetasDaConversa = etiquetasPorLead.get(conversa.id) ?? [];
+
+    return {
+      id: conversa.id,
+      nome: conversa.nome,
+      href: urlChat(filtro, busca, etiquetaFiltro, atendenteFiltro, conversa.id),
+      hora: horaCurta(conversa.ultima_interacao_em),
+      previa: previas.get(conversa.id) ?? "—",
+      pendente,
+      aberta,
+      espera: emAlerta
+        ? espera >= 60
+          ? `${Math.floor(espera / 60)}h`
+          : `${espera}min`
+        : null,
+      // A faixa lateral herda a cor da primeira etiqueta; a conversa aberta
+      // continua mandando na cor.
+      faixa: aberta
+        ? "border-primary-600"
+        : etiquetasDaConversa.length > 0
+          ? estiloEtiqueta(etiquetasDaConversa[0].cor).faixa
+          : "border-transparent",
+      etiquetas: etiquetasDaConversa.slice(0, 3).map((e) => ({
+        id: e.id,
+        nome: e.nome,
+        chip: estiloEtiqueta(e.cor).chip,
+      })),
+      etiquetasExtras: Math.max(0, etiquetasDaConversa.length - 3),
+    };
+  });
+
   return (
     <div className="flex h-[calc(100dvh-64px)] min-h-0 lg:h-dvh">
       <AtualizadorTempoReal />
@@ -631,108 +670,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
           ) : null}
         </div>
 
-        <ul className="min-h-0 flex-1 divide-y divide-neutral-200 overflow-y-auto">
-          {conversas.length === 0 ? (
-            <li className="p-2 text-sm text-neutral-600">
-              Nenhuma conversa aqui.
-            </li>
-          ) : (
-            conversas.map((conversa) => {
-              const selecionada = conversa.id === atual?.id;
-              const pendente = naoLida(conversa) && !selecionada;
-              const espera = pendente ? minutosAguardando(conversa) : 0;
-              const emAlerta = pendente && espera >= minutosAlerta;
-              const etiquetasDaConversa = etiquetasPorLead.get(conversa.id) ?? [];
-              // A faixa lateral herda a cor da primeira etiqueta; a seleção
-              // continua mandando na cor quando a conversa está aberta.
-              const faixa = selecionada
-                ? "border-primary-600"
-                : etiquetasDaConversa.length > 0
-                  ? estiloEtiqueta(etiquetasDaConversa[0].cor).faixa
-                  : "border-transparent";
-              return (
-                <li key={conversa.id}>
-                  <Link
-                    href={urlChat(filtro, busca, etiquetaFiltro, atendenteFiltro, conversa.id)}
-                    aria-current={selecionada ? "true" : undefined}
-                    className={cn(
-                      "flex items-center gap-1 border-l-4 px-1.5 py-1 transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500",
-                      faixa,
-                      selecionada ? "bg-primary-50" : "hover:bg-neutral-50",
-                    )}
-                  >
-                    <span
-                      aria-hidden
-                      className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md bg-neutral-100 font-mono text-sm text-neutral-600"
-                    >
-                      {conversa.nome.slice(0, 2).toUpperCase()}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline justify-between gap-1">
-                        <span
-                          className={cn(
-                            "truncate text-sm text-neutral-800",
-                            pendente ? "font-semibold" : "font-medium",
-                          )}
-                        >
-                          {conversa.nome}
-                        </span>
-                        <span className="shrink-0 font-mono text-xs text-neutral-400 tabular-nums">
-                          {horaCurta(conversa.ultima_interacao_em)}
-                        </span>
-                      </span>
-                      <span className="flex items-center justify-between gap-1">
-                        <span
-                          className={cn(
-                            "truncate text-xs",
-                            pendente
-                              ? "font-medium text-neutral-800"
-                              : "text-neutral-600",
-                          )}
-                        >
-                          {previas.get(conversa.id) ?? "—"}
-                        </span>
-                        {emAlerta ? (
-                          <span className="inline-flex h-[20px] shrink-0 items-center rounded-sm bg-warning-bg px-0.5 font-mono text-xs font-medium text-warning tabular-nums">
-                            {espera >= 60
-                              ? `${Math.floor(espera / 60)}h`
-                              : `${espera}min`}
-                          </span>
-                        ) : pendente ? (
-                          <span
-                            aria-label="Mensagens não lidas"
-                            className="h-1 w-1 shrink-0 rounded-full bg-primary-600"
-                          />
-                        ) : null}
-                      </span>
-
-                      {etiquetasDaConversa.length > 0 ? (
-                        <span className="mt-0.5 flex flex-wrap items-center gap-0.5">
-                          {etiquetasDaConversa.slice(0, 3).map((etiqueta) => (
-                            <span
-                              key={etiqueta.id}
-                              className={cn(
-                                "inline-flex h-[20px] items-center rounded-sm px-1 text-xs font-medium",
-                                estiloEtiqueta(etiqueta.cor).chip,
-                              )}
-                            >
-                              {etiqueta.nome}
-                            </span>
-                          ))}
-                          {etiquetasDaConversa.length > 3 ? (
-                            <span className="text-xs text-neutral-400">
-                              +{etiquetasDaConversa.length - 3}
-                            </span>
-                          ) : null}
-                        </span>
-                      ) : null}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })
-          )}
-        </ul>
+        <ListaConversas itens={itensLista} equipe={equipeAtendentes} />
       </aside>
 
       {/* Janela da conversa */}
