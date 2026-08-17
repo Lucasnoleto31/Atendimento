@@ -10,12 +10,11 @@ import { normalizarConta } from "@/lib/imports/tabular";
  * registro criado aqui nunca duplica: a linha do diversificador só completa
  * CPF, e-mail e data de abertura.
  */
-export async function garantirClienteDoLead(
-  leadId: string,
-  contasBrutas?: string,
-): Promise<{ ok?: true; erro?: string }> {
-  // Aceita várias contas de uma vez: "12345, 67890" ou separadas por espaço.
-  const partes = (contasBrutas ?? "")
+/** "12345, 67890" (vírgula/espaço) -> lista normalizada, ou o erro da parte inválida. */
+export function parsearContas(
+  brutas: string,
+): { contas: string[] } | { erro: string } {
+  const partes = brutas
     .split(/[,;\s]+/)
     .map((p) => p.trim())
     .filter(Boolean);
@@ -29,6 +28,16 @@ export async function garantirClienteDoLead(
     }
     if (!contas.includes(conta)) contas.push(conta);
   }
+  return { contas };
+}
+
+export async function garantirClienteDoLead(
+  leadId: string,
+  contasBrutas?: string,
+): Promise<{ ok?: true; erro?: string }> {
+  const parse = parsearContas(contasBrutas ?? "");
+  if ("erro" in parse) return { erro: parse.erro };
+  const { contas } = parse;
 
   const service = createServiceClient();
   const { data: lead } = await service

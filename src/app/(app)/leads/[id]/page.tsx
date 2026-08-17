@@ -7,7 +7,7 @@ import { perfilAtual } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { CAMPO } from "@/components/app/form-styles";
 import { registrarVenda } from "@/app/(app)/pagamentos/actions";
-import { virarCliente } from "./cliente-actions";
+import { atualizarCliente, virarCliente } from "./cliente-actions";
 import { formatarReais, formatarTelefone, tempoDesde } from "@/lib/format";
 import { LotesChart, type PontoLote } from "@/components/app/lotes-chart";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
@@ -198,7 +198,8 @@ export default async function LeadPage({
           className={cn(
             "mt-2 max-w-[68ch] rounded-md border px-1.5 py-1 text-sm",
             aviso === "Venda registrada." ||
-              aviso === "Lead vinculado à base de clientes."
+              aviso === "Lead vinculado à base de clientes." ||
+              aviso === "Dados do cliente atualizados."
               ? "border-success bg-success-bg text-success"
               : "border-warning bg-warning-bg text-warning",
           )}
@@ -296,6 +297,7 @@ export default async function LeadPage({
           </h2>
 
           {lead.customer ? (
+            <>
             <dl className="mt-2 divide-y divide-neutral-200">
               <LinhaDado rotulo="Nome na base" valor={lead.customer.nome_completo} />
               <LinhaDado
@@ -325,6 +327,117 @@ export default async function LeadPage({
                 valor={lead.customer.ativo ? "Ativa" : "Inativa"}
               />
             </dl>
+
+            {ehGestor ? (
+              <details className="mt-2 border-t border-neutral-200 pt-2">
+                <summary className="cursor-pointer text-sm font-medium text-neutral-600 hover:text-neutral-800">
+                  Editar dados do cliente
+                </summary>
+                <form
+                  action={atualizarCliente}
+                  className="mt-2 flex flex-col gap-2"
+                >
+                  <input type="hidden" name="lead_id" value={lead.id} />
+                  <input
+                    type="hidden"
+                    name="customer_id"
+                    value={lead.customer.id}
+                  />
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="flex flex-col gap-1">
+                      <label
+                        htmlFor="cliente-documento"
+                        className="text-sm font-medium text-neutral-800"
+                      >
+                        CPF/CNPJ
+                      </label>
+                      <input
+                        id="cliente-documento"
+                        name="documento"
+                        inputMode="numeric"
+                        defaultValue={lead.customer.documento ?? ""}
+                        placeholder="só números"
+                        className={CAMPO}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label
+                        htmlFor="cliente-email"
+                        className="text-sm font-medium text-neutral-800"
+                      >
+                        E-mail
+                      </label>
+                      <input
+                        id="cliente-email"
+                        name="email"
+                        type="email"
+                        defaultValue={lead.customer.email ?? ""}
+                        className={CAMPO}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label
+                        htmlFor="cliente-abertura"
+                        className="text-sm font-medium text-neutral-800"
+                      >
+                        Conta aberta em
+                      </label>
+                      <input
+                        id="cliente-abertura"
+                        name="conta_aberta_em"
+                        type="date"
+                        defaultValue={lead.customer.conta_aberta_em ?? ""}
+                        className={CAMPO}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label
+                        htmlFor="cliente-situacao"
+                        className="text-sm font-medium text-neutral-800"
+                      >
+                        Situação
+                      </label>
+                      <select
+                        id="cliente-situacao"
+                        name="situacao"
+                        defaultValue={lead.customer.ativo ? "ativa" : "inativa"}
+                        className={CAMPO}
+                      >
+                        <option value="ativa">Ativa</option>
+                        <option value="inativa">Inativa</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label
+                      htmlFor="cliente-contas"
+                      className="text-sm font-medium text-neutral-800"
+                    >
+                      Adicionar conta(s)
+                    </label>
+                    <input
+                      id="cliente-contas"
+                      name="contas"
+                      placeholder="separe várias por vírgula"
+                      className={CAMPO}
+                    />
+                    <p className="text-xs text-neutral-600">
+                      Contas existentes não saem por aqui — a importação da
+                      base é quem manda na lista completa.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button type="submit" variant="secondary" size="sm">
+                      Salvar dados do cliente
+                    </Button>
+                  </div>
+                </form>
+              </details>
+            ) : null}
+            </>
           ) : lead.status === "ganho" ? (
             <div className="mt-2">
               <p className="text-sm text-neutral-600">
