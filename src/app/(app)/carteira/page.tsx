@@ -6,6 +6,7 @@ import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
 import { formatarReais, formatarTelefone } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { AbrirConversa } from "./abrir-conversa";
 
 export const metadata: Metadata = { title: "Carteira · Zeve CRM" };
 
@@ -44,6 +45,7 @@ type LinhaCarteira = {
   ltv_centavos: number | null;
   lead_id: string | null;
   telefone_e164: string | null;
+  telefone_cliente?: string | null;
   dias_sem_contato: number | null;
 };
 
@@ -530,9 +532,14 @@ export default async function CarteiraPage({
                                   />
                                 </Link>
                               </span>
+                            ) : linha.telefone_cliente ? (
+                              <AbrirConversa
+                                customerId={linha.customer_id}
+                                nome={linha.nome_completo}
+                              />
                             ) : (
                               <span className="text-xs text-neutral-400">
-                                sem lead
+                                sem telefone
                               </span>
                             )}
                           </td>
