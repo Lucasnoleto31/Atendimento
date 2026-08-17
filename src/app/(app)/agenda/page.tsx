@@ -72,7 +72,9 @@ export default async function AgendaPage({
   let consultaTarefas = supabase
     .from("lead_tasks")
     .select(
-      "id, titulo, vence_em, concluida_em, responsavel_id, lead:leads(id, nome), responsavel:profiles(nome)",
+      // profiles!responsavel_id: lead_tasks tem DUAS FKs para profiles (autor
+      // e responsável) — sem a dica o PostgREST recusa o embed (PGRST201).
+      "id, titulo, vence_em, concluida_em, responsavel_id, lead:leads(id, nome), responsavel:profiles!responsavel_id(nome)",
     )
     .gte("vence_em", `${mesParam}-01T00:00:00-03:00`)
     .lt("vence_em", `${mesParam}-${String(diasNoMes).padStart(2, "0")}T23:59:59-03:00`)
@@ -85,7 +87,9 @@ export default async function AgendaPage({
   let consultaPendentes = supabase
     .from("lead_tasks")
     .select(
-      "id, titulo, vence_em, concluida_em, responsavel_id, lead:leads(id, nome), responsavel:profiles(nome)",
+      // profiles!responsavel_id: lead_tasks tem DUAS FKs para profiles (autor
+      // e responsável) — sem a dica o PostgREST recusa o embed (PGRST201).
+      "id, titulo, vence_em, concluida_em, responsavel_id, lead:leads(id, nome), responsavel:profiles!responsavel_id(nome)",
     )
     .is("concluida_em", null)
     .order("vence_em")
