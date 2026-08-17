@@ -30,8 +30,9 @@ export async function GET(request: NextRequest) {
 
 function assinaturaValida(corpo: string, assinatura: string | null): boolean {
   const segredo = process.env.META_APP_SECRET;
-  // Sem segredo configurado, aceita — ambiente de desenvolvimento.
-  if (!segredo) return true;
+  // Sem segredo: aceita só em desenvolvimento. Em produção o endpoint é
+  // público e escreve com service role — sem validação, recusa tudo.
+  if (!segredo) return process.env.NODE_ENV !== "production";
   if (!assinatura?.startsWith("sha256=")) return false;
 
   const esperada = createHmac("sha256", segredo).update(corpo).digest("hex");
@@ -64,8 +65,31 @@ type MensagemMeta = {
 type StatusMeta = {
   id?: string;
   status?: string;
-  errors?: { title?: string; message?: string }[];
+  errors?: {
+    code?: number;
+    title?: string;
+    message?: string;
+    error_data?: { details?: string };
+  }[];
 };
+
+/** Tradução dos códigos de falha mais comuns da Graph API. */
+function descreverErroMeta(erro: NonNullable<StatusMeta["errors"]>[number]) {
+  switch (erro.code) {
+    case 131047:
+      return "Janela de 24h fechada — fora dela só template aprovado chega.";
+    case 131030:
+      return "Número fora da lista de destinatários de teste (app em modo desenvolvimento).";
+    case 190:
+      return "Token da Meta inválido ou expirado.";
+    case 131026:
+      return "Não entregue — o número pode não ter WhatsApp ou bloqueou a empresa.";
+    default:
+      return (
+        erro.error_data?.details ?? erro.title ?? erro.message ?? "Falha no envio."
+      );
+  }
+}
 
 type ValorMeta = {
   metadata?: { phone_number_id?: string };
@@ -116,8 +140,9 @@ export async function POST(request: NextRequest) {
           .eq("metadados->>message_id", status.id)
           .maybeSingle();
         if (linha) {
-          const erro =
-            status.errors?.[0]?.title ?? status.errors?.[0]?.message ?? null;
+          const erro = status.errors?.[0]
+            ? descreverErroMeta(status.errors[0])
+            : null;
           await service
             .from("lead_interactions")
             .update({
@@ -162,6 +187,23 @@ export async function POST(request: NextRequest) {
 
   // Sempre 200 rápido: a Meta corta webhooks que falham repetidamente.
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Contas WhatsApp BR antigas chegam da Meta sem o nono dígito (55+DDD+8).
+ * O lookup considera as duas grafias para não duplicar lead no cutover.
+ */
+function variantesTelefone(telefone: string): string[] {
+  const variantes = [telefone];
+  if (telefone.startsWith("55")) {
+    if (telefone.length === 12) {
+      variantes.push(`${telefone.slice(0, 4)}9${telefone.slice(4)}`);
+    }
+    if (telefone.length === 13 && telefone[4] === "9") {
+      variantes.push(telefone.slice(0, 4) + telefone.slice(5));
+    }
+  }
+  return variantes;
 }
 
 async function processarMensagem(
@@ -219,11 +261,12 @@ async function processarMensagem(
         .maybeSingle()
     : { data: null };
 
-  const { data: existente } = await service
+  const { data: candidatos } = await service
     .from("leads")
-    .select("id, status, primeira_resposta_em, whatsapp_instance_id")
-    .eq("telefone_e164", telefone)
-    .maybeSingle();
+    .select("id, status, primeira_resposta_em, whatsapp_instance_id, telefone_e164")
+    .in("telefone_e164", variantesTelefone(telefone));
+  const existente =
+    candidatos?.find((l) => l.telefone_e164 === telefone) ?? candidatos?.[0] ?? null;
 
   const agora = new Date().toISOString();
   let leadId: string;

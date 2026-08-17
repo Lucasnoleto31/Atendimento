@@ -209,6 +209,33 @@ export async function excluirMensagem(formData: FormData) {
 // Instâncias de WhatsApp
 // ===========================================================================
 
+/**
+ * Leads que chegaram pelo webhook da Meta antes de o phone_number_id ser
+ * cadastrado ficam sem vínculo com instância. Ao conectar a instância, adota
+ * os órfãos cujas mensagens chegaram por esse número.
+ */
+async function adotarLeadsOrfaos(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  instanciaId: string,
+  phoneNumberId: string,
+) {
+  const { data: interacoes } = await supabase
+    .from("lead_interactions")
+    .select("lead_id")
+    .eq("tipo", "mensagem_recebida")
+    .eq("metadados->>phone_number_id", phoneNumberId)
+    .limit(1000);
+
+  const ids = [...new Set((interacoes ?? []).map((i) => i.lead_id as string))];
+  if (ids.length === 0) return;
+
+  await supabase
+    .from("leads")
+    .update({ whatsapp_instance_id: instanciaId })
+    .in("id", ids)
+    .is("whatsapp_instance_id", null);
+}
+
 export async function criarInstancia(formData: FormData) {
   await exigirGestor();
   const nome = String(formData.get("nome") ?? "").trim();
@@ -229,18 +256,25 @@ export async function criarInstancia(formData: FormData) {
 
   const phoneNumberId = String(formData.get("meta_phone_number_id") ?? "").trim();
 
-  const { error } = await supabase.from("whatsapp_instances").insert({
-    nome,
-    telefone_e164: telefone,
-    vendedor_id: vendedorId || null,
-    meta_phone_number_id: phoneNumberId || null,
-  });
+  const { data: nova, error } = await supabase
+    .from("whatsapp_instances")
+    .insert({
+      nome,
+      telefone_e164: telefone,
+      vendedor_id: vendedorId || null,
+      meta_phone_number_id: phoneNumberId || null,
+    })
+    .select("id")
+    .single();
   if (error)
     terminar(
       error.code === "23505"
         ? "Já existe uma instância com esse telefone."
         : error.message,
     );
+  if (phoneNumberId && nova) {
+    await adotarLeadsOrfaos(supabase, nova.id, phoneNumberId);
+  }
   terminar();
 }
 
@@ -263,6 +297,7 @@ export async function atualizarInstancia(formData: FormData) {
     })
     .eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
+  if (phoneNumberId) await adotarLeadsOrfaos(supabase, id, phoneNumberId);
   terminar();
 }
 
