@@ -642,8 +642,10 @@ function Barra({
 }) {
   const largura = maximo > 0 ? Math.max((valor / maximo) * 100, valor > 0 ? 2 : 0) : 0;
   return (
-    <li className="flex items-center gap-1">
-      <span className="w-[152px] shrink-0 truncate text-sm text-neutral-800">
+    // No celular o rótulo ocupa a linha inteira e a barra desce — lado a
+    // lado, sobravam ~13px para a barra em 375px.
+    <li className="flex flex-wrap items-center gap-1">
+      <span className="w-full truncate text-sm text-neutral-800 sm:w-[152px] sm:shrink-0">
         {rotulo}
       </span>
       <span

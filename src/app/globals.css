@@ -111,6 +111,20 @@
   }
 }
 
+/*
+ * Safari do iPhone dá zoom automático (e permanente) na página ao focar
+ * qualquer campo com fonte menor que 16px — e o zoom desalinha o layout
+ * inteiro. Em telas de toque, os controles sobem para 16px; fora de camada
+ * (@layer), esta regra vence as utilities text-sm/text-xs dos componentes.
+ */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

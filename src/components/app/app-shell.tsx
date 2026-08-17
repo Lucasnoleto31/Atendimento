@@ -58,7 +58,7 @@ export function AppShell({
         <RodapeUsuario perfil={perfil} />
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex h-[64px] items-center justify-between gap-1 border-b border-neutral-200 bg-neutral-0 px-2 lg:hidden">
           <Marca compacto />
           <button
@@ -85,7 +85,9 @@ export function AppShell({
               animate={{ opacity: 1, y: 0 }}
               exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4 }}
               transition={{ duration: 0.24, ease: [0.2, 0, 0, 1] }}
-              className="border-b border-neutral-200 bg-neutral-0 lg:hidden"
+              // Overlay sobre o conteúdo: no fluxo ele empurrava telas de
+              // altura travada (ex.: /chat com 100dvh) e criava rolagem dupla.
+              className="absolute inset-x-0 top-[64px] z-40 border-b border-neutral-200 bg-neutral-0 shadow-lg lg:hidden"
               onClick={() => setMenuAberto(false)}
             >
               <Navegacao itens={itens} />

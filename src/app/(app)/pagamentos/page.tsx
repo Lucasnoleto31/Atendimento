@@ -206,13 +206,15 @@ export default async function PagamentosPage({
               const bateu =
                 v.meta_mensal_centavos > 0 && v.realizado >= v.meta_mensal_centavos;
               return (
-                <li key={v.id} className="flex items-center gap-1">
+                // flex-wrap: em 375px o valor desce para a linha de baixo em
+                // vez de estourar a borda e criar rolagem horizontal.
+                <li key={v.id} className="flex flex-wrap items-center gap-1">
                   <span className="w-[180px] shrink-0 truncate text-sm text-neutral-800">
                     {v.nome}
                   </span>
                   <span
                     aria-hidden
-                    className="h-1 flex-1 overflow-hidden rounded-sm bg-neutral-100"
+                    className="h-1 min-w-[120px] flex-1 overflow-hidden rounded-sm bg-neutral-100"
                   >
                     <span
                       className={cn(
@@ -222,7 +224,7 @@ export default async function PagamentosPage({
                       style={{ width: `${pct}%` }}
                     />
                   </span>
-                  <span className="w-[176px] shrink-0 text-right font-mono text-xs text-neutral-600 tabular-nums">
+                  <span className="ml-auto w-[176px] shrink-0 text-right font-mono text-xs text-neutral-600 tabular-nums">
                     {formatarReais(v.realizado)}
                     {v.meta_mensal_centavos > 0
                       ? ` / ${formatarReais(v.meta_mensal_centavos)}`

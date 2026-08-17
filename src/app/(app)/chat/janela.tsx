@@ -45,7 +45,19 @@ export type Agendada = {
 };
 
 const ESTADO: ResultadoEnvio = {};
-const INTERVALO_ATUALIZACAO = 5_000;
+// 30s: o tempo real (Supabase) cobre o imediato; o polling é só rede de
+// segurança. Intervalos curtos derrubavam o Safari do iPhone por memória.
+const INTERVALO_ATUALIZACAO = 30_000;
+
+function assinarPonteiroGrosso(avisar: () => void) {
+  const mq = window.matchMedia("(pointer: coarse)");
+  mq.addEventListener("change", avisar);
+  return () => mq.removeEventListener("change", avisar);
+}
+
+function lerPonteiroGrosso() {
+  return window.matchMedia("(pointer: coarse)").matches;
+}
 const MAX_ANEXOS = 5;
 const MAX_TAMANHO_ANEXO = 16 * 1024 * 1024; // teto do WhatsApp para mídia
 const LIMIAR_FIM_PX = 80;
@@ -372,6 +384,14 @@ export function Janela({
     }, INTERVALO_ATUALIZACAO);
     return () => clearInterval(intervalo);
   }, [router]);
+
+  // Teclado virtual (iPhone/Android): sem Shift+Enter, Enter deve quebrar
+  // linha. Lido do cliente; no servidor assume teclado físico.
+  const ehToque = useSyncExternalStore(
+    assinarPonteiroGrosso,
+    lerPonteiroGrosso,
+    () => false,
+  );
 
   // Limpa campo e anexos após envio (ajuste durante o render).
   const [estadoAnterior, setEstadoAnterior] = useState(estado);
@@ -765,7 +785,7 @@ export function Janela({
                     }
                     disabled={agendando}
                     onClick={() => cancelarAgendada(agendada.id)}
-                    className="inline-flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] hover:bg-neutral-200 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
+                    className="inline-flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] -m-[6px] hover:bg-neutral-200 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
                   >
                     <X size={12} strokeWidth={1.5} aria-hidden />
                   </button>
@@ -964,7 +984,7 @@ export function Janela({
                     type="button"
                     aria-label={`Remover anexo ${arquivo.name}`}
                     onClick={() => removerArquivo(i)}
-                    className="inline-flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] hover:bg-neutral-200 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-primary-500"
+                    className="inline-flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] -m-[6px] hover:bg-neutral-200 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-primary-500"
                   >
                     <X size={12} strokeWidth={1.5} aria-hidden />
                   </button>
@@ -1008,15 +1028,21 @@ export function Janela({
                 fecharPainel();
                 return;
               }
-              if (e.key === "Enter" && !e.shiftKey) {
+              // No teclado do iPhone não existe Shift+Enter: lá o return
+              // quebra linha e o envio é só pelo botão.
+              if (e.key === "Enter" && !e.shiftKey && !ehToque) {
                 e.preventDefault();
                 if (podeEnviar) formRef.current?.requestSubmit();
               }
             }}
             placeholder={
               modo === "nota"
-                ? "Nota interna — o lead não vê… (Enter salva)"
-                : 'Escreva a mensagem… ("/" para prontas, Enter envia)'
+                ? ehToque
+                  ? "Nota interna — o lead não vê…"
+                  : "Nota interna — o lead não vê… (Enter salva)"
+                : ehToque
+                  ? 'Escreva a mensagem… ("/" para prontas)'
+                  : 'Escreva a mensagem… ("/" para prontas, Enter envia)'
             }
             className={cn(
               "field-sizing-content max-h-[240px] min-h-[88px] w-full resize-y rounded-md border px-1.5 py-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
@@ -1079,7 +1105,7 @@ export function Janela({
               }}
               className={cn(
                 BOTAO_FERRAMENTA,
-                "hidden sm:inline-flex disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
+                "disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
               )}
             >
               <Clock size={16} strokeWidth={1.5} aria-hidden />

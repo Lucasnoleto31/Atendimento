@@ -511,7 +511,7 @@ export default async function LeadPage({
             </ul>
           </nav>
 
-          <dl className="mt-2 grid grid-cols-3 gap-2 border-y border-neutral-200 py-2">
+          <dl className="mt-2 grid grid-cols-1 gap-1 border-y border-neutral-200 py-2 sm:grid-cols-3 sm:gap-2">
             <div>
               <dt className="text-xs tracking-[0.06em] text-neutral-600 uppercase">
                 Últimos 30 dias

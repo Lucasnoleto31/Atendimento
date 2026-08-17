@@ -233,7 +233,7 @@ export function FerramentasConversa({
               onClick={() =>
                 executar(() => alternarEtiquetaChat(leadId, etiqueta.id, false))
               }
-              className="inline-flex h-[16px] w-[16px] items-center justify-center rounded-sm opacity-70 transition-opacity duration-[120ms] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
+              className="inline-flex h-[28px] w-[28px] items-center justify-center rounded-sm opacity-70 transition-opacity duration-[120ms] -m-[6px] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
             >
               <X size={12} strokeWidth={1.5} aria-hidden />
             </button>
@@ -265,7 +265,9 @@ export function FerramentasConversa({
               <div
                 role="group"
                 aria-label="Etiquetas do lead"
-                className="absolute left-0 top-[calc(100%+4px)] z-20 w-[240px] rounded-[10px] border border-neutral-200 bg-neutral-0 py-0.5 shadow-lg"
+                // No mobile ancora pela direita — ancorado à esquerda, os
+                // 240px estouravam a borda e criavam rolagem horizontal.
+                className="absolute top-[calc(100%+4px)] z-20 w-[240px] max-w-[calc(100vw-24px)] rounded-[10px] border border-neutral-200 bg-neutral-0 py-0.5 shadow-lg max-lg:right-0 lg:left-0"
               >
                 {etiquetas.length === 0 ? (
                   <p className="px-1.5 py-1 text-sm text-neutral-600">

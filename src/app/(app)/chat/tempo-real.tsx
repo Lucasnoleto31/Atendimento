@@ -6,10 +6,13 @@ import { createClient } from "@/lib/supabase/client";
 
 /**
  * Assina INSERTs de lead_interactions no Supabase Realtime e atualiza a
- * tela na hora (com um respiro de 800ms para rajadas). Exige a publication
- * da migração 0014; sem ela, simplesmente não chega evento e o polling
- * continua cobrindo.
+ * tela (com um respiro de 3s para rajadas — cada refresh refaz o RSC da
+ * página inteira, e no iPhone o excesso derrubava a aba por memória).
+ * Exige a publication da migração 0014; sem ela, simplesmente não chega
+ * evento e o polling continua cobrindo.
  */
+const RESPIRO_MS = 3_000;
+
 export function AtualizadorTempoReal() {
   const router = useRouter();
   const timerRef = useRef<number | null>(null);
@@ -25,8 +28,9 @@ export function AtualizadorTempoReal() {
           if (timerRef.current !== null) return;
           timerRef.current = window.setTimeout(() => {
             timerRef.current = null;
-            router.refresh();
-          }, 800);
+            // Aba oculta não paga o custo; o polling cobre quando voltar.
+            if (document.visibilityState === "visible") router.refresh();
+          }, RESPIRO_MS);
         },
       )
       .subscribe();

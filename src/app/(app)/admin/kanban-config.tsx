@@ -110,12 +110,14 @@ export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) 
 
             <ol className="mt-2 flex flex-col gap-1">
               {pipeline.etapas.map((etapa, i) => (
-                <li key={etapa.id} className="flex items-center gap-1">
+                // flex-wrap: em 375px os botões descem para a segunda linha em
+                // vez de esmagar o campo de nome até sumir.
+                <li key={etapa.id} className="flex flex-wrap items-center gap-1">
                   <span className="w-2 shrink-0 text-right font-mono text-xs text-neutral-400 tabular-nums">
                     {etapa.ordem}
                   </span>
 
-                  <form action={renomearEtapa} className="flex min-w-0 flex-1 items-center gap-1">
+                  <form action={renomearEtapa} className="flex min-w-[180px] flex-1 items-center gap-1">
                     <input type="hidden" name="id" value={etapa.id} />
                     <label htmlFor={`etapa-${etapa.id}`} className="sr-only">
                       Nome da etapa

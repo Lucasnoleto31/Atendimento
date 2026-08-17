@@ -9,12 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
     "framer-motion": "^13.1.0",
-    "lamejs": "^1.2.1",
     "lucide-react": "^1.31.0",
     "next": "16.3.1",
     "react": "19.2.8",

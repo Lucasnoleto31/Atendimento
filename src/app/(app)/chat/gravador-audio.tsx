@@ -2,39 +2,45 @@
 
 import { useRef, useState } from "react";
 import { Mic, Square } from "lucide-react";
-import lamejs from "lamejs";
+// Fork do lamejs com o módulo MPEGMode corrigido — o original (1.2.1) lança
+// "MPEGMode is not defined" em qualquer bundler e a conversão nunca funciona.
+import lamejs from "@breezystack/lamejs";
 import { cn } from "@/lib/utils";
 
 const KBPS = 64;
 const BLOCO = 1152; // tamanho de quadro do MP3
 
-/** Converte a gravação (WebM/Opus) para MP3, que o WhatsApp aceita. */
+/** Converte a gravação (WebM/Opus ou MP4/AAC do iOS) para MP3, que o WhatsApp aceita. */
 async function converterParaMp3(gravacao: Blob): Promise<File> {
   const contexto = new AudioContext();
-  const audio = await contexto.decodeAudioData(await gravacao.arrayBuffer());
-  const canal = audio.getChannelData(0); // mono basta para voz
+  try {
+    const audio = await contexto.decodeAudioData(await gravacao.arrayBuffer());
+    const canal = audio.getChannelData(0); // mono basta para voz
 
-  const amostras = new Int16Array(canal.length);
-  for (let i = 0; i < canal.length; i++) {
-    amostras[i] = Math.max(-1, Math.min(1, canal[i])) * 0x7fff;
+    const amostras = new Int16Array(canal.length);
+    for (let i = 0; i < canal.length; i++) {
+      amostras[i] = Math.max(-1, Math.min(1, canal[i])) * 0x7fff;
+    }
+
+    const codificador = new lamejs.Mp3Encoder(1, audio.sampleRate, KBPS);
+    const pedacos: Uint8Array[] = [];
+    for (let i = 0; i < amostras.length; i += BLOCO) {
+      const pedaco = codificador.encodeBuffer(amostras.subarray(i, i + BLOCO));
+      if (pedaco.length > 0) pedacos.push(pedaco);
+    }
+    const final = codificador.flush();
+    if (final.length > 0) pedacos.push(final);
+
+    return new File(
+      [new Blob(pedacos as BlobPart[], { type: "audio/mpeg" })],
+      `voz-${Date.now()}.mp3`,
+      { type: "audio/mpeg" },
+    );
+  } finally {
+    // Fechar sempre — o iOS limita ~4 AudioContexts por página; vazar um a
+    // cada erro esgotava o limite e silenciava o recurso.
+    void contexto.close().catch(() => {});
   }
-
-  const codificador = new lamejs.Mp3Encoder(1, audio.sampleRate, KBPS);
-  const pedacos: Int8Array[] = [];
-  for (let i = 0; i < amostras.length; i += BLOCO) {
-    const pedaco = codificador.encodeBuffer(amostras.subarray(i, i + BLOCO));
-    if (pedaco.length > 0) pedacos.push(pedaco);
-  }
-  const final = codificador.flush();
-  if (final.length > 0) pedacos.push(final);
-
-  await contexto.close();
-
-  return new File(
-    [new Blob(pedacos as BlobPart[], { type: "audio/mpeg" })],
-    `voz-${Date.now()}.mp3`,
-    { type: "audio/mpeg" },
-  );
 }
 
 /**
