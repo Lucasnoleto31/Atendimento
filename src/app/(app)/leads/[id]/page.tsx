@@ -342,13 +342,12 @@ export default async function LeadPage({
                     htmlFor="conta-cliente"
                     className="text-sm font-medium text-neutral-800"
                   >
-                    Conta na corretora
+                    Conta(s) na corretora
                   </label>
                   <input
                     id="conta-cliente"
                     name="conta"
-                    inputMode="numeric"
-                    placeholder="opcional — só números"
+                    placeholder="opcional — separe várias por vírgula"
                     className={CAMPO}
                   />
                 </div>
@@ -484,13 +483,12 @@ export default async function LeadPage({
                   htmlFor="conta"
                   className="text-sm font-medium text-neutral-800"
                 >
-                  Conta na corretora
+                  Conta(s) na corretora
                 </label>
                 <input
                   id="conta"
                   name="conta"
-                  inputMode="numeric"
-                  placeholder="opcional — só números"
+                  placeholder="opcional — separe várias por vírgula"
                   className={CAMPO}
                 />
               </div>

@@ -12,11 +12,22 @@ import { normalizarConta } from "@/lib/imports/tabular";
  */
 export async function garantirClienteDoLead(
   leadId: string,
-  contaBruta?: string,
+  contasBrutas?: string,
 ): Promise<{ ok?: true; erro?: string }> {
-  const conta = contaBruta ? normalizarConta(contaBruta) : null;
-  if (contaBruta?.trim() && !conta) {
-    return { erro: "Conta inválida — use só os números (mínimo 3 dígitos)." };
+  // Aceita várias contas de uma vez: "12345, 67890" ou separadas por espaço.
+  const partes = (contasBrutas ?? "")
+    .split(/[,;\s]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const contas: string[] = [];
+  for (const parte of partes) {
+    const conta = normalizarConta(parte);
+    if (!conta) {
+      return {
+        erro: `Conta inválida: "${parte}" — use só os números (mínimo 3 dígitos).`,
+      };
+    }
+    if (!contas.includes(conta)) contas.push(conta);
   }
 
   const service = createServiceClient();
@@ -30,11 +41,12 @@ export async function garantirClienteDoLead(
   let customerId = lead.customer_id as string | null;
 
   // Conta já cadastrada aponta o dono (lotes importados antes da base).
-  if (!customerId && conta) {
+  if (!customerId && contas.length > 0) {
     const { data } = await service
       .from("customer_accounts")
       .select("customer_id")
-      .eq("conta", conta)
+      .in("conta", contas)
+      .limit(1)
       .maybeSingle();
     customerId = (data?.customer_id as string | undefined) ?? null;
   }
@@ -63,17 +75,17 @@ export async function garantirClienteDoLead(
     customerId = novo.id as string;
   }
 
-  if (conta) {
-    // ignoreDuplicates: se a conta já pertence a alguém, não rouba — a
+  if (contas.length > 0) {
+    // ignoreDuplicates: conta que já pertence a alguém não é roubada — a
     // importação da base resolve conflito de verdade via mesclar_clientes.
     const { error } = await service
       .from("customer_accounts")
       .upsert(
-        { customer_id: customerId, conta },
+        contas.map((conta) => ({ customer_id: customerId, conta })),
         { onConflict: "conta", ignoreDuplicates: true },
       );
     if (error) {
-      return { erro: `Cliente criado, mas a conta não gravou: ${error.message}` };
+      return { erro: `Cliente criado, mas as contas não gravaram: ${error.message}` };
     }
   }
 
