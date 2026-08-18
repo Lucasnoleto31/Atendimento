@@ -31,6 +31,16 @@ type Relatorio = {
     clientes: number;
     gasto_centavos: number;
   }[];
+  /** Uma linha por campanha; quem não veio de campanha entra pelo canal. */
+  por_origem?: {
+    origem: string;
+    canal: string;
+    campanha: boolean;
+    leads: number;
+    ganhos: number;
+    clientes: number;
+    gasto_centavos: number;
+  }[];
   por_vendedor: {
     vendedor: string;
     leads: number;
@@ -57,6 +67,20 @@ export default async function RelatoriosPage({
   });
 
   const r = (data ?? null) as Relatorio | null;
+
+  // Sem a migração 0022 a função ainda devolve só por_canal: a tabela cai
+  // para o agrupamento antigo em vez de sumir da tela.
+  const origens =
+    r?.por_origem ??
+    (r?.por_canal ?? []).map((c) => ({
+      origem: c.canal,
+      canal: c.canal,
+      campanha: false,
+      leads: c.leads,
+      ganhos: c.ganhos,
+      clientes: c.clientes,
+      gasto_centavos: c.gasto_centavos,
+    }));
 
   // Atividade da equipe (30 dias) — quem contata, quanto e com que resposta.
   // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
@@ -596,15 +620,22 @@ export default async function RelatoriosPage({
             </section>
           </div>
 
-          {/* Canais */}
-          <section aria-labelledby="canais-titulo" className="mt-3">
-            <h2 id="canais-titulo" className="text-h3 text-neutral-900">
-              Detalhamento por canal
+          {/* Campanhas */}
+          <section aria-labelledby="origens-titulo" className="mt-3">
+            <h2 id="origens-titulo" className="text-h3 text-neutral-900">
+              Detalhamento por campanha
             </h2>
+            <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
+              Uma linha por campanha. Lead que não veio de campanha aparece
+              pelo canal de entrada. O gasto lançado com o nome da campanha
+              vai inteiro para ela; o que foi lançado só no canal é rateado
+              entre as campanhas daquele canal pelo volume de leads.
+            </p>
             <div className="mt-2 overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-0 shadow-sm">
-              <table className="w-full min-w-[720px] border-collapse text-left">
+              <table className="w-full min-w-[820px] border-collapse text-left">
                 <thead>
                   <tr className="border-b border-neutral-200 bg-neutral-50">
+                    <Th>Campanha</Th>
                     <Th>Canal</Th>
                     <Th alinhar>Leads</Th>
                     <Th alinhar>Clientes</Th>
@@ -615,24 +646,35 @@ export default async function RelatoriosPage({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-200">
-                  {r.por_canal.map((canal) => (
-                    <tr key={canal.canal} className="h-[48px] hover:bg-neutral-50">
+                  {origens.map((origem) => (
+                    <tr
+                      key={`${origem.origem}|${origem.canal}`}
+                      className="h-[48px] hover:bg-neutral-50"
+                    >
                       <td className="px-2 text-sm font-medium text-neutral-800">
-                        {canal.canal}
+                        {origem.origem}
+                        {origem.campanha ? null : (
+                          <span className="ml-1 text-xs font-normal text-neutral-400">
+                            sem campanha
+                          </span>
+                        )}
                       </td>
-                      <Td>{numero(canal.leads)}</Td>
-                      <Td>{numero(canal.clientes)}</Td>
-                      <Td>{numero(canal.ganhos)}</Td>
-                      <Td>{percentual(canal.ganhos, canal.leads)}</Td>
+                      <td className="px-2 text-sm text-neutral-600">
+                        {origem.canal}
+                      </td>
+                      <Td>{numero(origem.leads)}</Td>
+                      <Td>{numero(origem.clientes)}</Td>
+                      <Td>{numero(origem.ganhos)}</Td>
+                      <Td>{percentual(origem.ganhos, origem.leads)}</Td>
                       <Td>
-                        {canal.gasto_centavos > 0
-                          ? formatarReais(canal.gasto_centavos)
+                        {origem.gasto_centavos > 0
+                          ? formatarReais(origem.gasto_centavos)
                           : "—"}
                       </Td>
                       <Td>
-                        {canal.gasto_centavos > 0 && canal.leads > 0
+                        {origem.gasto_centavos > 0 && origem.leads > 0
                           ? formatarReais(
-                              Math.round(canal.gasto_centavos / canal.leads),
+                              Math.round(origem.gasto_centavos / origem.leads),
                             )
                           : "—"}
                       </Td>
