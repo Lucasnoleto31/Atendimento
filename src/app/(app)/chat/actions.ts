@@ -158,7 +158,9 @@ export async function enviarMensagemLead(
 
   if (canal === "meta") {
     if (!lead.telefone_e164) {
-      return { erro: "Este lead não tem telefone para receber WhatsApp." };
+      return {
+        erro: "Este lead não tem telefone para receber WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
+      };
     }
     try {
       if (arquivos.length > 0) {
@@ -300,7 +302,7 @@ export async function enviarTemplateLead(
     // Na Meta o template abre conversa direto: só precisa do telefone.
     if (!lead.telefone_e164) {
       return {
-        erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp.",
+        erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
       };
     }
     try {
@@ -320,7 +322,7 @@ export async function enviarTemplateLead(
     if (!conversaId) {
       if (!lead.telefone_e164) {
         return {
-          erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp.",
+          erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
         };
       }
       try {
