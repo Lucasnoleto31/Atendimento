@@ -39,6 +39,7 @@ type Relatorio = {
     leads: number;
     ganhos: number;
     clientes: number;
+    templates: number;
     gasto_centavos: number;
   }[];
   por_vendedor: {
@@ -79,6 +80,7 @@ export default async function RelatoriosPage({
       leads: c.leads,
       ganhos: c.ganhos,
       clientes: c.clientes,
+      templates: 0,
       gasto_centavos: c.gasto_centavos,
     }));
 
@@ -627,12 +629,14 @@ export default async function RelatoriosPage({
             </h2>
             <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
               Uma linha por campanha. Lead que não veio de campanha aparece
-              pelo canal de entrada. O gasto lançado com o nome da campanha
-              vai inteiro para ela; o que foi lançado só no canal é rateado
-              entre as campanhas daquele canal pelo volume de leads.
+              pelo canal de entrada. O gasto conta cada template enviado aos
+              leads da campanha (R$ 0,25 por disparo, editável em
+              configurações) mais o que estiver lançado à mão por canal. O
+              custo por ganho divide esse gasto pelos leads ganhos — quanto
+              custou cada cliente, não cada disparo.
             </p>
             <div className="mt-2 overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-0 shadow-sm">
-              <table className="w-full min-w-[820px] border-collapse text-left">
+              <table className="w-full min-w-[900px] border-collapse text-left">
                 <thead>
                   <tr className="border-b border-neutral-200 bg-neutral-50">
                     <Th>Campanha</Th>
@@ -641,8 +645,9 @@ export default async function RelatoriosPage({
                     <Th alinhar>Clientes</Th>
                     <Th alinhar>Ganhos</Th>
                     <Th alinhar>Conversão</Th>
+                    <Th alinhar>Templates</Th>
                     <Th alinhar>Gasto</Th>
-                    <Th alinhar>Custo por lead</Th>
+                    <Th alinhar>Custo por ganho</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-200">
@@ -666,15 +671,16 @@ export default async function RelatoriosPage({
                       <Td>{numero(origem.clientes)}</Td>
                       <Td>{numero(origem.ganhos)}</Td>
                       <Td>{percentual(origem.ganhos, origem.leads)}</Td>
+                      <Td>{numero(origem.templates)}</Td>
                       <Td>
                         {origem.gasto_centavos > 0
                           ? formatarReais(origem.gasto_centavos)
                           : "—"}
                       </Td>
                       <Td>
-                        {origem.gasto_centavos > 0 && origem.leads > 0
+                        {origem.gasto_centavos > 0 && origem.ganhos > 0
                           ? formatarReais(
-                              Math.round(origem.gasto_centavos / origem.leads),
+                              Math.round(origem.gasto_centavos / origem.ganhos),
                             )
                           : "—"}
                       </Td>

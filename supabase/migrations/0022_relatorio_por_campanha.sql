@@ -6,9 +6,14 @@
 -- passa a ser a CAMPANHA do lead (leads.campanha); quem não veio de campanha
 -- nenhuma continua aparecendo pelo canal, como antes.
 --
--- Gasto: channel_spend já aceita campanha. O valor lançado com o nome da
--- campanha vai inteiro para ela; o que foi lançado só no canal é rateado
--- entre as campanhas daquele canal pelo volume de leads.
+-- Gasto: cada template enviado custa (settings.custo_template_centavos,
+-- padrão R$ 0,25). O relatório conta os templates que saíram para os leads
+-- de cada campanha e multiplica. Some a isso o que estiver lançado à mão em
+-- channel_spend: valor com o nome da campanha vai inteiro para ela, valor
+-- solto no canal é rateado pelo volume de leads.
+--
+-- Custo por ganho: gasto dividido pelos leads GANHOS da campanha — o que
+-- custou cada cliente, não cada disparo.
 --
 -- Mantém 'por_canal' no retorno para nada que dependa dele quebrar.
 --
@@ -26,6 +31,26 @@ with base as (
   from leads l
   where p_dias is null
      or l.criado_em >= now() - make_interval(days => p_dias)
+),
+
+-- Preço de um template enviado, em centavos.
+custo_template as (
+  select coalesce(
+    (select (valor #>> '{}')::numeric from settings
+      where chave = 'custo_template_centavos'),
+    25
+  ) as centavos
+),
+
+-- Templates que saíram para cada lead. Todo envio de template grava o nome
+-- dele em metadados->>'template' — é o que separa template de mensagem
+-- comum, que não é cobrada.
+templates_lead as (
+  select i.lead_id, count(*) as n
+  from lead_interactions i
+  where i.tipo = 'mensagem_enviada'
+    and i.metadados ? 'template'
+  group by i.lead_id
 ),
 
 -- Gasto lançado com o nome da campanha: vai inteiro para ela.
@@ -69,9 +94,11 @@ origens as (
     b.channel_id,
     count(*) as leads,
     count(*) filter (where b.status = 'ganho') as ganhos,
-    count(*) filter (where b.customer_id is not null) as clientes
+    count(*) filter (where b.customer_id is not null) as clientes,
+    coalesce(sum(tl.n), 0) as templates
   from base b
   left join channels ch on ch.id = b.channel_id
+  left join templates_lead tl on tl.lead_id = b.id
   group by 1, 2, 3, b.channel_id
 )
 
@@ -122,8 +149,10 @@ select jsonb_build_object(
           'leads', o.leads,
           'ganhos', o.ganhos,
           'clientes', o.clientes,
+          'templates', o.templates,
           'gasto_centavos',
-            coalesce(gcp.gasto, 0)
+            round(o.templates * ct.centavos)
+            + coalesce(gcp.gasto, 0)
             + coalesce(
                 round(gcg.gasto * o.leads::numeric / nullif(lc.n, 0)),
                 0
@@ -134,6 +163,7 @@ select jsonb_build_object(
       '[]'::jsonb
     )
     from origens o
+    cross join custo_template ct
     left join gasto_campanha gcp
       on o.eh_campanha and lower(gcp.campanha) = lower(o.origem)
     left join gasto_canal_geral gcg on gcg.channel_id = o.channel_id
@@ -192,3 +222,14 @@ $$;
 
 revoke execute on function relatorio_leads(integer) from public, anon;
 grant execute on function relatorio_leads(integer) to authenticated;
+
+-- Preço de um template, editável sem mexer em código.
+insert into settings (chave, valor, descricao) values
+  ('custo_template_centavos', '25'::jsonb,
+   'Custo em centavos de cada template de WhatsApp enviado.')
+on conflict (chave) do nothing;
+
+-- A contagem de templates varre só os envios de template, não a conversa toda.
+create index if not exists lead_interactions_template_idx
+  on lead_interactions (lead_id)
+  where tipo = 'mensagem_enviada' and metadados ? 'template';
