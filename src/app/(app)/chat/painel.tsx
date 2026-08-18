@@ -77,7 +77,7 @@ export function PainelLead({
   return (
     <aside
       aria-label="Contexto do lead"
-      className="hidden w-[280px] shrink-0 flex-col gap-2 overflow-y-auto border-l border-neutral-200 bg-neutral-0 p-1.5 xl:flex"
+      className="hidden min-h-0 w-[280px] shrink-0 flex-col gap-2 overflow-y-auto border-l border-neutral-200 bg-neutral-0 p-1.5 xl:flex"
     >
       <section aria-labelledby="painel-lead-titulo">
         <h2

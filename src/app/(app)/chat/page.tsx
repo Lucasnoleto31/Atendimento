@@ -537,12 +537,12 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   });
 
   return (
-    <div className="flex h-[calc(100dvh-64px)] min-h-0 lg:h-dvh">
+    <div className="flex h-[calc(100dvh-64px)] min-h-0 overflow-hidden lg:h-dvh">
       <AtualizadorTempoReal />
       {/* Lista de conversas */}
       <aside
         className={cn(
-          "w-full flex-col border-r border-neutral-200 bg-neutral-0 lg:flex lg:w-[320px] lg:shrink-0",
+          "w-full min-h-0 flex-col border-r border-neutral-200 bg-neutral-0 lg:flex lg:w-[320px] lg:shrink-0",
           atual ? "hidden" : "flex",
         )}
       >
@@ -673,7 +673,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       <section
         aria-label="Conversa"
         className={cn(
-          "min-w-0 flex-1 flex-col lg:flex",
+          "min-h-0 min-w-0 flex-1 flex-col lg:flex",
           atual ? "flex" : "hidden",
         )}
       >
