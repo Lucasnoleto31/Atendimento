@@ -14,6 +14,7 @@ import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { estiloEtiqueta } from "@/lib/etiquetas";
 import { processarCadencia } from "@/lib/cadencia";
 import { processarAgendadas } from "@/lib/agendadas";
+import { processarCampanhas } from "@/lib/campanhas";
 import {
   Janela,
   type Agendada,
@@ -114,6 +115,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const canal = canalAtivo();
   processarCadencia().catch(() => {});
   processarAgendadas().catch(() => {});
+  processarCampanhas().catch(() => {});
 
   // A lista da caixa de entrada. `comAdiado` desliga tudo que depende da
   // coluna chat_adiado_em, para a tela seguir de pé sem a migração 0017.

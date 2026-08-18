@@ -7,6 +7,7 @@ import {
 } from "@/lib/chatwoot";
 import { processarCadencia } from "@/lib/cadencia";
 import { processarAgendadas } from "@/lib/agendadas";
+import { processarCampanhas } from "@/lib/campanhas";
 
 /**
  * Sincronização incremental com o Chatwoot, para quando o webhook não
@@ -39,6 +40,7 @@ export async function sincronizarChatwoot(): Promise<void> {
   // Carona no heartbeat: cadência e mensagens agendadas andam por aqui.
   processarCadencia().catch(() => {});
   processarAgendadas().catch(() => {});
+  processarCampanhas().catch(() => {});
 
   const service = createServiceClient();
 

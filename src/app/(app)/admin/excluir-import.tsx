@@ -26,7 +26,7 @@ export function ExcluirImportacao({
   arquivo,
 }: {
   importId: string;
-  tipo: "clientes" | "lotes";
+  tipo: "clientes" | "lotes" | "leads";
   arquivo: string;
 }) {
   const [confirmando, setConfirmando] = useState(false);
@@ -68,7 +68,9 @@ export function ExcluirImportacao({
       <p className="max-w-[240px] text-right text-xs text-neutral-600">
         {tipo === "lotes"
           ? "Remove o histórico e os lotes que este upload gravou."
-          : "Remove só o histórico — os clientes importados permanecem."}
+          : tipo === "leads"
+            ? "Remove só o histórico — os leads importados permanecem."
+            : "Remove só o histórico — os clientes importados permanecem."}
       </p>
       <form action={formAction} className="flex items-center gap-1">
         <input type="hidden" name="import_id" value={importId} />

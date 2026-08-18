@@ -8,13 +8,13 @@ import { KanbanConfig, type PipelineComEtapas } from "./kanban-config";
 import { Usuarios, type UsuarioLinha } from "./usuarios";
 import { ChatwootImport } from "./chatwoot-import";
 import { HistoricoImport } from "./historico-import";
-import { importarClientes, importarLotes } from "./actions";
+import { importarClientes, importarLeads, importarLotes } from "./actions";
 
 export const metadata: Metadata = { title: "Administração · Zeve CRM" };
 
 type Importacao = {
   id: string;
-  tipo: "clientes" | "lotes";
+  tipo: "clientes" | "lotes" | "leads";
   arquivo_nome: string | null;
   referencia_data: string;
   status: "processando" | "concluida" | "falhou";
@@ -154,6 +154,47 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
           acao={importarLotes}
           comData
           rotulo="Importar lotes"
+        />
+
+        <ImportForm
+          titulo="Lista de leads"
+          descricao="Sobe a lista de uma campanha (Google Sheets exportado em CSV). Telefone repetido não vira lead duplicado: quem já existe só recebe a etiqueta. Quem já é cliente entra vinculado."
+          colunas="colunas: telefone · opcionais: nome, email, campanha"
+          acao={importarLeads}
+          extras={
+            <>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="etiqueta-leads"
+                  className="text-sm font-medium text-neutral-800"
+                >
+                  Etiqueta da lista
+                </label>
+                <input
+                  id="etiqueta-leads"
+                  name="etiqueta"
+                  type="text"
+                  placeholder="Comunidade Instagram"
+                  className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                />
+                <p className="text-xs text-neutral-600">
+                  É por ela que a campanha encontra o público. Criada se ainda
+                  não existir.
+                </p>
+              </div>
+
+              <label className="flex min-h-[40px] items-center gap-1 text-sm text-neutral-800">
+                <input
+                  name="distribuir"
+                  type="checkbox"
+                  defaultChecked
+                  className="h-[16px] w-[16px] accent-primary-600"
+                />
+                Dividir a lista entre a equipe
+              </label>
+            </>
+          }
+          rotulo="Importar leads"
         />
       </div>
 

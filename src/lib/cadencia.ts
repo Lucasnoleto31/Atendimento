@@ -36,7 +36,7 @@ type Regra = {
   ancora?: "lead_criado" | "conta_aberta" | "sem_giro" | "queda_lotes";
 };
 
-type Alvo = {
+export type Alvo = {
   leadId: string;
   nome: string;
   telefone: string;
@@ -380,7 +380,7 @@ async function alvosCliente(
     }));
 }
 
-async function dispararTemplate(
+export async function dispararTemplate(
   service: ReturnType<typeof createServiceClient>,
   canal: "meta" | "chatwoot",
   alvo: Alvo,

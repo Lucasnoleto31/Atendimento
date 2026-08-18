@@ -14,6 +14,7 @@ import {
 } from "@/lib/imports/tabular";
 import { prepararClientes, type GrupoCliente } from "@/lib/imports/clientes";
 import { prepararLotes } from "@/lib/imports/lotes";
+import { prepararLeads } from "@/lib/imports/leads";
 
 const LIMITE_BYTES = 20 * 1024 * 1024; // 20 MB — xlsx é maior que csv
 const BLOCO = 500;
@@ -29,6 +30,9 @@ export type ResultadoImport = {
   mesclados?: number;
   telefonesPreenchidos?: number;
   reativacao?: { queda: number; semGiro: number };
+  leadsNovos?: number;
+  leadsAtualizados?: number;
+  duplicadosNoArquivo?: number;
 };
 
 type Service = ReturnType<typeof createServiceClient>;
@@ -80,7 +84,7 @@ async function guardarArquivo(service: Service, arquivo: File, tipo: string) {
 async function abrirRegistro(
   service: Service,
   dados: {
-    tipo: "clientes" | "lotes";
+    tipo: "clientes" | "lotes" | "leads";
     arquivo: File;
     arquivoPath: string | null;
     referencia: string;
@@ -607,6 +611,191 @@ export async function importarLotes(
         semGiro:
           linhasReativacao.find((r) => r.motivo === "sem_giro")?.criados ?? 0,
       },
+    };
+  } catch (e) {
+    const detalhe = e instanceof Error ? e.message : String(e);
+    await fecharRegistro(service, registroId, { status: "falhou", detalhe });
+    return { erro: `Falha ao gravar: ${detalhe}` };
+  }
+}
+
+// ===========================================================================
+// Leads
+// ===========================================================================
+
+/** Etiqueta pelo nome; cria se não existir, para a campanha ter público. */
+async function garantirEtiqueta(service: Service, nome: string) {
+  const limpo = nome.trim();
+  if (!limpo) return null;
+
+  const { data: existente } = await service
+    .from("tags")
+    .select("id")
+    .ilike("nome", limpo)
+    .maybeSingle();
+  if (existente) return existente.id as string;
+
+  const { data: nova } = await service
+    .from("tags")
+    .insert({ nome: limpo, cor: "azul" })
+    .select("id")
+    .single();
+  return (nova?.id as string) ?? null;
+}
+
+export async function importarLeads(
+  _estado: ResultadoImport,
+  formData: FormData,
+): Promise<ResultadoImport> {
+  const perfil = await validarGestor();
+  if (!perfil) return { erro: "Só administração e gestão podem importar." };
+
+  const nomeEtiqueta = String(formData.get("etiqueta") ?? "").trim();
+  const distribuir = formData.get("distribuir") === "on";
+
+  const lido = await lerArquivo(formData);
+  if ("erro" in lido) return { erro: lido.erro };
+  const { arquivo, abas } = lido;
+
+  const aba = melhorAba(abas, [COLUNAS_TELEFONE]);
+  if (!aba) {
+    return { erro: "Nenhuma aba tem coluna de telefone." };
+  }
+
+  const { leads, duplicados, erros } = prepararLeads(aba.linhas);
+  if (leads.length === 0) {
+    return {
+      erro: "Nenhum telefone válido no arquivo.",
+      exemplosErro: erros.slice(0, 5),
+    };
+  }
+
+  const service = createServiceClient();
+  const arquivoPath = await guardarArquivo(service, arquivo, "leads");
+  const registroId = await abrirRegistro(service, {
+    tipo: "leads",
+    arquivo,
+    arquivoPath,
+    referencia: new Date().toISOString().slice(0, 10),
+    totalLinhas: aba.linhas.length,
+    autorId: perfil.id,
+  });
+
+  try {
+    const etiquetaId = nomeEtiqueta
+      ? await garantirEtiqueta(service, nomeEtiqueta)
+      : null;
+
+    const telefones = leads.map((l) => l.telefone);
+
+    // Quem já é lead não vira duplicata: só ganha a etiqueta da campanha.
+    const jaExiste = new Map<string, string>();
+    for (const parte of blocos(telefones)) {
+      const { data } = await service
+        .from("leads")
+        .select("id, telefone_e164")
+        .in("telefone_e164", parte);
+      (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
+        jaExiste.set(r.telefone_e164, r.id),
+      );
+    }
+
+    // Telefone que bate com a base de clientes entra já vinculado — a equipe
+    // vê na hora que aquele "lead" novo é cliente antigo.
+    const clientePorTelefone = new Map<string, string>();
+    for (const parte of blocos(telefones)) {
+      const { data } = await service
+        .from("customers")
+        .select("id, telefone_e164")
+        .in("telefone_e164", parte);
+      (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
+        clientePorTelefone.set(r.telefone_e164, r.id),
+      );
+    }
+
+    // Primeira etapa do kanban padrão — mesmo destino do lead criado à mão.
+    const { data: etapa } = await service
+      .from("pipeline_stages")
+      .select("id, pipeline:pipelines!inner(padrao)")
+      .eq("pipeline.padrao", true)
+      .order("ordem")
+      .limit(1)
+      .maybeSingle();
+
+    // Rodízio simples: lista grande dividida em partes iguais entre a equipe.
+    let equipe: string[] = [];
+    if (distribuir) {
+      const { data } = await service
+        .from("profiles")
+        .select("id")
+        .eq("ativo", true)
+        .in("papel", ["vendedor", "gestor"])
+        .order("nome");
+      equipe = (data ?? []).map((p: { id: string }) => p.id);
+    }
+
+    const novos = leads.filter((l) => !jaExiste.has(l.telefone));
+    const agora = new Date().toISOString();
+
+    const linhasNovas = novos.map((lead, i) => ({
+      nome: lead.nome,
+      telefone_e164: lead.telefone,
+      email: lead.email,
+      campanha: lead.campanha ?? (nomeEtiqueta || null),
+      entrada_motivo: "importacao" as const,
+      stage_id: etapa?.id ?? null,
+      customer_id: clientePorTelefone.get(lead.telefone) ?? null,
+      cliente_confirmado_em: clientePorTelefone.has(lead.telefone)
+        ? agora
+        : null,
+      responsavel_id:
+        equipe.length > 0 ? equipe[i % equipe.length] : null,
+    }));
+
+    for (const parte of blocos(linhasNovas)) {
+      const { data, error } = await service
+        .from("leads")
+        .upsert(parte, { onConflict: "telefone_e164" })
+        .select("id, telefone_e164");
+      if (error) throw new Error(error.message);
+      (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
+        jaExiste.set(r.telefone_e164, r.id),
+      );
+    }
+
+    if (etiquetaId) {
+      const vinculos = leads
+        .map((l) => jaExiste.get(l.telefone))
+        .filter((id): id is string => Boolean(id))
+        .map((lead_id) => ({ lead_id, tag_id: etiquetaId }));
+
+      for (const parte of blocos(vinculos)) {
+        await service
+          .from("lead_tags")
+          .upsert(parte, { onConflict: "lead_id,tag_id" });
+      }
+    }
+
+    await fecharRegistro(service, registroId, {
+      status: "concluida",
+      ok: leads.length,
+      erros: erros.length,
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/leads");
+    revalidatePath("/atendimento");
+    revalidatePath("/campanhas");
+
+    return {
+      ok: true,
+      totalLinhas: aba.linhas.length,
+      linhasOk: leads.length,
+      linhasErro: erros.length,
+      exemplosErro: erros.slice(0, 5),
+      leadsNovos: linhasNovas.length,
+      leadsAtualizados: leads.length - linhasNovas.length,
+      duplicadosNoArquivo: duplicados,
     };
   } catch (e) {
     const detalhe = e instanceof Error ? e.message : String(e);

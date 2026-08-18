@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useId } from "react";
+import { useActionState, useId, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
 import type { ResultadoImport } from "./actions";
@@ -22,6 +22,7 @@ export function ImportForm({
   colunas,
   acao,
   comData = false,
+  extras,
   rotulo,
 }: {
   titulo: string;
@@ -32,6 +33,8 @@ export function ImportForm({
     formData: FormData,
   ) => Promise<ResultadoImport>;
   comData?: boolean;
+  /** Campos próprios do formulário, entre o arquivo e o botão. */
+  extras?: ReactNode;
   rotulo: string;
 }) {
   const [estado, formAction] = useActionState(acao, ESTADO_INICIAL);
@@ -83,6 +86,8 @@ export function ImportForm({
           </div>
         ) : null}
 
+        {extras}
+
         <div>
           <BotaoEnviar rotulo={rotulo} />
         </div>
@@ -121,6 +126,16 @@ export function ImportForm({
                 {" "}
                 · {estado.telefonesPreenchidos} lead(s) ganharam telefone
               </>
+            ) : null}
+            {estado.leadsNovos !== undefined ? (
+              <>
+                {" "}
+                · {estado.leadsNovos} novo(s), {estado.leadsAtualizados} já
+                existiam
+              </>
+            ) : null}
+            {estado.duplicadosNoArquivo ? (
+              <> · {estado.duplicadosNoArquivo} repetido(s) no arquivo</>
             ) : null}
           </p>
 
