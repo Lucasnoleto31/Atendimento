@@ -363,11 +363,18 @@ export default async function ConfiguracoesPage({
       {/* Tags -------------------------------------------------------------- */}
       <section className="mt-4" aria-labelledby="tags-titulo">
         <h2 id="tags-titulo" className="text-h3 text-neutral-900">
-          Tags de atendimento
+          Etiquetas
         </h2>
         <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
-          A cor da etiqueta pinta a faixa lateral da conversa no Chat e o
-          cartão no Atendimento — a equipe reconhece o assunto de relance.
+          Etiqueta marca <strong className="font-medium">interesse</strong> do
+          lead e a <strong className="font-medium">campanha</strong> de onde
+          ele veio. A fase do funil não é etiqueta — é a coluna do kanban, em
+          Atendimento. Guardar a fase nos dois lugares faz um contradizer o
+          outro.
+        </p>
+        <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
+          A cor pinta a faixa lateral da conversa no Chat e o cartão no
+          Atendimento — a equipe reconhece o assunto de relance.
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-1">
           {(
