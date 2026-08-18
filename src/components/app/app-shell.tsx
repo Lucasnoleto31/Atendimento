@@ -126,7 +126,7 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Módulos" className="min-h-0 flex-1 overflow-y-auto p-1">
+    <nav aria-label="Módulos" className="relative min-h-0 flex-1 overflow-y-auto p-1">
       <ul className="flex flex-col gap-0.5">
         {itens.map((item) => {
           const Icon = item.icon;

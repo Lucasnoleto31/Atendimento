@@ -179,7 +179,7 @@ export function ListaConversas({
         </div>
       ) : null}
 
-      <ul className="min-h-0 flex-1 divide-y divide-neutral-200 overflow-y-auto">
+      <ul className="relative min-h-0 flex-1 divide-y divide-neutral-200 overflow-y-auto">
         {itens.length === 0 ? (
           <li className="p-2 text-sm text-neutral-600">Nenhuma conversa aqui.</li>
         ) : (
@@ -198,12 +198,16 @@ export function ListaConversas({
                       : "hover:bg-neutral-50",
                 )}
               >
+                {/* aria-label direto no input, sem span sr-only: sr-only é
+                    position:absolute e, sem ancestral posicionado dentro da
+                    lista, ancorava na coluna do shell — cada conversa abaixo
+                    da dobra esticava o DOCUMENTO (rolagem para o vazio). */}
                 <label className="flex h-[40px] w-[32px] shrink-0 cursor-pointer items-center justify-center">
-                  <span className="sr-only">Selecionar conversa de {item.nome}</span>
                   <input
                     type="checkbox"
                     checked={marcado}
                     onChange={() => alternar(item.id)}
+                    aria-label={`Selecionar conversa de ${item.nome}`}
                     className="h-[16px] w-[16px] accent-primary-600"
                   />
                 </label>
