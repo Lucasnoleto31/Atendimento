@@ -89,6 +89,10 @@ function descreverErroMeta(erro: NonNullable<StatusMeta["errors"]>[number]) {
       return "O cliente desativou mensagens de marketing da sua empresa no WhatsApp. Template de utilidade e resposta na janela de 24h ainda chegam.";
     case 131049:
       return "A Meta segurou o envio para preservar o engajamento (limite de marketing por usuário). Tente mais tarde ou por outro caminho.";
+    case 130472:
+      // Grupo de controle da Meta: ~1% dos usuários não recebe template de
+      // marketing de empresa nenhuma. Repetir dá o mesmo erro.
+      return "Este número está no grupo de teste da Meta e não recebe template de marketing de nenhuma empresa. Fale por outro caminho (ligação, e-mail) ou espere ele te mandar mensagem primeiro.";
     default:
       return (
         erro.error_data?.details ?? erro.title ?? erro.message ?? "Falha no envio."
@@ -161,11 +165,25 @@ export async function POST(request: NextRequest) {
               .update({ marketing_bloqueado_em: new Date().toISOString() })
               .eq("id", linha.lead_id);
           }
+          const metadados = (linha.metadados as Record<string, unknown>) ?? {};
+
+          // A Meta aceita o envio e só depois avisa que não entregou. Sem
+          // devolver isso para campanha_envios, a tela da campanha mostraria
+          // zero recusa enquanto o número apanha na prática.
+          if (erro && linha.lead_id && typeof metadados.campanha_id === "string") {
+            await service
+              .from("campanha_envios")
+              .update({ erro })
+              .eq("campanha_id", metadados.campanha_id)
+              .eq("lead_id", linha.lead_id)
+              .is("erro", null);
+          }
+
           await service
             .from("lead_interactions")
             .update({
               metadados: {
-                ...((linha.metadados as Record<string, unknown>) ?? {}),
+                ...metadados,
                 status_envio: status.status,
                 ...(erro ? { erro_envio: erro } : {}),
               },

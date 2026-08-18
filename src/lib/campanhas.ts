@@ -176,6 +176,7 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
               : { chatwoot_message_id: idMensagem }),
             via: "campanha",
             campanha: campanha.nome,
+            campanha_id: campanha.id,
             template: template.nome,
           },
         });
