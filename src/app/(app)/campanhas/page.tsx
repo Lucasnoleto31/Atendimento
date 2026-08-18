@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { listarTemplatesCanal } from "@/lib/canal";
 import { inicioDoDiaSaoPaulo } from "@/lib/campanhas";
+import { formatarDataCurta } from "@/lib/format";
 import { NovaCampanha, type TemplateOpcao } from "./nova-campanha";
 import { alterarStatusCampanha, excluirCampanha } from "./actions";
 
@@ -273,10 +274,7 @@ export default async function CampanhasPage({
                         <>
                           {" "}
                           · termina por volta de{" "}
-                          {previsao.data.toLocaleDateString("pt-BR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                          })}
+                          {formatarDataCurta(previsao.data)}
                         </>
                       ) : null}
                     </p>

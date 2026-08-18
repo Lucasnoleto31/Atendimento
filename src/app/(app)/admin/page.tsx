@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { formatarData } from "@/lib/format";
 import { perfilAtual } from "@/lib/auth";
 import { ImportForm } from "./import-form";
 import { ExcluirImportacao } from "./excluir-import";
@@ -384,7 +385,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                       ) : null}
                     </td>
                     <td className="px-2 text-right font-mono text-sm text-neutral-600 tabular-nums">
-                      {new Date(`${imp.referencia_data}T12:00:00`).toLocaleDateString("pt-BR")}
+                      {formatarData(imp.referencia_data)}
                     </td>
                     <td className="px-2 text-sm text-neutral-600">
                       {imp.autor?.nome ?? "—"}

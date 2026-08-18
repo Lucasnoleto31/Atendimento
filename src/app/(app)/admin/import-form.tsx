@@ -3,6 +3,7 @@
 import { useActionState, useId, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
+import { hojeEmBrasilia } from "@/lib/format";
 import type { ResultadoImport } from "./actions";
 
 const ESTADO_INICIAL: ResultadoImport = {};
@@ -77,7 +78,7 @@ export function ImportForm({
               id={dataId}
               name="referencia_data"
               type="date"
-              defaultValue={new Date().toISOString().slice(0, 10)}
+              defaultValue={hojeEmBrasilia()}
               className="h-[40px] w-full max-w-[240px] rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
             />
             <p className="text-xs text-neutral-600">

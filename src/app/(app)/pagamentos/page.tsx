@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Ban } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { formatarReais } from "@/lib/format";
+import { formatarData, formatarReais } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { cancelarVenda } from "./actions";
 
@@ -281,7 +281,7 @@ export default async function PagamentosPage({
                     return (
                       <tr key={venda.id} className="h-[48px] hover:bg-neutral-50">
                         <td className="px-2 font-mono text-sm text-neutral-600 tabular-nums">
-                          {new Date(venda.ocorreu_em).toLocaleDateString("pt-BR")}
+                          {formatarData(venda.ocorreu_em)}
                         </td>
                         <td className="max-w-[220px] truncate px-2">
                           {venda.lead ? (

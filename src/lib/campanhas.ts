@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { dispararTemplate, type Alvo } from "@/lib/cadencia";
+import { agoraEmBrasilia } from "@/lib/format";
 
 /**
  * Campanha com ritmo diário.
@@ -17,9 +18,6 @@ import { dispararTemplate, type Alvo } from "@/lib/cadencia";
 const INTERVALO_HEARTBEAT_MS = 5 * 60_000;
 /** Por rodada, para os envios se espalharem ao longo do expediente. */
 const LOTE_POR_RODADA = 10;
-const FUSO = "America/Sao_Paulo";
-/** Brasil não tem mais horário de verão — o deslocamento é fixo. */
-const DESLOCAMENTO = "-03:00";
 const VARREDURA_MAXIMA = 5_000;
 const PAGINA = 200;
 
@@ -44,36 +42,9 @@ export type ResultadoCampanhas = {
   campanhas: number;
 };
 
-/** Data, hora e dia da semana em São Paulo — o relógio da equipe. */
-function agoraEmSaoPaulo() {
-  const partes = new Intl.DateTimeFormat("en-CA", {
-    timeZone: FUSO,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-    weekday: "short",
-  }).formatToParts(new Date());
-
-  const pegar = (tipo: string) =>
-    partes.find((p) => p.type === tipo)?.value ?? "";
-
-  const dia = `${pegar("year")}-${pegar("month")}-${pegar("day")}`;
-  const hora = Number(pegar("hour"));
-  const semana = pegar("weekday");
-
-  return {
-    dia,
-    hora,
-    fimDeSemana: semana === "Sat" || semana === "Sun",
-    inicioDoDia: `${dia}T00:00:00${DESLOCAMENTO}`,
-  };
-}
-
-/** Começo do dia em São Paulo, para a tela contar no mesmo relógio do motor. */
+/** Começo do dia em Brasília, para a tela contar no mesmo relógio do motor. */
 export function inicioDoDiaSaoPaulo(): string {
-  return agoraEmSaoPaulo().inicioDoDia;
+  return agoraEmBrasilia().inicioDoDia;
 }
 
 /** Primeiro nome, que é como a equipe chama o lead na mensagem. */
@@ -102,7 +73,7 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
   // Migração 0021 ainda não rodou, ou nada ativo.
   if (error || !data || data.length === 0) return vazio;
 
-  const relogio = agoraEmSaoPaulo();
+  const relogio = agoraEmBrasilia();
   const templates = await listarTemplatesCanal();
   const canal = canalAtivo();
 

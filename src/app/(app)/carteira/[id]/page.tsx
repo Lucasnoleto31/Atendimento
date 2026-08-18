@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, MessageSquare, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { formatarReais, formatarTelefone } from "@/lib/format";
+import { formatarData, formatarReais, formatarTelefone } from "@/lib/format";
 import { CAMPO } from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
 import { salvarFichaCliente } from "../actions";
@@ -194,9 +194,7 @@ export default async function ClientePage({
           </dt>
           <dd className="font-mono text-h2 text-neutral-800 tabular-nums">
             {giro?.ultimo_giro_em
-              ? new Date(
-                  `${giro.ultimo_giro_em}T12:00:00`,
-                ).toLocaleDateString("pt-BR")
+              ? formatarData(giro.ultimo_giro_em)
               : "nunca"}
           </dd>
           {giro?.dias_sem_giro != null ? (

@@ -8,7 +8,12 @@ import { Button } from "@/components/ui/button";
 import { CAMPO } from "@/components/app/form-styles";
 import { registrarVenda } from "@/app/(app)/pagamentos/actions";
 import { atualizarCliente, virarCliente } from "./cliente-actions";
-import { formatarReais, formatarTelefone, tempoDesde } from "@/lib/format";
+import {
+  formatarData,
+  formatarReais,
+  formatarTelefone,
+  tempoDesde,
+} from "@/lib/format";
 import { LotesChart, type PontoLote } from "@/components/app/lotes-chart";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -276,7 +281,7 @@ export default async function LeadPage({
             <LinhaDado
               rotulo="Entrada"
               valor={ROTULO_MOTIVO[lead.entrada_motivo] ?? lead.entrada_motivo}
-              detalhe={new Date(lead.criado_em).toLocaleDateString("pt-BR")}
+              detalhe={formatarData(lead.criado_em)}
             />
             <LinhaDado rotulo="Responsável" valor={lead.responsavel?.nome ?? "—"} />
           </dl>
@@ -308,13 +313,7 @@ export default async function LeadPage({
               <LinhaDado rotulo="E-mail" valor={lead.customer.email ?? "—"} />
               <LinhaDado
                 rotulo="Conta aberta em"
-                valor={
-                  lead.customer.conta_aberta_em
-                    ? new Date(
-                        `${lead.customer.conta_aberta_em}T12:00:00`,
-                      ).toLocaleDateString("pt-BR")
-                    : "—"
-                }
+                valor={formatarData(lead.customer.conta_aberta_em)}
                 mono
               />
               <LinhaDado
@@ -505,7 +504,7 @@ export default async function LeadPage({
                   <span className="text-neutral-600">
                     {" "}
                     · {venda.vendedor?.nome ?? "—"} ·{" "}
-                    {new Date(venda.ocorreu_em).toLocaleDateString("pt-BR")}
+                    {formatarData(venda.ocorreu_em)}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
@@ -696,11 +695,7 @@ export default async function LeadPage({
                 Último giro
               </dt>
               <dd className="font-mono text-h3 text-neutral-900 tabular-nums">
-                {giro?.ultimo_giro_em
-                  ? new Date(`${giro.ultimo_giro_em}T12:00:00`).toLocaleDateString(
-                      "pt-BR",
-                    )
-                  : "—"}
+                {formatarData(giro?.ultimo_giro_em)}
               </dd>
             </div>
           </dl>

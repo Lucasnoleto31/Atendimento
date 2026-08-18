@@ -4,7 +4,7 @@ import { Download, MessageSquare, Search, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
-import { formatarReais, formatarTelefone } from "@/lib/format";
+import { formatarData, formatarReais, formatarTelefone } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AbrirConversa } from "./abrir-conversa";
 
@@ -157,10 +157,7 @@ export default async function CarteiraPage({
     }
   }
 
-  const dataCurta = (iso: string | null) =>
-    iso
-      ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR")
-      : "—";
+  const dataCurta = (iso: string | null) => formatarData(iso?.slice(0, 10));
 
   const url = (novos: Record<string, string>) => {
     const p = new URLSearchParams();

@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Clock, MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { formatarHora } from "@/lib/format";
 import { TarefaItem, type ItemAgenda } from "./tarefa-item";
 
 export const metadata: Metadata = { title: "Agenda · Zeve CRM" };
@@ -193,7 +194,7 @@ export default async function AgendaPage({
   );
   const dataLonga = new Date(`${diaSelecionado}T12:00:00`).toLocaleDateString(
     "pt-BR",
-    { day: "2-digit", month: "long", weekday: "long" },
+    { day: "2-digit", month: "long", weekday: "long", timeZone: FUSO },
   );
 
   return (
@@ -433,10 +434,7 @@ export default async function AgendaPage({
                             />
                             <span className="min-w-0 flex-1">
                               <span className="font-mono text-xs text-neutral-600 tabular-nums">
-                                {new Date(m.enviar_em).toLocaleTimeString(
-                                  "pt-BR",
-                                  { hour: "2-digit", minute: "2-digit" },
-                                )}
+                                {formatarHora(m.enviar_em)}
                               </span>
                               <span className="ml-1 text-sm text-neutral-800">
                                 {m.leadNome}

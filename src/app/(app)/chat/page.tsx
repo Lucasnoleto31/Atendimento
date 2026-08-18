@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AlarmClock, ArrowLeft, CheckCheck, Search, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { formatarTelefone } from "@/lib/format";
+import { formatarTelefone, horaOuData } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   obterStatusConversa,
@@ -495,14 +495,8 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       : atual.chatwoot_conversation_id !== null
     : false;
 
-  const horaCurta = (iso: string | null) => {
-    if (!iso) return "";
-    const data = new Date(iso);
-    const hoje = new Date();
-    return data.toDateString() === hoje.toDateString()
-      ? data.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-      : data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  };
+  // Hora no dia de hoje, data nos anteriores — tudo no fuso de Brasília.
+  const horaCurta = horaOuData;
 
   // A lista é um componente cliente (seleção múltipla), então tudo que é
   // cálculo ou classe vai resolvido daqui.

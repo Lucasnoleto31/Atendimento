@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatarReais } from "@/lib/format";
+import { formatarData, formatarReais } from "@/lib/format";
 import { TarefasLead, type TarefaLead } from "./tarefas-lead";
 
 export type ReceitaCliente = {
@@ -65,8 +65,7 @@ export function PainelLead({
 }) {
   if (!detalhe) return null;
 
-  const dataCurta = (iso: string | null) =>
-    iso ? new Date(iso).toLocaleDateString("pt-BR") : "—";
+  const dataCurta = formatarData;
 
   const lotes = giro?.lotes_30d ?? null;
   const lotesAnterior = giro?.lotes_30d_anterior ?? null;

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Download, MessageSquare, Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { formatarTelefone, tempoDesde } from "@/lib/format";
+import { formatarData, formatarTelefone, tempoDesde } from "@/lib/format";
 import { type TemplateWhatsapp } from "@/lib/chatwoot";
 import { listarTemplatesCanal } from "@/lib/canal";
 import { Button } from "@/components/ui/button";
@@ -453,11 +453,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                           {linha.customer_id ? (linha.lotes_30d ?? 0) : "—"}
                         </td>
                         <td className="px-2 text-right font-mono text-sm text-neutral-600 tabular-nums">
-                          {linha.ultimo_giro_em
-                            ? new Date(
-                                `${linha.ultimo_giro_em}T12:00:00`,
-                              ).toLocaleDateString("pt-BR")
-                            : "—"}
+                          {formatarData(linha.ultimo_giro_em)}
                         </td>
                       </>
                     )}

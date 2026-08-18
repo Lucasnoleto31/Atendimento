@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { normalizarData } from "@/lib/csv";
+import { hojeEmBrasilia } from "@/lib/format";
 import {
   lerTabela,
   melhorAba,
@@ -73,7 +74,7 @@ async function lerArquivo(formData: FormData) {
 }
 
 async function guardarArquivo(service: Service, arquivo: File, tipo: string) {
-  const caminho = `${tipo}/${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID()}-${arquivo.name}`;
+  const caminho = `${tipo}/${hojeEmBrasilia()}-${crypto.randomUUID()}-${arquivo.name}`;
   const { error } = await service.storage
     .from("importacoes")
     .upload(caminho, arquivo, { upsert: false });
@@ -424,7 +425,7 @@ export async function importarClientes(
     tipo: "clientes",
     arquivo,
     arquivoPath,
-    referencia: new Date().toISOString().slice(0, 10),
+    referencia: hojeEmBrasilia(),
     totalLinhas: aba.linhas.length,
     autorId: perfil.id,
   });
@@ -482,7 +483,7 @@ export async function importarLotes(
 
   const dataPadrao =
     normalizarData(String(formData.get("referencia_data") ?? "")) ??
-    new Date().toISOString().slice(0, 10);
+    hojeEmBrasilia();
 
   const lido = await lerArquivo(formData);
   if ("erro" in lido) return { erro: lido.erro };
@@ -677,7 +678,7 @@ export async function importarLeads(
     tipo: "leads",
     arquivo,
     arquivoPath,
-    referencia: new Date().toISOString().slice(0, 10),
+    referencia: hojeEmBrasilia(),
     totalLinhas: aba.linhas.length,
     autorId: perfil.id,
   });
