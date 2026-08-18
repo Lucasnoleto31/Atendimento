@@ -56,7 +56,7 @@ export function AppShell({
 
   return (
     <div className="flex min-h-full flex-1">
-      <aside className="hidden w-[240px] shrink-0 border-r border-neutral-200 bg-neutral-0 lg:flex lg:flex-col">
+      <aside className="sticky top-0 hidden h-dvh w-[240px] shrink-0 self-start border-r border-neutral-200 bg-neutral-0 lg:flex lg:flex-col">
         <Marca />
         <Navegacao itens={itens} />
         <RodapeUsuario perfil={perfil} />
@@ -110,7 +110,7 @@ export function AppShell({
 
 function Marca({ compacto = false }: { compacto?: boolean }) {
   return (
-    <div className={cn("flex items-center gap-1", compacto ? "" : "h-[64px] border-b border-neutral-200 px-2")}>
+    <div className={cn("flex shrink-0 items-center gap-1", compacto ? "" : "h-[64px] border-b border-neutral-200 px-2")}>
       <span
         aria-hidden
         className="flex h-[28px] w-[28px] items-center justify-center rounded-md bg-primary-600 font-mono text-sm text-neutral-0"
@@ -126,7 +126,7 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Módulos" className="flex-1 p-1">
+    <nav aria-label="Módulos" className="min-h-0 flex-1 overflow-y-auto p-1">
       <ul className="flex flex-col gap-0.5">
         {itens.map((item) => {
           const Icon = item.icon;
@@ -162,7 +162,7 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
 
 function RodapeUsuario({ perfil }: { perfil: Perfil }) {
   return (
-    <div className="border-t border-neutral-200 p-1">
+    <div className="shrink-0 border-t border-neutral-200 p-1">
       <div className="flex items-center gap-1 px-1.5 py-1">
         <span
           aria-hidden
