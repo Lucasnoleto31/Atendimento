@@ -752,15 +752,32 @@ export async function importarLeads(
         equipe.length > 0 ? equipe[i % equipe.length] : null,
     }));
 
-    // ignoreDuplicates: se o lead nasceu entre a consulta e a gravação (uma
-    // mensagem chegando pelo webhook), o registro dele fica como está — a
-    // importação nunca troca o responsável de quem já está em atendimento.
+    // Insert puro, não upsert: o telefone é único por índice PARCIAL
+    // (migração 0004, "where telefone_e164 is not null") e ON CONFLICT não
+    // casa com índice parcial. Quem já existe foi filtrado acima; se um lead
+    // nascer no meio da importação (mensagem chegando pelo webhook), o bloco
+    // cai em duplicidade e é regravado linha a linha, pulando o repetido —
+    // o registro de quem já está em atendimento fica intacto.
     for (const parte of blocos(linhasNovas)) {
       const { data, error } = await service
         .from("leads")
-        .upsert(parte, { onConflict: "telefone_e164", ignoreDuplicates: true })
+        .insert(parte)
         .select("id, telefone_e164");
-      if (error) throw new Error(error.message);
+
+      if (error && error.code !== "23505") throw new Error(error.message);
+
+      if (error) {
+        for (const linha of parte) {
+          const { data: uma } = await service
+            .from("leads")
+            .insert(linha)
+            .select("id, telefone_e164")
+            .maybeSingle();
+          if (uma) jaExiste.set(uma.telefone_e164, uma.id);
+        }
+        continue;
+      }
+
       (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
         jaExiste.set(r.telefone_e164, r.id),
       );
