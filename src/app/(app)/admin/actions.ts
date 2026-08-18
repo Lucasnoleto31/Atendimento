@@ -33,6 +33,7 @@ export type ResultadoImport = {
   leadsNovos?: number;
   leadsAtualizados?: number;
   duplicadosNoArquivo?: number;
+  etiquetasAplicadas?: string[];
 };
 
 type Service = ReturnType<typeof createServiceClient>;
@@ -682,9 +683,20 @@ export async function importarLeads(
   });
 
   try {
-    const etiquetaId = nomeEtiqueta
-      ? await garantirEtiqueta(service, nomeEtiqueta)
-      : null;
+    // Etiqueta de cada lead, sem ninguém precisar digitar: o que a gestão
+    // escreveu vale para a lista toda; na falta disso, a coluna "campanha"
+    // da planilha; na falta das duas, o nome do arquivo. Todo lead
+    // importado sai daqui com etiqueta — é ela que a campanha usa de
+    // público.
+    const nomeDoArquivo = arquivo.name.replace(/\.[^.]+$/, "").trim();
+    const etiquetaDoLead = (lead: { campanha: string | null }) =>
+      nomeEtiqueta || lead.campanha || nomeDoArquivo || "Importação";
+
+    const idPorEtiqueta = new Map<string, string>();
+    for (const nome of new Set(leads.map(etiquetaDoLead))) {
+      const id = await garantirEtiqueta(service, nome);
+      if (id) idPorEtiqueta.set(nome, id);
+    }
 
     const telefones = leads.map((l) => l.telefone);
 
@@ -741,7 +753,7 @@ export async function importarLeads(
       nome: lead.nome,
       telefone_e164: lead.telefone,
       email: lead.email,
-      campanha: lead.campanha ?? (nomeEtiqueta || null),
+      campanha: etiquetaDoLead(lead),
       entrada_motivo: "importacao" as const,
       stage_id: etapa?.id ?? null,
       customer_id: clientePorTelefone.get(lead.telefone) ?? null,
@@ -796,17 +808,20 @@ export async function importarLeads(
       );
     }
 
-    if (etiquetaId) {
-      const vinculos = leads
-        .map((l) => jaExiste.get(l.telefone))
-        .filter((id): id is string => Boolean(id))
-        .map((lead_id) => ({ lead_id, tag_id: etiquetaId }));
+    const vinculos = leads
+      .map((l) => ({
+        lead_id: jaExiste.get(l.telefone),
+        tag_id: idPorEtiqueta.get(etiquetaDoLead(l)),
+      }))
+      .filter(
+        (v): v is { lead_id: string; tag_id: string } =>
+          Boolean(v.lead_id) && Boolean(v.tag_id),
+      );
 
-      for (const parte of blocos(vinculos)) {
-        await service
-          .from("lead_tags")
-          .upsert(parte, { onConflict: "lead_id,tag_id" });
-      }
+    for (const parte of blocos(vinculos)) {
+      await service
+        .from("lead_tags")
+        .upsert(parte, { onConflict: "lead_id,tag_id" });
     }
 
     await fecharRegistro(service, registroId, {
@@ -829,6 +844,7 @@ export async function importarLeads(
       leadsNovos: linhasNovas.length,
       leadsAtualizados: leads.length - linhasNovas.length,
       duplicadosNoArquivo: duplicados,
+      etiquetasAplicadas: [...idPorEtiqueta.keys()],
     };
   } catch (e) {
     const detalhe = e instanceof Error ? e.message : String(e);

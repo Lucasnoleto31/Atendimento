@@ -138,6 +138,12 @@ export function ImportForm({
               <> · {estado.duplicadosNoArquivo} repetido(s) no arquivo</>
             ) : null}
           </p>
+          {estado.etiquetasAplicadas?.length ? (
+            <p className="mt-1 text-sm text-neutral-600">
+              Etiqueta aplicada: {estado.etiquetasAplicadas.join(", ")} — já
+              serve de público para uma campanha.
+            </p>
+          ) : null}
 
           {estado.reativacao &&
           (estado.reativacao.queda > 0 || estado.reativacao.semGiro > 0) ? (

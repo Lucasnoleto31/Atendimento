@@ -158,7 +158,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
 
         <ImportForm
           titulo="Lista de leads"
-          descricao="Sobe a lista de uma campanha (Google Sheets exportado em CSV). Telefone repetido não vira lead duplicado: quem já existe só recebe a etiqueta. Quem já é cliente entra vinculado."
+          descricao="Sobe a lista de uma campanha (Google Sheets exportado em CSV). Todo mundo ganha a etiqueta da campanha automaticamente. Telefone repetido não vira lead duplicado: quem já existe só recebe a etiqueta. Quem já é cliente entra vinculado."
           colunas="colunas: telefone · opcionais: nome, email, campanha"
           acao={importarLeads}
           extras={
@@ -168,7 +168,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                   htmlFor="etiqueta-leads"
                   className="text-sm font-medium text-neutral-800"
                 >
-                  Etiqueta da lista
+                  Etiqueta da lista (opcional)
                 </label>
                 <input
                   id="etiqueta-leads"
@@ -178,8 +178,9 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                   className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                 />
                 <p className="text-xs text-neutral-600">
-                  É por ela que a campanha encontra o público. Criada se ainda
-                  não existir.
+                  Todo lead importado sai com etiqueta — é por ela que a
+                  campanha encontra o público. Em branco, o CRM usa a coluna
+                  “campanha” da planilha e, na falta dela, o nome do arquivo.
                 </p>
               </div>
 
