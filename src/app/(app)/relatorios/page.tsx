@@ -33,14 +33,14 @@ type Relatorio = {
   }[];
   /** Uma linha por campanha; quem não veio de campanha entra pelo canal. */
   por_origem?: {
-    origem: string;
-    canal: string;
-    campanha: boolean;
-    leads: number;
-    ganhos: number;
-    clientes: number;
-    templates: number;
-    gasto_centavos: number;
+    origem?: string;
+    canal?: string;
+    campanha?: boolean;
+    leads?: number;
+    ganhos?: number;
+    clientes?: number;
+    templates?: number;
+    gasto_centavos?: number;
   }[];
   por_vendedor: {
     vendedor: string;
@@ -69,20 +69,24 @@ export default async function RelatoriosPage({
 
   const r = (data ?? null) as Relatorio | null;
 
-  // Sem a migração 0022 a função ainda devolve só por_canal: a tabela cai
-  // para o agrupamento antigo em vez de sumir da tela.
-  const origens =
+  // A função no banco pode estar em qualquer versão: sem a 0022 só existe
+  // por_canal, e uma 0022 antiga vem sem `templates`. Normalizar aqui evita
+  // a página inteira cair por causa de um campo que ainda não existe.
+  type LinhaOrigem = NonNullable<Relatorio["por_origem"]>[number];
+  const brutas: LinhaOrigem[] =
     r?.por_origem ??
-    (r?.por_canal ?? []).map((c) => ({
-      origem: c.canal,
-      canal: c.canal,
-      campanha: false,
-      leads: c.leads,
-      ganhos: c.ganhos,
-      clientes: c.clientes,
-      templates: 0,
-      gasto_centavos: c.gasto_centavos,
-    }));
+    (r?.por_canal ?? []).map((c) => ({ ...c, origem: c.canal, campanha: false }));
+
+  const origens = brutas.map((o) => ({
+    origem: o.origem ?? "Sem origem",
+    canal: o.canal ?? "Sem canal",
+    campanha: o.campanha ?? false,
+    leads: o.leads ?? 0,
+    ganhos: o.ganhos ?? 0,
+    clientes: o.clientes ?? 0,
+    templates: o.templates ?? 0,
+    gasto_centavos: o.gasto_centavos ?? 0,
+  }));
 
   // Atividade da equipe (30 dias) — quem contata, quanto e com que resposta.
   // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
