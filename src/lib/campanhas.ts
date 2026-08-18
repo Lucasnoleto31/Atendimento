@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { dispararTemplate, type Alvo } from "@/lib/cadencia";
 import { agoraEmBrasilia } from "@/lib/format";
+import { avancarAposDisparo } from "@/lib/kanban";
 
 /**
  * Campanha com ritmo diário.
@@ -183,6 +184,9 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
           .from("leads")
           .update({ ultima_interacao_em: agora, chat_lido_em: agora })
           .eq("id", alvo.leadId);
+
+        // Saiu a mensagem, o lead sai de "Novos" para "Em contato".
+        await avancarAposDisparo(service, [alvo.leadId]);
 
         enviados++;
       } catch (e) {

@@ -101,6 +101,7 @@ export async function distribuirLeads() {
 // ===========================================================================
 
 import { createServiceClient } from "@/lib/supabase/server";
+import { avancarAposDisparo } from "@/lib/kanban";
 import {
   enviarTemplate,
   iniciarConversaWhatsapp,
@@ -217,6 +218,7 @@ export async function dispararTemplateLista(
   const inicio = Date.now();
   let enviados = 0;
   let pulados = 0;
+  const contatados: string[] = [];
 
   while (
     enviados + pulados < MAX_POR_EXECUCAO &&
@@ -306,6 +308,7 @@ export async function dispararTemplateLista(
         });
 
         enviados++;
+        contatados.push(lead.id);
       } catch {
         pulados++;
       }
@@ -317,10 +320,14 @@ export async function dispararTemplateLista(
     }
   }
 
+  // Quem recebeu template saiu de "Novos": vai para "Em contato".
+  await avancarAposDisparo(service, contatados);
+
   const { count: restantes } = await consultaFila("contagem");
 
   revalidatePath("/leads");
   revalidatePath("/chat");
+  revalidatePath("/atendimento");
 
   return {
     ok: true,

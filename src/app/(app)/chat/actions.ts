@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { avancarAposDisparo } from "@/lib/kanban";
 import { perfilAtual } from "@/lib/auth";
 import {
   alterarStatusConversa,
@@ -244,7 +245,11 @@ export async function enviarMensagemLead(
     .update({ ultima_interacao_em: agora, chat_lido_em: agora })
     .eq("id", leadId);
 
+  // Template disparado é contato feito: sai de "Novos" para "Em contato".
+  await avancarAposDisparo(createServiceClient(), [leadId]);
+
   revalidatePath("/chat");
+  revalidatePath("/atendimento");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true };
 }

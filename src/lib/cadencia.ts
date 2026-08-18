@@ -6,6 +6,7 @@ import {
 } from "@/lib/chatwoot";
 import { enviarTemplateMeta } from "@/lib/whatsapp";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+import { avancarAposDisparo } from "@/lib/kanban";
 
 /**
  * Cadência de follow-up com duas famílias de regras (followup_rules.ancora):
@@ -186,6 +187,8 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
           .from("leads")
           .update({ ultima_interacao_em: agora, chat_lido_em: agora })
           .eq("id", alvo.leadId);
+
+        await avancarAposDisparo(service, [alvo.leadId]);
 
         enviados++;
         enviadosRegra++;
