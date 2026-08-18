@@ -752,12 +752,28 @@ export async function importarLeads(
         equipe.length > 0 ? equipe[i % equipe.length] : null,
     }));
 
+    // ignoreDuplicates: se o lead nasceu entre a consulta e a gravação (uma
+    // mensagem chegando pelo webhook), o registro dele fica como está — a
+    // importação nunca troca o responsável de quem já está em atendimento.
     for (const parte of blocos(linhasNovas)) {
       const { data, error } = await service
         .from("leads")
-        .upsert(parte, { onConflict: "telefone_e164" })
+        .upsert(parte, { onConflict: "telefone_e164", ignoreDuplicates: true })
         .select("id, telefone_e164");
       if (error) throw new Error(error.message);
+      (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
+        jaExiste.set(r.telefone_e164, r.id),
+      );
+    }
+
+    // Quem caiu nessa corrida não voltou do insert: busca o id para a
+    // etiqueta da campanha não deixar ninguém de fora.
+    const semId = telefones.filter((t) => !jaExiste.has(t));
+    for (const parte of blocos(semId)) {
+      const { data } = await service
+        .from("leads")
+        .select("id, telefone_e164")
+        .in("telefone_e164", parte);
       (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
         jaExiste.set(r.telefone_e164, r.id),
       );
