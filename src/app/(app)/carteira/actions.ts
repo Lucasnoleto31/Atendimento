@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { variantesTelefone } from "@/lib/csv";
 
 export type ResultadoConversa = { leadId?: string; erro?: string };
 
@@ -34,12 +35,20 @@ export async function abrirConversaCliente(
     };
   }
 
-  // Já existe lead com esse número? Então é só adotar.
-  const { data: existente } = await supabase
+  // Já existe lead com esse número? Considera as DUAS grafias do nono
+  // dígito — o WhatsApp registra sem o 9 e o cadastro costuma vir com —
+  // e prefere a conversa que já tem mensagem em vez de criar outra.
+  const { data: candidatos } = await supabase
     .from("leads")
-    .select("id, customer_id")
-    .eq("telefone_e164", cliente.telefone_e164)
-    .maybeSingle();
+    .select("id, customer_id, ultima_interacao_em")
+    .in("telefone_e164", variantesTelefone(cliente.telefone_e164));
+
+  const existente =
+    (candidatos ?? [])
+      .slice()
+      .sort((a, b) =>
+        (b.ultima_interacao_em ?? "").localeCompare(a.ultima_interacao_em ?? ""),
+      )[0] ?? null;
 
   if (existente) {
     if (!existente.customer_id) {

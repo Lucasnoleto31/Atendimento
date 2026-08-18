@@ -16,6 +16,7 @@ import {
 import { prepararClientes, type GrupoCliente } from "@/lib/imports/clientes";
 import { prepararLotes } from "@/lib/imports/lotes";
 import { prepararLeads } from "@/lib/imports/leads";
+import { variantesTelefone } from "@/lib/csv";
 
 const LIMITE_BYTES = 20 * 1024 * 1024; // 20 MB — xlsx é maior que csv
 const BLOCO = 500;
@@ -702,14 +703,18 @@ export async function importarLeads(
     const telefones = leads.map((l) => l.telefone);
 
     // Quem já é lead não vira duplicata: só ganha a etiqueta da campanha.
+    // O mapa guarda as duas grafias do nono dígito, para a planilha (com 9)
+    // casar com o lead que o WhatsApp criou (sem 9).
     const jaExiste = new Map<string, string>();
     for (const parte of blocos(telefones)) {
       const { data } = await service
         .from("leads")
         .select("id, telefone_e164")
-        .in("telefone_e164", parte);
+        .in("telefone_e164", parte.flatMap(variantesTelefone));
       (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
-        jaExiste.set(r.telefone_e164, r.id),
+        variantesTelefone(r.telefone_e164).forEach((v) =>
+          jaExiste.set(v, r.id),
+        ),
       );
     }
 
@@ -720,9 +725,11 @@ export async function importarLeads(
       const { data } = await service
         .from("customers")
         .select("id, telefone_e164")
-        .in("telefone_e164", parte);
+        .in("telefone_e164", parte.flatMap(variantesTelefone));
       (data ?? []).forEach((r: { id: string; telefone_e164: string }) =>
-        clientePorTelefone.set(r.telefone_e164, r.id),
+        variantesTelefone(r.telefone_e164).forEach((v) =>
+          clientePorTelefone.set(v, r.id),
+        ),
       );
     }
 

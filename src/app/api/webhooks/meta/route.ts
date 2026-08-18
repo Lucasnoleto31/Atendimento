@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { variantesTelefone } from "@/lib/csv";
 import { escolherVendedor } from "@/lib/distribuicao";
 import { hospedarMidiaMeta } from "@/lib/whatsapp";
 import { extrairDocumento } from "@/lib/documento";
@@ -229,19 +230,6 @@ export async function POST(request: NextRequest) {
  * Contas WhatsApp BR antigas chegam da Meta sem o nono dígito (55+DDD+8).
  * O lookup considera as duas grafias para não duplicar lead no cutover.
  */
-function variantesTelefone(telefone: string): string[] {
-  const variantes = [telefone];
-  if (telefone.startsWith("55")) {
-    if (telefone.length === 12) {
-      variantes.push(`${telefone.slice(0, 4)}9${telefone.slice(4)}`);
-    }
-    if (telefone.length === 13 && telefone[4] === "9") {
-      variantes.push(telefone.slice(0, 4) + telefone.slice(5));
-    }
-  }
-  return variantes;
-}
-
 async function processarMensagem(
   service: ReturnType<typeof createServiceClient>,
   valor: ValorMeta,
