@@ -1077,6 +1077,43 @@ export async function marcarLidasEmMassa(leadIds: string[]) {
 }
 
 /** Atribui (ou tira o dono de) várias conversas de uma vez. */
+/** Aplica (ou remove) uma etiqueta em todas as conversas selecionadas. */
+export async function etiquetarEmMassa(
+  leadIds: string[],
+  tagId: string,
+  marcar: boolean,
+): Promise<ResultadoEnvio & { total?: number }> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!tagId) return { erro: "Etiqueta não informada." };
+
+  const ids = [...new Set(leadIds)].filter(Boolean).slice(0, MAX_EM_MASSA);
+  if (ids.length === 0) return { erro: "Nenhuma conversa selecionada." };
+
+  const supabase = await createClient();
+
+  if (marcar) {
+    // upsert: quem já tinha a etiqueta não vira erro de duplicidade.
+    const { error } = await supabase
+      .from("lead_tags")
+      .upsert(
+        ids.map((lead_id) => ({ lead_id, tag_id: tagId })),
+        { onConflict: "lead_id,tag_id" },
+      );
+    if (error) return { erro: error.message };
+  } else {
+    const { error } = await supabase
+      .from("lead_tags")
+      .delete()
+      .in("lead_id", ids)
+      .eq("tag_id", tagId);
+    if (error) return { erro: error.message };
+  }
+
+  revalidatePath("/chat");
+  return { ok: true, total: ids.length };
+}
+
 export async function atribuirEmMassa(
   leadIds: string[],
   responsavelId: string | null,

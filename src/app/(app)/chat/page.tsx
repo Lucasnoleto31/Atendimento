@@ -724,7 +724,11 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
           />
         </div>
 
-        <ListaConversas itens={itensLista} equipe={equipeAtendentes} />
+        <ListaConversas
+          itens={itensLista}
+          equipe={equipeAtendentes}
+          etiquetas={etiquetas.map((e) => ({ id: e.id, nome: e.nome }))}
+        />
       </aside>
 
       {/* Janela da conversa */}

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import {
   adiarConversasEmMassa,
   atribuirEmMassa,
+  etiquetarEmMassa,
   marcarLidasEmMassa,
   marcarNaoLidasEmMassa,
   resolverConversasEmMassa,
@@ -39,9 +40,11 @@ const BOTAO_MASSA =
 export function ListaConversas({
   itens,
   equipe,
+  etiquetas,
 }: {
   itens: ItemConversa[];
   equipe: { id: string; nome: string }[];
+  etiquetas: { id: string; nome: string }[];
 }) {
   const [marcados, setMarcados] = useState<Set<string>>(new Set());
   const [pendente, iniciar] = useTransition();
@@ -162,6 +165,36 @@ export function ListaConversas({
                 </option>
               ))}
             </select>
+
+            {etiquetas.length > 0 ? (
+              <>
+                <label htmlFor="etiquetar-massa" className="sr-only">
+                  Etiquetar as conversas selecionadas
+                </label>
+                <select
+                  id="etiquetar-massa"
+                  defaultValue=""
+                  disabled={pendente}
+                  onChange={(e) => {
+                    const valor = e.target.value;
+                    e.target.value = "";
+                    if (valor) {
+                      executar(() => etiquetarEmMassa(ids, valor, true));
+                    }
+                  }}
+                  className="h-[32px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
+                >
+                  <option value="" disabled>
+                    Etiquetar…
+                  </option>
+                  {etiquetas.map((etiqueta) => (
+                    <option key={etiqueta.id} value={etiqueta.id}>
+                      {etiqueta.nome}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
 
             <button
               type="button"
