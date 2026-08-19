@@ -549,6 +549,7 @@ export function Janela({
   useEffect(() => {
     const aoColar = (e: ClipboardEvent) => {
       if (modo === "nota" || !temConversa) return;
+      if (restanteJanela === null || restanteJanela <= 0) return; // janela fechada
       const alvo = e.target as HTMLElement | null;
       if (
         alvo &&
@@ -570,10 +571,16 @@ export function Janela({
     return () => window.removeEventListener("paste", aoColar);
   });
 
+  // Janela de 24h do WhatsApp: fora dela (ou se o lead nunca respondeu), a
+  // Meta aceita a mensagem livre e DESCARTA depois — enviar é gritar no vazio.
+  // O composer trava e aponta o template, que é o único que chega.
+  const janelaFechada =
+    modo === "responder" && (restanteJanela === null || restanteJanela <= 0);
+
   const podeEnviar =
     modo === "nota"
       ? texto.trim().length > 0
-      : texto.trim().length > 0 || arquivos.length > 0;
+      : !janelaFechada && (texto.trim().length > 0 || arquivos.length > 0);
 
   const aoRolar = () => {
     const caixa = caixaRef.current;
@@ -806,6 +813,14 @@ export function Janela({
 
           {modo === "responder" && restanteJanela !== null ? (
             <BannerJanela restanteInicialMs={restanteJanela} />
+          ) : null}
+
+          {modo === "responder" && restanteJanela === null ? (
+            <p className="rounded-md bg-warning-bg px-1.5 py-0.5 text-xs font-medium text-warning">
+              Este lead ainda não mandou mensagem — a janela de 24h nunca
+              abriu, e mensagem livre não chega. Dispare um template para
+              iniciar a conversa.
+            </p>
           ) : null}
 
           {agendadas.length > 0 ? (
@@ -1160,7 +1175,7 @@ export function Janela({
             </button>
 
             <GravadorAudio
-              desabilitado={modo === "nota"}
+              desabilitado={modo === "nota" || janelaFechada}
               onGravado={anexarGravacao}
               onErro={setAvisoArquivo}
             />
@@ -1191,9 +1206,11 @@ export function Janela({
               title={
                 modo === "nota"
                   ? "Anexo só em resposta ao lead"
-                  : "Anexar arquivos (máx. 5, até 16MB cada)"
+                  : janelaFechada
+                    ? "Janela de 24h fechada — anexo não chega; use um template"
+                    : "Anexar arquivos (máx. 5, até 4MB por envio)"
               }
-              disabled={modo === "nota"}
+              disabled={modo === "nota" || janelaFechada}
               onClick={() => inputArquivosRef.current?.click()}
               className={cn(
                 BOTAO_FERRAMENTA,
