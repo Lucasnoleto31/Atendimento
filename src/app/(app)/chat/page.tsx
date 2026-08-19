@@ -649,20 +649,20 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                       href={urlChat(filtro, busca, etiquetaFiltro, escopo.v)}
                       aria-current={ativo ? "page" : undefined}
                       className={cn(
-                        "flex h-[32px] items-center justify-center gap-0.5 rounded-sm text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                        "flex h-[32px] items-center justify-center gap-0.5 rounded-sm text-xs font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
                         ativo
-                          ? "bg-primary-50 font-medium text-primary-900"
+                          ? "bg-primary-50 text-primary-900"
                           : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
                       )}
                     >
                       {escopo.rotulo}
                       <span
                         className={cn(
-                          "font-mono text-xs tabular-nums",
+                          "font-mono tabular-nums",
                           ativo ? "text-primary-500" : "text-neutral-400",
                         )}
                       >
-                        {escopo.total}
+                        {escopo.total > 99 ? "99+" : escopo.total}
                       </span>
                     </Link>
                   </li>
@@ -671,9 +671,10 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             </ul>
           </nav>
 
-          {/* Eixo 2 — caixa (situação da conversa). Combina com o escopo. */}
+          {/* Eixo 2 — caixa (situação da conversa), no mesmo desenho do eixo
+              de escopo: células iguais, nunca quebra linha. */}
           <nav aria-label="Caixa de conversas" className="mt-1">
-            <ul className="flex flex-wrap gap-0.5">
+            <ul className="grid grid-cols-4 gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 p-0.5">
               {CAIXAS.map((caixa) => {
                 const ativo = filtro === caixa.chave;
                 const total =
@@ -687,17 +688,23 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                     <Link
                       href={urlChat(caixa.chave, busca, etiquetaFiltro, atendenteFiltro)}
                       aria-current={ativo ? "page" : undefined}
+                      title={total > 0 ? `${caixa.rotulo} (${total})` : caixa.rotulo}
                       className={cn(
-                        "inline-flex h-[32px] items-center rounded-md px-1 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                        "flex h-[32px] items-center justify-center gap-0.5 rounded-sm text-xs font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
                         ativo
-                          ? "bg-primary-50 font-medium text-primary-900"
+                          ? "bg-primary-50 text-primary-900"
                           : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
                       )}
                     >
                       {caixa.rotulo}
                       {total > 0 ? (
-                        <span className="ml-0.5 font-mono text-xs text-neutral-400 tabular-nums">
-                          {total}
+                        <span
+                          className={cn(
+                            "font-mono tabular-nums",
+                            ativo ? "text-primary-500" : "text-neutral-400",
+                          )}
+                        >
+                          {total > 99 ? "99+" : total}
                         </span>
                       ) : null}
                     </Link>
