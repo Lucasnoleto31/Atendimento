@@ -23,6 +23,37 @@ import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 
 const MAX_ANEXOS = 5;
 const MAX_TAMANHO_ANEXO = 16 * 1024 * 1024; // teto do WhatsApp para mídia
+const BUCKET_MIDIA = "midia-whatsapp";
+
+type AnexoRemoto = {
+  caminho: string;
+  nome: string;
+  tipo: string;
+  tamanho: number;
+};
+
+/**
+ * URL assinada para o anexo subir DIRETO do navegador ao Storage — o corpo
+ * da requisição na Vercel tem teto de ~4,5MB e derrubava a página; por aqui
+ * vale o teto real do WhatsApp (16MB por arquivo).
+ */
+export async function prepararUploadAnexo(
+  nome: string,
+): Promise<{ caminho?: string; token?: string; erro?: string }> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+
+  const limpo = nome.replace(/[^\w.\-]+/g, "_").slice(-80);
+  const caminho = `envios/${crypto.randomUUID()}-${limpo}`;
+  const service = createServiceClient();
+  const { data, error } = await service.storage
+    .from(BUCKET_MIDIA)
+    .createSignedUploadUrl(caminho);
+  if (error) {
+    return { erro: `Não deu para preparar o upload: ${error.message}` };
+  }
+  return { caminho, token: data.token };
+}
 
 const ROTULO_TIPO: Record<string, string> = {
   image: "[imagem]",
@@ -85,12 +116,42 @@ export async function enviarMensagemLead(
   const textoBruto = String(formData.get("texto") ?? "").trim();
   const modo = formData.get("modo") === "nota" ? "nota" : "responder";
   const assinar = formData.get("assinar") === "1";
-  const arquivos =
-    modo === "nota"
-      ? []
-      : formData
-          .getAll("arquivos")
-          .filter((a): a is File => a instanceof File && a.size > 0);
+  // Anexos chegam como referências do Storage (o navegador subiu direto).
+  let anexosRemotos: AnexoRemoto[] = [];
+  if (modo !== "nota") {
+    try {
+      const brutos = JSON.parse(String(formData.get("anexos_remotos") ?? "[]"));
+      if (Array.isArray(brutos)) {
+        anexosRemotos = brutos.filter(
+          (a): a is AnexoRemoto =>
+            typeof a?.caminho === "string" && a.caminho.startsWith("envios/"),
+        );
+      }
+    } catch {
+      // JSON inválido = sem anexos
+    }
+  }
+
+  // Materializa os arquivos do Storage para os canais de envio.
+  const arquivos: File[] = [];
+  if (anexosRemotos.length > 0) {
+    const service = createServiceClient();
+    for (const anexo of anexosRemotos) {
+      const { data, error } = await service.storage
+        .from(BUCKET_MIDIA)
+        .download(anexo.caminho);
+      if (error || !data) {
+        return {
+          erro: `O anexo "${anexo.nome}" não está mais no armazenamento — anexe de novo.`,
+        };
+      }
+      arquivos.push(
+        new File([data], anexo.nome, {
+          type: anexo.tipo || "application/octet-stream",
+        }),
+      );
+    }
+  }
 
   if (!leadId) return { erro: "Lead não informado." };
   if (!textoBruto && arquivos.length === 0) {
@@ -233,6 +294,16 @@ export async function enviarMensagemLead(
     }
   }
 
+  // No canal Meta os anexos ficam no histórico com a URL pública do Storage
+  // (o navegador subiu direto para lá) — antes o envio sumia da conversa.
+  if (canal === "meta" && anexosRemotos.length > 0) {
+    const service = createServiceClient();
+    anexos = anexosRemotos.slice(0, wamids.length).map((a) => ({
+      tipo: tipoDoArquivo(a.tipo || ""),
+      url: service.storage.from(BUCKET_MIDIA).getPublicUrl(a.caminho).data.publicUrl,
+    }));
+  }
+
   // Sem texto, o histórico guarda o rótulo do primeiro anexo como prévia.
   // Envio parcial registra quantos arquivos de fato chegaram.
   const enviados = canal === "meta" && arquivos.length > 0 ? wamids.length : arquivos.length;
@@ -259,13 +330,6 @@ export async function enviarMensagemLead(
             // Recibos (✓✓/falhou) casam por qualquer wamid do envio, não só
             // o do último arquivo.
             ...(wamids.length > 1 ? { message_ids: wamids } : {}),
-            ...(arquivos.length > 0
-              ? {
-                  anexos_enviados: arquivos
-                    .slice(0, enviados)
-                    .map((a) => ({ nome: a.name, tipo: tipoDoArquivo(a.type) })),
-                }
-              : {}),
             ...(falhaParcial ? { falha_parcial: falhaParcial } : {}),
           }
         : {

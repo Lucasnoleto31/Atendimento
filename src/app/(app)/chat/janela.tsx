@@ -29,11 +29,13 @@ import { cn } from "@/lib/utils";
 import type { TemplateWhatsapp } from "@/lib/chatwoot";
 import { BotaoTemplates } from "./templates";
 import { GravadorAudio } from "./gravador-audio";
+import { createClient as criarClienteNavegador } from "@/lib/supabase/client";
 import {
   agendarMensagemLead,
   cancelarMensagemAgendada,
   enviarMensagemLead,
   marcarChatLido,
+  prepararUploadAnexo,
   type ResultadoEnvio,
 } from "./actions";
 
@@ -61,9 +63,7 @@ function lerPonteiroGrosso() {
 }
 const MAX_ANEXOS = 5;
 const MAX_TAMANHO_ANEXO = 16 * 1024 * 1024; // teto do WhatsApp para mídia
-// A Vercel corta o corpo da requisição em ~4,5MB — acima disso o envio nem
-// chega ao servidor e a página quebra. Trava no cliente com aviso claro.
-const MAX_TOTAL_ENVIO = 4 * 1024 * 1024;
+const MAX_IMAGEM = 5 * 1024 * 1024; // o WhatsApp limita imagem a 5MB
 const LIMIAR_FIM_PX = 80;
 
 const EMOJIS = [
@@ -524,19 +524,19 @@ export function Janela({
         );
         continue;
       }
+      if (arquivo.type.startsWith("image/") && arquivo.size > MAX_IMAGEM) {
+        setAvisoArquivo(
+          `"${arquivo.name}" passa de 5MB — o WhatsApp limita imagem a 5MB (envie como documento ou reduza).`,
+        );
+        continue;
+      }
       aceitos.push(arquivo);
     }
 
     if (arquivos.length + aceitos.length > MAX_ANEXOS) {
       setAvisoArquivo(`No máximo ${MAX_ANEXOS} anexos por mensagem.`);
     }
-    const combinado = [...arquivos, ...aceitos].slice(0, MAX_ANEXOS);
-    if (combinado.reduce((soma, a) => soma + a.size, 0) > MAX_TOTAL_ENVIO) {
-      setAvisoArquivo(
-        "Os anexos somam mais de 4MB — o envio aceita até 4MB por vez.",
-      );
-    }
-    setArquivos(combinado);
+    setArquivos([...arquivos, ...aceitos].slice(0, MAX_ANEXOS));
   };
 
   const removerArquivo = (indice: number) => {
@@ -598,15 +598,13 @@ export function Janela({
     setNovasAbaixo(false);
   };
 
-  const aoEnviar = (formData: FormData) => {
+  const aoEnviar = async (formData: FormData) => {
     const textoEnvio = String(formData.get("texto") ?? "").trim();
-    const totalAnexos = arquivos.reduce((soma, a) => soma + a.size, 0);
-    if (modo === "responder" && totalAnexos > MAX_TOTAL_ENVIO) {
-      setAvisoArquivo(
-        "Os anexos somam mais de 4MB — o envio aceita até 4MB por vez. Remova ou reduza arquivos.",
-      );
-      return;
-    }
+    // O arquivo NÃO viaja no corpo da requisição (a Vercel corta em ~4,5MB e
+    // a página quebrava): sobe direto do navegador ao Storage por URL
+    // assinada, e a action recebe só as referências.
+    formData.delete("arquivos");
+
     if (modo === "responder" && (textoEnvio || arquivos.length > 0)) {
       contadorOtimistaRef.current += 1;
       adicionarOtimista({
@@ -619,6 +617,40 @@ export function Janela({
       });
       pertoDoFimRef.current = true; // envio próprio sempre desce a tela
     }
+
+    if (modo === "responder" && arquivos.length > 0) {
+      const remotos: {
+        caminho: string;
+        nome: string;
+        tipo: string;
+        tamanho: number;
+      }[] = [];
+      const storage = criarClienteNavegador().storage.from("midia-whatsapp");
+      for (const arquivo of arquivos) {
+        const preparo = await prepararUploadAnexo(arquivo.name);
+        if (preparo.erro || !preparo.caminho || !preparo.token) {
+          setAvisoArquivo(preparo.erro ?? "Não deu para preparar o upload.");
+          return;
+        }
+        const { error } = await storage.uploadToSignedUrl(
+          preparo.caminho,
+          preparo.token,
+          arquivo,
+        );
+        if (error) {
+          setAvisoArquivo(`Falha ao subir "${arquivo.name}": ${error.message}`);
+          return;
+        }
+        remotos.push({
+          caminho: preparo.caminho,
+          nome: arquivo.name,
+          tipo: arquivo.type,
+          tamanho: arquivo.size,
+        });
+      }
+      formData.set("anexos_remotos", JSON.stringify(remotos));
+    }
+
     // A caixa limpa no clique, não quando o servidor responder — se o envio
     // falhar, o texto e os anexos voltam (backup restaurado no estado.erro).
     // Nota privada não envia anexos: eles ficam para a resposta ao lead.
