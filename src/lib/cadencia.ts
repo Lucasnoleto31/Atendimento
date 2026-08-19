@@ -192,21 +192,59 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
 
         enviados++;
         enviadosRegra++;
-      } catch {
-        // Falhou (canal fora): libera o episódio para nova tentativa.
-        let remocao = service
-          .from("followup_envios")
-          .delete()
-          .eq("lead_id", alvo.leadId)
-          .eq("rule_id", regra.id);
-        if (!legado) remocao = remocao.eq("episodio", episodio);
-        await remocao;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         pulados++;
+
+        if (falhaPermanente(msg)) {
+          // Falha do destinatário/template (número inválido, template
+          // pausado, opt-out): tentar de novo dá o mesmo erro para sempre.
+          // MANTÉM a reserva (some da fila) e guarda o motivo. Sem a coluna
+          // erro (migração 0028) o update falha em silêncio, o que só
+          // significa que o motivo não fica registrado — a reserva fica.
+          let marca = service
+            .from("followup_envios")
+            .update({ erro: msg })
+            .eq("lead_id", alvo.leadId)
+            .eq("rule_id", regra.id);
+          if (!legado) marca = marca.eq("episodio", episodio);
+          await marca;
+        } else {
+          // Falha transitória (canal fora, timeout, throttle): libera para
+          // nova tentativa na próxima rodada.
+          let remocao = service
+            .from("followup_envios")
+            .delete()
+            .eq("lead_id", alvo.leadId)
+            .eq("rule_id", regra.id);
+          if (!legado) remocao = remocao.eq("episodio", episodio);
+          await remocao;
+        }
       }
     }
   }
 
   return { enviados, pulados, regras: regras.length };
+}
+
+/**
+ * Distingue falha PERMANENTE (mesmo erro para sempre para este destinatário
+ * ou template) de falha transitória (canal fora, timeout, throttle). Só a
+ * permanente segura a reserva; a transitória libera para nova tentativa.
+ */
+function falhaPermanente(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    /13105\d/.test(m) || // opt-out de marketing
+    /130472/.test(m) || // número no grupo de teste da Meta
+    /131047|131026/.test(m) || // fora de janela / não entregável
+    /132\d{3}/.test(m) || // erros de template (pausado, inexistente, formato)
+    m.includes("invalid") ||
+    m.includes("not exist") ||
+    m.includes("does not exist") ||
+    m.includes("template") ||
+    m.includes("marketing")
+  );
 }
 
 /** Aquisição: leads que nunca responderam, criados há N+ dias. */
@@ -216,37 +254,69 @@ async function alvosLeadNovo(
 ): Promise<Alvo[]> {
   const corte = new Date(Date.now() - regra.dias * 86_400_000).toISOString();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
-  const q: any = service
-    .from("leads")
-    .select(
-      "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
-    )
-    .is("primeira_resposta_em", null)
-    .not("status", "in", "(ganho,perdido)")
-    .not("telefone_e164", "is", null)
-    .lte("criado_em", corte)
-    .order("criado_em", { ascending: true })
-    .limit(VARREDURA_MAXIMA);
+  // Quem já recebeu esta regra sai da fila PARA SEMPRE (episódio único).
+  // Sem esta exclusão a janela ordenada por criado_em trava nos leads mais
+  // antigos — todos já contemplados — e nunca alcança os leads novos: o
+  // motor de aquisição para em silêncio. Coleto o conjunto já enviado (em
+  // páginas, pode passar de 1000) e filtro em memória enquanto pagino os
+  // candidatos, sem despejar um `not.in` gigante na query string.
+  const jaEnviados = new Set<string>();
+  for (let de = 0; de < 100_000; de += 1000) {
+    const { data, error } = await service
+      .from("followup_envios")
+      .select("lead_id")
+      .eq("rule_id", regra.id)
+      .range(de, de + 999);
+    if (error || !data || data.length === 0) break;
+    data.forEach((r: { lead_id: string }) => jaEnviados.add(r.lead_id));
+    if (data.length < 1000) break;
+  }
 
-  // Quem desligou marketing no WhatsApp não recebe template — insistir só
-  // gera falha. Sem a migração 0019 a coluna não existe e o filtro cai fora.
-  const comFiltro = await q.is("marketing_bloqueado_em", null);
-  const { data } = comFiltro.error ? await q : comFiltro;
-
-  return ((data ?? []) as {
+  type LinhaLead = {
     id: string;
     nome: string;
     telefone_e164: string;
     chatwoot_contact_id: number | null;
     chatwoot_conversation_id: number | null;
-  }[]).map((l) => ({
-    leadId: l.id,
-    nome: l.nome,
-    telefone: l.telefone_e164,
-    chatwootContatoId: l.chatwoot_contact_id,
-    chatwootConversaId: l.chatwoot_conversation_id,
-  }));
+  };
+
+  const alvos: Alvo[] = [];
+  for (let de = 0; de < 100_000 && alvos.length < VARREDURA_MAXIMA; de += 1000) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
+    const base = (): any =>
+      service
+        .from("leads")
+        .select(
+          "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
+        )
+        .is("primeira_resposta_em", null)
+        .not("status", "in", "(ganho,perdido)")
+        .not("telefone_e164", "is", null)
+        .lte("criado_em", corte)
+        .order("criado_em", { ascending: true })
+        .range(de, de + 999);
+
+    // Quem desligou marketing não recebe template. Sem a migração 0019 a
+    // coluna não existe e o filtro cai fora.
+    const comFiltro = await base().is("marketing_bloqueado_em", null);
+    const { data, error } = comFiltro.error ? await base() : comFiltro;
+    if (error || !data || data.length === 0) break;
+
+    for (const l of data as LinhaLead[]) {
+      if (jaEnviados.has(l.id)) continue;
+      alvos.push({
+        leadId: l.id,
+        nome: l.nome,
+        telefone: l.telefone_e164,
+        chatwootContatoId: l.chatwoot_contact_id,
+        chatwootConversaId: l.chatwoot_conversation_id,
+      });
+      if (alvos.length >= VARREDURA_MAXIMA) break;
+    }
+    if (data.length < 1000) break;
+  }
+
+  return alvos;
 }
 
 /** Retenção: clientes da carteira conforme a âncora (migração 0015). */

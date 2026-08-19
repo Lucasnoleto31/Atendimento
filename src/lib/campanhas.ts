@@ -269,8 +269,15 @@ async function proximosAlvos(
           .range(de, de + PAGINA - 1)
       : comBloqueio;
 
+    // Erro de página (timeout, hiccup do PostgREST) NÃO é fim de lista: sair
+    // com publicoAcabou=true encerraria a campanha ativa para sempre por um
+    // soluço momentâneo. Aborta a rodada sem concluir; tenta de novo depois.
+    if (pagina.error) {
+      return { alvos, publicoAcabou: false };
+    }
+
     const linhas = (pagina.data ?? []) as unknown as LinhaPublico[];
-    if (pagina.error || linhas.length === 0) {
+    if (linhas.length === 0) {
       fim = true;
       break;
     }

@@ -36,8 +36,13 @@ export async function GET(request: NextRequest) {
   const perfil = await perfilAtual();
   if (!perfil) return new Response("Forbidden", { status: 403 });
 
+  const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
+
   const params = request.nextUrl.searchParams;
-  const filtro = params.get("f") ?? "todas";
+  // Vendedor só exporta a PRÓPRIA carteira, mesmo forjando ?f=todas na URL —
+  // a carteira inteira traz receita e LTV, que a tela já esconde de quem não
+  // é gestor. O escopo é decidido no servidor, não pelo parâmetro.
+  const filtro = ehGestor ? (params.get("f") ?? "todas") : "minha";
   const status = params.get("s") ?? "todos";
   const busca = (params.get("q") ?? "").trim();
 
@@ -56,13 +61,16 @@ export async function GET(request: NextRequest) {
     if (filtro === "minha") q = q.eq("responsavel_id", perfil.id);
     if (status !== "todos") q = q.eq("status", status);
     if (busca) {
+      // Vírgula e parênteses quebram a sintaxe do filtro .or() do PostgREST —
+      // tira antes de interpolar.
+      const termo = busca.replace(/[,()]/g, " ").trim();
       const digitos = busca.replace(/\D/g, "");
       q =
         digitos.length >= 4
           ? q.or(
-              `nome_completo.ilike.%${busca}%,telefone_e164.ilike.%${digitos}%`,
+              `nome_completo.ilike.%${termo}%,telefone_e164.ilike.%${digitos}%`,
             )
-          : q.ilike("nome_completo", `%${busca}%`);
+          : q.ilike("nome_completo", `%${termo}%`);
     }
     return q.range(de, ate);
   });

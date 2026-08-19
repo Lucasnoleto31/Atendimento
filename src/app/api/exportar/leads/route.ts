@@ -1,13 +1,14 @@
 import { type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
 
 /**
  * Exporta a lista filtrada de leads em CSV (mesmos filtros da página Leads).
  * Separador ponto-e-vírgula e BOM para abrir certinho no Excel brasileiro.
+ * Busca em lotes (buscarTudo) para furar o teto de 1000 linhas do PostgREST —
+ * senão o CSV "completo" saía pela metade.
  */
-
-const LIMITE = 5000;
 
 const LISTAS_CONTATO = new Set([
   "ativos_24h",
@@ -36,30 +37,33 @@ export async function GET(request: NextRequest) {
   if (LISTAS_CONTATO.has(lista)) {
     const dataAtras = (dias: number) =>
       new Date(Date.now() - dias * 86_400_000).toISOString();
-    const d1 = dataAtras(1);
     const d7 = dataAtras(7);
     const d30 = dataAtras(30);
     const d60 = dataAtras(60);
 
-    let q = supabase
-      .from("leads")
-      .select(
-        "nome, telefone_e164, status, criado_em, campanha, ultima_interacao_em, responsavel:profiles(nome), channel:channels(nome), stage:pipeline_stages(nome)",
-      )
-      .not("status", "in", "(ganho,perdido)")
-      .limit(LIMITE);
+    const termo = busca.replace(/[,()]/g, " ").trim();
+    const { dados } = await buscarTudo((de, ate) => {
+      let q = supabase
+        .from("leads")
+        .select(
+          "nome, telefone_e164, status, criado_em, campanha, ultima_interacao_em, responsavel:profiles(nome), channel:channels(nome), stage:pipeline_stages(nome)",
+        )
+        .not("status", "in", "(ganho,perdido)")
+        .order("criado_em", { ascending: false })
+        .range(de, ate);
 
-    if (lista === "ativos_24h") q = q.gte("ultima_interacao_em", d1);
-    if (lista === "esfriando")
-      q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);
-    if (lista === "sem_contato_30")
-      q = q.lt("ultima_interacao_em", d30).gte("ultima_interacao_em", d60);
-    if (lista === "sem_contato_60") q = q.lt("ultima_interacao_em", d60);
-    if (lista === "sem_contato_nunca") q = q.is("ultima_interacao_em", null);
-    if (busca) q = q.ilike("nome", `%${busca}%`);
+      if (lista === "ativos_24h") q = q.gte("ultima_interacao_em", d7);
+      if (lista === "esfriando")
+        q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);
+      if (lista === "sem_contato_30")
+        q = q.lt("ultima_interacao_em", d30).gte("ultima_interacao_em", d60);
+      if (lista === "sem_contato_60") q = q.lt("ultima_interacao_em", d60);
+      if (lista === "sem_contato_nunca") q = q.is("ultima_interacao_em", null);
+      if (termo) q = q.ilike("nome", `%${termo}%`);
+      return q;
+    });
 
-    const { data } = await q.order("criado_em", { ascending: false });
-    for (const l of (data ?? []) as unknown as {
+    for (const l of (dados ?? []) as unknown as {
       nome: string;
       telefone_e164: string | null;
       status: string;
@@ -83,13 +87,20 @@ export async function GET(request: NextRequest) {
       ]);
     }
   } else {
-    let q = supabase.from("v_listas_atendimento").select("*").limit(LIMITE);
-    if (lista === "nunca_respondeu") q = q.eq("nunca_respondeu", true);
-    else if (lista !== "todos") q = q.eq("lista", lista);
-    if (busca) q = q.ilike("nome", `%${busca}%`);
+    const termo = busca.replace(/[,()]/g, " ").trim();
+    const { dados } = await buscarTudo((de, ate) => {
+      let q = supabase
+        .from("v_listas_atendimento")
+        .select("*")
+        .order("criado_em", { ascending: false })
+        .range(de, ate);
+      if (lista === "nunca_respondeu") q = q.eq("nunca_respondeu", true);
+      else if (lista !== "todos") q = q.eq("lista", lista);
+      if (termo) q = q.ilike("nome", `%${termo}%`);
+      return q;
+    });
 
-    const { data } = await q.order("criado_em", { ascending: false });
-    for (const l of (data ?? []) as {
+    for (const l of (dados ?? []) as {
       nome: string;
       telefone_e164: string | null;
       status: string;

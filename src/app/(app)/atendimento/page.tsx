@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
 import { KanbanBoard, type Coluna } from "@/components/app/kanban/board";
 import type { LeadCard, Stage } from "@/lib/types";
@@ -88,16 +89,37 @@ export default async function AtendimentoPage({
         .order("ordem")
     : { data: [] };
 
-  // Não lidas por coluna: uma consulta só, contada aqui (o PostgREST não
-  // compara coluna com coluna).
-  const consultaNaoLidas = supabase
-    .from("leads")
-    .select("stage_id, ultima_interacao_em, chat_lido_em")
-    .not("chatwoot_conversation_id", "is", null)
-    .not("ultima_interacao_em", "is", null)
-    .limit(2000);
+  // Não lidas por coluna: uma varredura só, contada aqui (o PostgREST não
+  // compara coluna com coluna). Filtra por ultima_interacao_em — o canal
+  // Meta direto nunca preenche chatwoot_conversation_id, então o filtro
+  // antigo cegava justamente as conversas novas. buscarTudo fura o teto de
+  // 1000 linhas do PostgREST (a base já passa disso).
+  const buscarNaoLidas = () =>
+    buscarTudo<{
+      stage_id: string;
+      ultima_interacao_em: string;
+      chat_lido_em: string | null;
+    }>((de, ate) => {
+      let q = supabase
+        .from("leads")
+        .select("stage_id, ultima_interacao_em, chat_lido_em")
+        .not("ultima_interacao_em", "is", null)
+        .range(de, ate);
+      if (soMeus && perfil) q = q.eq("responsavel_id", perfil.id);
+      return q;
+    });
 
-  const [colunas, { data: linhasNaoLidas }, { count: totalClientes }, { count: totalSemResposta }] =
+  // Contagem escopada pelo mesmo "só meus" do funil — senão o cabeçalho
+  // mostrava "8 no funil · 640 clientes" (funil filtrado, totais da base
+  // inteira), números que não fecham entre si.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
+  const contarBase = (aplicar: (q: any) => any) => {
+    let q = supabase.from("leads").select("id", { count: "exact", head: true });
+    if (soMeus && perfil) q = q.eq("responsavel_id", perfil.id);
+    return aplicar(q);
+  };
+
+  const [colunas, { dados: linhasNaoLidas }, { count: totalClientes }, { count: totalSemResposta }] =
     await Promise.all([
       Promise.all(
         ((stages ?? []) as Stage[]).map(async (stage): Promise<Coluna> => {
@@ -121,17 +143,9 @@ export default async function AtendimentoPage({
           };
         }),
       ),
-      soMeus && perfil
-        ? consultaNaoLidas.eq("responsavel_id", perfil.id)
-        : consultaNaoLidas,
-      supabase
-        .from("leads")
-        .select("id", { count: "exact", head: true })
-        .not("customer_id", "is", null),
-      supabase
-        .from("leads")
-        .select("id", { count: "exact", head: true })
-        .is("primeira_resposta_em", null),
+      buscarNaoLidas(),
+      contarBase((q) => q.not("customer_id", "is", null)),
+      contarBase((q) => q.is("primeira_resposta_em", null)),
     ]);
 
   // Etiquetas dos cartões visíveis, numa consulta só.
@@ -242,7 +256,7 @@ export default async function AtendimentoPage({
           <span className="font-mono tabular-nums">{totalLeads}</span> leads no
           funil ·{" "}
           <span className="font-mono tabular-nums">{totalClientes ?? 0}</span>{" "}
-          já são clientes ·{" "}
+          {soMeus ? "meus já são clientes" : "já são clientes"} ·{" "}
           <span className="font-mono tabular-nums">
             {totalSemResposta ?? 0}
           </span>{" "}

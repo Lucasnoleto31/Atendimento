@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { after } from "next/server";
 import Link from "next/link";
 import { AlarmClock, ArrowLeft, CheckCheck, Search, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -110,12 +111,16 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const perfil = await perfilAtual();
   const supabase = await createClient();
 
-  // Heartbeat: cadência de follow-up e mensagens agendadas pegam carona na
-  // atualização da tela. As mensagens chegam pelo webhook da Meta.
+  // Heartbeat: cadência, agendadas e campanhas pegam carona na atualização
+  // da tela. Roda em after() — depois que a resposta é enviada — porque na
+  // Vercel a instância CONGELA quando o render termina; sem isso a tarefa
+  // podia parar no meio (agendada marcada como enviada sem ter saído).
   const canal = canalAtivo();
-  processarCadencia().catch(() => {});
-  processarAgendadas().catch(() => {});
-  processarCampanhas().catch(() => {});
+  after(async () => {
+    await processarCadencia().catch(() => {});
+    await processarAgendadas().catch(() => {});
+    await processarCampanhas().catch(() => {});
+  });
 
   // A lista da caixa de entrada. `comAdiado` desliga tudo que depende da
   // coluna chat_adiado_em, para a tela seguir de pé sem a migração 0017.

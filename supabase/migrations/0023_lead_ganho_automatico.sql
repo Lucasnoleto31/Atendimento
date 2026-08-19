@@ -22,8 +22,14 @@ security definer
 set search_path = public
 as $$
 begin
+  -- `new.status is not distinct from old.status`: só marca ganho quando o
+  -- UPDATE foi um vínculo PURO de cliente (telefone/CPF/manual) e não mexeu
+  -- no status. O motor de reativação reabre o lead mudando o status para
+  -- 'em_atendimento' no MESMO update que preenche o customer_id — aí o
+  -- status muda, a guarda falha, e o resgate não é atropelado por 'ganho'.
   if old.customer_id is null
      and new.customer_id is not null
+     and new.status is not distinct from old.status
      and new.status is distinct from 'ganho' then
 
     new.status = 'ganho';

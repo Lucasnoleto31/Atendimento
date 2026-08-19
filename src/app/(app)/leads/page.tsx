@@ -33,10 +33,12 @@ const LISTAS = [
   { chave: "nunca_respondeu", rotulo: "Nunca responderam" },
 ] as const;
 
-// Listas por tempo desde a última interação (exclui ganhos e perdidos).
-// São as filas de contato da equipe: quem esfriou aparece antes de sumir.
+// Filas de contato da equipe: quem esfriou aparece antes de sumir (exclui
+// ganhos e perdidos). Faixas contínuas por tempo desde a última interação:
+// 0–7, 7–30, 30–60, +60, nunca. Antes "Ativos" era só 24h e "Esfriando"
+// começava em 7 dias — quem foi contatado entre 1 e 7 dias sumia de todas.
 const LISTAS_CONTATO = [
-  { chave: "ativos_24h", rotulo: "Ativos (24h)" },
+  { chave: "ativos_24h", rotulo: "Ativos (7d)" },
   { chave: "esfriando", rotulo: "Esfriando (7–30d)" },
   { chave: "sem_contato_30", rotulo: "30–60d sem contato" },
   { chave: "sem_contato_60", rotulo: "+60d sem contato" },
@@ -115,7 +117,6 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const agoraMs = Date.now();
   const dataAtras = (dias: number) =>
     new Date(agoraMs - dias * 86_400_000).toISOString();
-  const d1 = dataAtras(1);
   const d7 = dataAtras(7);
   const d30 = dataAtras(30);
   const d60 = dataAtras(60);
@@ -129,7 +130,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
     // Ganhos e perdidos ficam fora da fila de contato.
     q = q.not("status", "in", "(ganho,perdido)");
 
-    if (chave === "ativos_24h") q = q.gte("ultima_interacao_em", d1);
+    if (chave === "ativos_24h") q = q.gte("ultima_interacao_em", d7);
     if (chave === "esfriando")
       q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);
     if (chave === "sem_contato_30")
