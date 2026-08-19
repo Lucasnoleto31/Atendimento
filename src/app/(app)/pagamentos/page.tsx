@@ -12,6 +12,7 @@ export const metadata: Metadata = { title: "Pagamentos · Zeve CRM" };
 const POR_PAGINA = 50;
 
 const PERIODOS = [
+  { chave: "hoje", rotulo: "Hoje" },
   { chave: "mes", rotulo: "Este mês" },
   { chave: "30", rotulo: "30 dias" },
   { chave: "90", rotulo: "90 dias" },
@@ -34,6 +35,13 @@ type Venda = {
 function inicioDoPeriodo(chave: ChavePeriodo): string | null {
   if (chave === "tudo") return null;
   const agora = new Date();
+  if (chave === "hoje") {
+    // Meia-noite de hoje em Brasília — o dia de trabalho da mesa.
+    const diaLocal = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+    }).format(agora);
+    return new Date(`${diaLocal}T00:00:00-03:00`).toISOString();
+  }
   if (chave === "mes") {
     return new Date(agora.getFullYear(), agora.getMonth(), 1).toISOString();
   }

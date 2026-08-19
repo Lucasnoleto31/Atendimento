@@ -15,6 +15,8 @@ import {
 export type ItemConversa = {
   id: string;
   nome: string;
+  /** Nome de quem está no atendimento — aparece em cima do nome do lead. */
+  atendente: string | null;
   href: string;
   hora: string;
   previa: string;
@@ -224,6 +226,11 @@ export function ListaConversas({
                     {item.nome.slice(0, 2).toUpperCase()}
                   </span>
                   <span className="min-w-0 flex-1">
+                    {item.atendente ? (
+                      <span className="block truncate text-xs text-neutral-600">
+                        {item.atendente}
+                      </span>
+                    ) : null}
                     <span className="flex items-baseline justify-between gap-1">
                       <span
                         className={cn(

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { after } from "next/server";
 import Link from "next/link";
-import { AlarmClock, ArrowLeft, CheckCheck, Search, UserRound } from "lucide-react";
+import { ArrowLeft, Search, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { formatarTelefone, horaOuData } from "@/lib/format";
@@ -41,19 +41,17 @@ import { type TarefaLead } from "./tarefas-lead";
 
 export const metadata: Metadata = { title: "Chat · Zeve CRM" };
 
-const FILTROS = [
-  { chave: "todas", rotulo: "Todas" },
-  { chave: "minhas", rotulo: "Minhas" },
+// Eixo "caixa": situação da conversa. O eixo "escopo" (Minhas / Sem dono /
+// Todas) vive no parâmetro v (atendente) e combina livremente com este —
+// dá para ver "adiadas minhas", "não lidas sem dono" etc.
+const CAIXAS = [
+  { chave: "todas", rotulo: "Caixa" },
   { chave: "naolidas", rotulo: "Não lidas" },
   { chave: "adiadas", rotulo: "Adiadas" },
   { chave: "resolvidas", rotulo: "Resolvidas" },
 ] as const;
 
-// No controle segmentado ficam só os filtros do dia a dia; "adiadas" vive num
-// atalho próprio e "sem atendente"/vendedor viraram o select de atendente.
-const SEGMENTOS = ["todas", "minhas", "naolidas"] as const;
-
-type ChaveFiltro = (typeof FILTROS)[number]["chave"];
+type ChaveFiltro = (typeof CAIXAS)[number]["chave"];
 
 type ConversaLinha = {
   id: string;
@@ -94,13 +92,15 @@ function urlChat(
 
 export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const params = await searchParams;
+  // f=minhas era o filtro antigo — virou escopo (v = o próprio usuário).
+  const fBruto = params.f === "minhas" ? "todas" : params.f;
   const filtro = (
-    FILTROS.some((f) => f.chave === params.f) ? params.f : "todas"
+    CAIXAS.some((c) => c.chave === fBruto) ? fBruto : "todas"
   ) as ChaveFiltro;
   const busca = typeof params.q === "string" ? params.q.trim() : "";
   const etiquetaFiltro = typeof params.t === "string" ? params.t : "";
   // "sem" = sem atendente; qualquer outro valor é o id do vendedor.
-  const atendenteFiltro = typeof params.v === "string" ? params.v : "";
+  let atendenteFiltro = typeof params.v === "string" ? params.v : "";
   const leadSelecionado = typeof params.lead === "string" ? params.lead : null;
   const limiteMensagens = Math.min(
     2000,
@@ -109,6 +109,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
 
   const perfil = await perfilAtual();
   const supabase = await createClient();
+  if (params.f === "minhas" && !atendenteFiltro && perfil) {
+    atendenteFiltro = perfil.id; // link antigo continua filtrando as minhas
+  }
 
   // Heartbeat: cadência, agendadas e campanhas pegam carona na atualização
   // da tela. Roda em after() — depois que a resposta é enviada — porque na
@@ -150,7 +153,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       }
     }
 
-    if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
     if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
     else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
     if (etiquetaFiltro) q = q.eq("lead_tags.tag_id", etiquetaFiltro);
@@ -192,9 +194,30 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       canal === "meta"
         ? q.not("ultima_interacao_em", "is", null)
         : q.not("chatwoot_conversation_id", "is", null);
-    if (filtro === "minhas" && perfil) q = q.eq("responsavel_id", perfil.id);
     if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
     else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
+    const { count, error } = await q;
+    return error ? 0 : (count ?? 0);
+  };
+
+  // Contagens do eixo de escopo (Minhas / Sem dono / Todas), na caixa atual.
+  const contarEscopo = async (vAlvo: string): Promise<number> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
+    let q: any = supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true });
+    q =
+      canal === "meta"
+        ? q.not("ultima_interacao_em", "is", null)
+        : q.not("chatwoot_conversation_id", "is", null);
+    if (filtro === "adiadas") q = q.not("chat_adiado_em", "is", null);
+    else if (filtro === "resolvidas") {
+      q = q.not("chat_resolvido_em", "is", null);
+    } else {
+      q = q.is("chat_adiado_em", null).is("chat_resolvido_em", null);
+    }
+    if (vAlvo === "sem") q = q.is("responsavel_id", null);
+    else if (vAlvo) q = q.eq("responsavel_id", vAlvo);
     const { count, error } = await q;
     return error ? 0 : (count ?? 0);
   };
@@ -205,6 +228,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     { data: pessoasFiltro },
     totalAdiadas,
     totalResolvidas,
+    totalMinhas,
+    totalSemDono,
+    totalTodas,
   ] = await Promise.all([
       supabase
         .from("tags")
@@ -224,6 +250,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome"),
       contarFora("chat_adiado_em"),
       contarFora("chat_resolvido_em"),
+      contarEscopo(perfil?.id ?? ""),
+      contarEscopo("sem"),
+      contarEscopo(""),
     ]);
   const etiquetas = (tagsAtivas ?? []) as Etiqueta[];
   const equipeAtendentes = (pessoasFiltro ?? []) as { id: string; nome: string }[];
@@ -507,6 +536,18 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   // Hora no dia de hoje, data nos anteriores — tudo no fuso de Brasília.
   const horaCurta = horaOuData;
 
+  // Quem está no atendimento aparece em cima do nome do lead na lista.
+  const nomePorAtendente = new Map(
+    equipeAtendentes.map((p) => [p.id, p.nome]),
+  );
+
+  // Eixo de escopo do cabeçalho: Minhas / Sem dono / Todas, com contagem.
+  const escopos = [
+    { rotulo: "Minhas", v: perfil?.id ?? "", total: totalMinhas },
+    { rotulo: "Sem dono", v: "sem", total: totalSemDono },
+    { rotulo: "Todas", v: "", total: totalTodas },
+  ];
+
   // A lista é um componente cliente (seleção múltipla), então tudo que é
   // cálculo ou classe vai resolvido daqui.
   const itensLista: ItemConversa[] = conversas.map((conversa) => {
@@ -519,6 +560,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     return {
       id: conversa.id,
       nome: conversa.nome,
+      atendente: conversa.responsavel_id
+        ? (nomePorAtendente.get(conversa.responsavel_id) ?? null)
+        : null,
       href: urlChat(filtro, busca, etiquetaFiltro, atendenteFiltro, conversa.id),
       hora: horaCurta(conversa.ultima_interacao_em),
       previa: previas.get(conversa.id) ?? "—",
@@ -556,57 +600,106 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         )}
       >
         <div className="border-b border-neutral-200 p-1.5">
-          <h1 className="px-0.5 text-h3 text-neutral-900">Chat</h1>
-
-          <form action="/chat" method="get" className="mt-1 flex gap-1">
-            {filtro !== "todas" ? (
-              <input type="hidden" name="f" value={filtro} />
-            ) : null}
-            {etiquetaFiltro ? (
-              <input type="hidden" name="t" value={etiquetaFiltro} />
-            ) : null}
-            {atendenteFiltro ? (
-              <input type="hidden" name="v" value={atendenteFiltro} />
-            ) : null}
-            <label htmlFor="busca-chat" className="sr-only">
-              Buscar conversa
-            </label>
-            <input
-              id="busca-chat"
-              name="q"
-              defaultValue={busca}
-              placeholder="Nome ou telefone…"
-              className="h-[40px] min-w-0 flex-1 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-            />
-            <button
-              type="submit"
-              aria-label="Buscar"
-              className="inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          {/* Título e busca dividem a linha — o cabeçalho inteiro cabe em
+              quatro linhas compactas (era o dobro, com atalhos empilhados). */}
+          <div className="flex items-center gap-1">
+            <h1 className="shrink-0 px-0.5 text-h3 text-neutral-900">Chat</h1>
+            <form
+              action="/chat"
+              method="get"
+              className="flex min-w-0 flex-1 gap-0.5"
             >
-              <Search size={18} strokeWidth={1.5} aria-hidden />
-            </button>
-          </form>
+              {filtro !== "todas" ? (
+                <input type="hidden" name="f" value={filtro} />
+              ) : null}
+              {etiquetaFiltro ? (
+                <input type="hidden" name="t" value={etiquetaFiltro} />
+              ) : null}
+              {atendenteFiltro ? (
+                <input type="hidden" name="v" value={atendenteFiltro} />
+              ) : null}
+              <label htmlFor="busca-chat" className="sr-only">
+                Buscar conversa
+              </label>
+              <input
+                id="busca-chat"
+                name="q"
+                defaultValue={busca}
+                placeholder="Nome ou telefone…"
+                className="h-[32px] min-w-0 flex-1 rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              />
+              <button
+                type="submit"
+                aria-label="Buscar"
+                className="inline-flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              >
+                <Search size={16} strokeWidth={1.5} aria-hidden />
+              </button>
+            </form>
+          </div>
 
-          {/* Controle segmentado: os três filtros do dia a dia, larguras iguais. */}
-          <nav aria-label="Filtro de conversas" className="mt-1">
+          {/* Eixo 1 — escopo (de quem), com contagem. Combina com a caixa. */}
+          <nav aria-label="Filtro por atendente" className="mt-1">
             <ul className="grid grid-cols-3 gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 p-0.5">
-              {FILTROS.filter((f) =>
-                (SEGMENTOS as readonly string[]).includes(f.chave),
-              ).map((f) => {
-                const ativo = f.chave === filtro;
+              {escopos.map((escopo) => {
+                const ativo = atendenteFiltro === escopo.v;
                 return (
-                  <li key={f.chave}>
+                  <li key={escopo.rotulo}>
                     <Link
-                      href={urlChat(f.chave, busca, etiquetaFiltro, atendenteFiltro)}
+                      href={urlChat(filtro, busca, etiquetaFiltro, escopo.v)}
                       aria-current={ativo ? "page" : undefined}
                       className={cn(
-                        "flex h-[32px] items-center justify-center rounded-sm text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                        "flex h-[32px] items-center justify-center gap-0.5 rounded-sm text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
                         ativo
                           ? "bg-primary-50 font-medium text-primary-900"
                           : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
                       )}
                     >
-                      {f.rotulo}
+                      {escopo.rotulo}
+                      <span
+                        className={cn(
+                          "font-mono text-xs tabular-nums",
+                          ativo ? "text-primary-500" : "text-neutral-400",
+                        )}
+                      >
+                        {escopo.total}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+
+          {/* Eixo 2 — caixa (situação da conversa). Combina com o escopo. */}
+          <nav aria-label="Caixa de conversas" className="mt-1">
+            <ul className="flex flex-wrap gap-0.5">
+              {CAIXAS.map((caixa) => {
+                const ativo = filtro === caixa.chave;
+                const total =
+                  caixa.chave === "adiadas"
+                    ? totalAdiadas
+                    : caixa.chave === "resolvidas"
+                      ? totalResolvidas
+                      : 0;
+                return (
+                  <li key={caixa.chave}>
+                    <Link
+                      href={urlChat(caixa.chave, busca, etiquetaFiltro, atendenteFiltro)}
+                      aria-current={ativo ? "page" : undefined}
+                      className={cn(
+                        "inline-flex h-[32px] items-center rounded-md px-1 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                        ativo
+                          ? "bg-primary-50 font-medium text-primary-900"
+                          : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
+                      )}
+                    >
+                      {caixa.rotulo}
+                      {total > 0 ? (
+                        <span className="ml-0.5 font-mono text-xs text-neutral-400 tabular-nums">
+                          {total}
+                        </span>
+                      ) : null}
                     </Link>
                   </li>
                 );
@@ -622,57 +715,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             etiquetaAtual={etiquetaFiltro}
             atendenteAtual={atendenteFiltro}
           />
-
-          {/* Fora do fluxo do dia a dia — atalhos só quando existirem. */}
-          {filtro === "resolvidas" || totalResolvidas > 0 ? (
-            <div className="mt-1 flex justify-end">
-              <Link
-                href={urlChat(
-                  filtro === "resolvidas" ? "todas" : "resolvidas",
-                  busca,
-                  etiquetaFiltro,
-                  atendenteFiltro,
-                )}
-                aria-current={filtro === "resolvidas" ? "page" : undefined}
-                className={cn(
-                  "inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
-                  filtro === "resolvidas"
-                    ? "bg-success-bg font-medium text-success"
-                    : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
-                )}
-              >
-                <CheckCheck size={14} strokeWidth={1.5} aria-hidden />
-                {filtro === "resolvidas"
-                  ? "Voltar para a caixa"
-                  : `Resolvidas (${totalResolvidas})`}
-              </Link>
-            </div>
-          ) : null}
-
-          {filtro === "adiadas" || totalAdiadas > 0 ? (
-            <div className="mt-1 flex justify-end">
-              <Link
-                href={urlChat(
-                  filtro === "adiadas" ? "todas" : "adiadas",
-                  busca,
-                  etiquetaFiltro,
-                  atendenteFiltro,
-                )}
-                aria-current={filtro === "adiadas" ? "page" : undefined}
-                className={cn(
-                  "inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
-                  filtro === "adiadas"
-                    ? "bg-primary-50 font-medium text-primary-900"
-                    : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
-                )}
-              >
-                <AlarmClock size={14} strokeWidth={1.5} aria-hidden />
-                {filtro === "adiadas"
-                  ? "Voltar para a caixa"
-                  : `Adiadas (${totalAdiadas})`}
-              </Link>
-            </div>
-          ) : null}
         </div>
 
         <ListaConversas itens={itensLista} equipe={equipeAtendentes} />
