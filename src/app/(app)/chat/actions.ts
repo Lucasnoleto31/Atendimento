@@ -68,6 +68,42 @@ function tipoDoArquivo(mime: string): string {
     : "file";
 }
 
+// A Cloud API da Meta só entrega como arquivo estes tipos (pdf, office e
+// texto) além de imagem/áudio/vídeo. Qualquer outro — .psf de indicador,
+// .zip, binário — é recusado com erro 131053. Nesses casos mandamos o link.
+const DOCS_WHATSAPP = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+]);
+const EXTS_WHATSAPP = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "txt",
+  "csv",
+]);
+
+/** O WhatsApp consegue entregar este arquivo como mídia/documento? */
+function suportadoWhatsApp(arquivo: File): boolean {
+  const mime = (arquivo.type || "").toLowerCase();
+  if (/^(image|audio|video)\//.test(mime)) return true;
+  if (DOCS_WHATSAPP.has(mime)) return true;
+  // Navegador nem sempre preenche o MIME — confere pela extensão também.
+  const ext = arquivo.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+  return EXTS_WHATSAPP.has(ext);
+}
+
 export type ResultadoEnvio = { ok?: boolean; erro?: string };
 
 async function leadComConversa(leadId: string) {
@@ -226,18 +262,32 @@ export async function enviarMensagemLead(
       };
     }
     if (arquivos.length > 0) {
+      const servicoLink = createServiceClient();
       // Texto vira legenda do primeiro anexo; áudio não aceita legenda.
       // Cada arquivo é um envio próprio: se um falhar no meio, os anteriores
       // JÁ chegaram ao lead — registra o que foi e avisa, em vez de fingir
       // que nada saiu (o reenvio duplicava texto e arquivos para o cliente).
       for (const [i, arquivo] of arquivos.entries()) {
+        const legenda = i === 0 && texto ? texto : undefined;
         try {
-          const id = await enviarMidiaMeta(
-            lead.telefone_e164,
-            arquivo,
-            i === 0 && texto ? texto : undefined,
-          );
-          if (id) wamids.push(id);
+          if (suportadoWhatsApp(arquivo)) {
+            const id = await enviarMidiaMeta(
+              lead.telefone_e164,
+              arquivo,
+              legenda,
+            );
+            if (id) wamids.push(id);
+          } else {
+            // Tipo que o WhatsApp não entrega como arquivo (ex.: indicador
+            // .psf): manda o link de download do Storage, que o cliente abre
+            // e baixa. O arquivo já subiu para lá quando foi anexado.
+            const url = servicoLink.storage
+              .from(BUCKET_MIDIA)
+              .getPublicUrl(anexosRemotos[i].caminho).data.publicUrl;
+            const corpo = `${legenda ? `${legenda}\n\n` : ""}📎 ${arquivo.name}\n${url}`;
+            const id = await enviarTextoMeta(lead.telefone_e164, corpo);
+            if (id) wamids.push(id);
+          }
         } catch (e) {
           falhaParcial = `"${arquivo.name}" (${e instanceof Error ? e.message : String(e)})`;
           break;

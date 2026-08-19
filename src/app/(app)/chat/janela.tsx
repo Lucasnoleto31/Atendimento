@@ -1358,12 +1358,15 @@ export function Janela({
             >
               <Paperclip size={16} strokeWidth={1.5} aria-hidden />
             </button>
+            {/* Sem accept: o seletor aceita qualquer arquivo. O servidor
+                decide o caminho — o WhatsApp entrega imagem/áudio/vídeo/pdf/
+                office/texto como arquivo, e o resto (indicador .psf, .zip…)
+                vai como link de download. */}
             <input
               ref={inputArquivosRef}
               type="file"
               name="arquivos"
               multiple
-              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
               className="hidden"
               onChange={(e) => adicionarArquivos(e.target.files)}
             />
