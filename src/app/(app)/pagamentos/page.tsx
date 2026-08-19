@@ -87,14 +87,24 @@ export default async function PagamentosPage({
     .eq("status", "confirmada");
   if (inicio) consultaTotais = consultaTotais.gte("ocorreu_em", inicio);
 
+  // "Operações no período" conta o que valeu — venda cancelada sai da conta
+  // (a lista abaixo ainda mostra a cancelada riscada, para rastreio).
+  let consultaOperacoes = supabase
+    .from("sales")
+    .select("id", { count: "exact", head: true })
+    .neq("status", "cancelada");
+  if (inicio) consultaOperacoes = consultaOperacoes.gte("ocorreu_em", inicio);
+
   const [
     { data: vendas, count },
     { data: totaisPeriodo },
+    { count: operacoes },
     { data: vendasMes },
     { data: equipe },
   ] = await Promise.all([
     consulta,
     consultaTotais,
+    consultaOperacoes,
     supabase
       .from("sales")
       .select("vendedor_id, valor_comissao_centavos")
@@ -194,7 +204,7 @@ export default async function PagamentosPage({
             Operações no período
           </dt>
           <dd className="font-mono text-h1 text-neutral-900 tabular-nums">
-            {total.toLocaleString("pt-BR")}
+            {(operacoes ?? 0).toLocaleString("pt-BR")}
           </dd>
         </div>
       </dl>
