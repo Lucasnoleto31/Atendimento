@@ -18,9 +18,12 @@ import {
   Check,
   CheckCheck,
   Clock,
+  LoaderCircle,
   Paperclip,
   Send,
   Smile,
+  Sparkles,
+  SpellCheck,
   TriangleAlert,
   X,
   Zap,
@@ -38,6 +41,7 @@ import {
   prepararUploadAnexo,
   type ResultadoEnvio,
 } from "./actions";
+import { corrigirTexto, sugerirResposta } from "./ia";
 
 export type Agendada = {
   id: string;
@@ -480,6 +484,43 @@ export function Janela({
     setBusca("");
     setIdxSel(0);
     textareaRef.current?.focus();
+  };
+
+  // IA: sugestão lê a conversa e propõe a próxima mensagem; correção arruma a
+  // ortografia do que foi digitado. Nos dois casos o texto só CAI NA CAIXA —
+  // nada vai ao lead sem o atendente revisar e apertar Enviar.
+  const [iaOcupada, setIaOcupada] = useState<"sugerir" | "corrigir" | null>(
+    null,
+  );
+  const [erroIa, setErroIa] = useState<string | null>(null);
+
+  const aplicarTextoIa = (valor: string) => {
+    atualizarTexto(valor);
+    textareaRef.current?.focus();
+  };
+
+  const pedirSugestao = () => {
+    setErroIa(null);
+    setIaOcupada("sugerir");
+    sugerirResposta(leadId)
+      .then((r) => {
+        if (r.erro) setErroIa(r.erro);
+        else if (r.sugestao) aplicarTextoIa(r.sugestao);
+      })
+      .catch(() => setErroIa("Não deu para falar com a IA agora — tente de novo."))
+      .finally(() => setIaOcupada(null));
+  };
+
+  const pedirCorrecao = () => {
+    setErroIa(null);
+    setIaOcupada("corrigir");
+    corrigirTexto(texto)
+      .then((r) => {
+        if (r.erro) setErroIa(r.erro);
+        else if (r.corrigido) aplicarTextoIa(r.corrigido);
+      })
+      .catch(() => setErroIa("Não deu para falar com a IA agora — tente de novo."))
+      .finally(() => setIaOcupada(null));
   };
 
   const anexarGravacao = (arquivo: File) => {
@@ -1124,6 +1165,12 @@ export function Janela({
             id="texto-mensagem"
             name="texto"
             rows={3}
+            // O corretor nativo depende do navegador saber o idioma do campo —
+            // sem isso, vendedor com dicionário em inglês não via sublinhado.
+            lang="pt-BR"
+            spellCheck
+            autoCorrect="on"
+            autoCapitalize="sentences"
             ref={textareaRef}
             value={texto}
             onChange={(e) => atualizarTexto(e.target.value)}
@@ -1181,7 +1228,7 @@ export function Janela({
             )}
           />
 
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <button
               type="button"
               aria-label='Mensagens prontas (atalho "/")'
@@ -1212,6 +1259,58 @@ export function Janela({
               className={cn(BOTAO_FERRAMENTA, "hidden sm:inline-flex")}
             >
               <Smile size={16} strokeWidth={1.5} aria-hidden />
+            </button>
+
+            <button
+              type="button"
+              aria-label="Sugerir resposta com IA"
+              title={
+                modo === "nota"
+                  ? "Sugestão só em resposta ao lead"
+                  : janelaFechada
+                    ? "Janela de 24h fechada — texto livre não chega; use um template"
+                    : "Sugerir resposta com IA — lê a conversa e escreve um rascunho para você revisar"
+              }
+              disabled={modo === "nota" || janelaFechada || iaOcupada !== null}
+              onClick={pedirSugestao}
+              className={cn(
+                BOTAO_FERRAMENTA,
+                "disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
+              )}
+            >
+              {iaOcupada === "sugerir" ? (
+                <LoaderCircle
+                  size={16}
+                  strokeWidth={1.5}
+                  aria-hidden
+                  className="animate-spin"
+                />
+              ) : (
+                <Sparkles size={16} strokeWidth={1.5} aria-hidden />
+              )}
+            </button>
+
+            <button
+              type="button"
+              aria-label="Corrigir ortografia com IA"
+              title="Corrigir ortografia com IA — arruma acentos e erros sem mudar o que você escreveu"
+              disabled={texto.trim().length === 0 || iaOcupada !== null}
+              onClick={pedirCorrecao}
+              className={cn(
+                BOTAO_FERRAMENTA,
+                "disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
+              )}
+            >
+              {iaOcupada === "corrigir" ? (
+                <LoaderCircle
+                  size={16}
+                  strokeWidth={1.5}
+                  aria-hidden
+                  className="animate-spin"
+                />
+              ) : (
+                <SpellCheck size={16} strokeWidth={1.5} aria-hidden />
+              )}
             </button>
 
             <GravadorAudio
@@ -1277,6 +1376,11 @@ export function Janela({
             </span>
           </div>
 
+          {erroIa ? (
+            <p role="alert" className="text-sm text-danger">
+              {erroIa}
+            </p>
+          ) : null}
           {avisoArquivo ? (
             <p role="alert" className="text-sm text-danger">
               {avisoArquivo}
