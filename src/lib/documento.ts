@@ -6,6 +6,21 @@
  * próprio telefone do lead.
  */
 
+/**
+ * Forma canônica do documento: só dígitos, com o zero à esquerda de volta.
+ * O Excel/diversificador trata CPF como número e come o zero da frente
+ * ("01177961237" vira "1177961237"), então o mesmo CPF fica com grafias
+ * diferentes no cliente e no lead e o cruzamento falha. Normaliza os dois
+ * lados para 11 (CPF) ou 14 (CNPJ) dígitos. Devolve null se não sobrar nada.
+ */
+export function normalizarDocumento(bruto: string): string | null {
+  const d = (bruto ?? "").replace(/\D/g, "");
+  if (!d) return null;
+  if (d.length <= 11) return d.padStart(11, "0");
+  if (d.length <= 14) return d.padStart(14, "0");
+  return d;
+}
+
 export function validarCpf(cpf: string): boolean {
   if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) return false;
   for (const posicao of [9, 10]) {

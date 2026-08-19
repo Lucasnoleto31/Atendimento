@@ -4,6 +4,7 @@ import {
   normalizarTelefone,
   type LinhaCsv,
 } from "../csv.ts";
+import { normalizarDocumento } from "../documento.ts";
 import {
   COLUNAS_CONTA,
   COLUNAS_NOME,
@@ -41,9 +42,11 @@ export function prepararClientes(linhas: LinhaCsv[]): PreparoClientes {
     const nome = campo(linha, ...COLUNAS_NOME).trim();
     const telefone = normalizarTelefone(campo(linha, ...COLUNAS_TELEFONE));
     const conta = normalizarConta(campo(linha, ...COLUNAS_CONTA));
-    const documento =
-      campo(linha, "documento", "cpf", "cnpj", "cpf_cnpj").replace(/\D/g, "") ||
-      null;
+    // Normaliza para trazer de volta o zero à esquerda que o Excel comeu —
+    // senão o CPF do cliente não casa com o que o lead informa no chat.
+    const documento = normalizarDocumento(
+      campo(linha, "documento", "cpf", "cnpj", "cpf_cnpj"),
+    );
 
     if (!nome) {
       erros.push(`Linha ${numeroLinha}: sem nome.`);

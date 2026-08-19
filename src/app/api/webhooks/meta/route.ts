@@ -62,6 +62,13 @@ type MensagemMeta = {
   video?: MidiaMeta;
   document?: MidiaMeta;
   sticker?: MidiaMeta;
+  // Reação a uma mensagem: emoji vazio = o cliente removeu a reação.
+  reaction?: { message_id?: string; emoji?: string };
+  button?: { text?: string; payload?: string };
+  interactive?: {
+    button_reply?: { title?: string };
+    list_reply?: { title?: string };
+  };
 };
 
 type StatusMeta = {
@@ -278,9 +285,26 @@ async function processarMensagem(
     }
   }
 
+  // Reação, resposta de botão e resposta de lista têm o conteúdo em campos
+  // próprios — sem tratá-los, a mensagem virava um "[reaction recebida]" e a
+  // equipe não via o que o cliente quis dizer.
+  const textoEspecial =
+    mensagem.type === "reaction"
+      ? mensagem.reaction?.emoji?.trim()
+        ? `Reagiu com ${mensagem.reaction.emoji.trim()}`
+        : "Removeu a reação"
+      : mensagem.type === "button"
+        ? mensagem.button?.text?.trim() || null
+        : mensagem.type === "interactive"
+          ? (mensagem.interactive?.button_reply?.title?.trim() ??
+            mensagem.interactive?.list_reply?.title?.trim() ??
+            null)
+          : null;
+
   const texto =
     mensagem.text?.body?.trim() ||
     midia?.caption?.trim() ||
+    textoEspecial ||
     ROTULO_TIPO_META[mensagem.type] ||
     `[${mensagem.type ?? "mensagem"} recebida]`;
 
