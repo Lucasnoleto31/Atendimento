@@ -1240,7 +1240,7 @@ export function Janela({
                   ? "Anexo só em resposta ao lead"
                   : janelaFechada
                     ? "Janela de 24h fechada — anexo não chega; use um template"
-                    : "Anexar arquivos (máx. 5, até 4MB por envio)"
+                    : "Anexar arquivos (máx. 5, até 16MB cada — imagem até 5MB)"
               }
               disabled={modo === "nota" || janelaFechada}
               onClick={() => inputArquivosRef.current?.click()}
