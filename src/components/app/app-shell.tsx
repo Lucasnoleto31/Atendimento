@@ -151,6 +151,9 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
                 />
                 {item.label}
                 {item.href === "/chat" ? <ContadorNaoLidas /> : null}
+                {item.href === "/agenda" ? (
+                  <ContadorNaoLidas mostrar="tarefas" />
+                ) : null}
               </Link>
             </li>
           );

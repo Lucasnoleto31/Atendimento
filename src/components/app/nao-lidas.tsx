@@ -54,9 +54,10 @@ function iniciarCiclo() {
       pendencias = novas;
       for (const avisar of ouvintes) avisar();
 
-      const totalTitulo = novas.naoLidas + novas.tarefasVencidas;
+      // Só as conversas não lidas entram no título da aba — é o alerta de
+      // "mensagem nova". Tarefa vencida é assunto da Agenda, não põe (n) aqui.
       const base = document.title.replace(/^\(\d+\)\s/, "");
-      document.title = totalTitulo > 0 ? `(${totalTitulo}) ${base}` : base;
+      document.title = novas.naoLidas > 0 ? `(${novas.naoLidas}) ${base}` : base;
     } catch {
       // sem rede/sessão: tenta de novo no próximo ciclo
     }
@@ -113,21 +114,29 @@ function lerPendencias(): Pendencias {
 }
 
 /**
- * Badge de conversas não lidas no menu. Consulta a cada 30s (e ao voltar
- * para a aba); aumento do total toca o bip e prefixa (n) no título da aba.
+ * Badge do menu. `mostrar` decide qual sinal:
+ *  - "conversas" (no item Chat): conversas com mensagem não lida.
+ *  - "tarefas"   (no item Agenda): tarefas vencidas.
+ *
+ * Antes os dois apareciam juntos no Chat — as 1.184 tarefas de reativação
+ * viravam um "99+" que abafava as conversas não lidas de verdade.
+ * Consulta a cada 30s (e ao voltar para a aba); mensagem nova toca o bip.
  */
-export function ContadorNaoLidas() {
+export function ContadorNaoLidas({
+  mostrar = "conversas",
+}: {
+  mostrar?: "conversas" | "tarefas";
+}) {
   const { naoLidas, tarefasVencidas } = useSyncExternalStore(
     assinar,
     lerPendencias,
     lerPendencias,
   );
 
-  if (naoLidas === 0 && tarefasVencidas === 0) return null;
-
-  return (
-    <span className="ml-auto inline-flex items-center gap-0.5">
-      {tarefasVencidas > 0 ? (
+  if (mostrar === "tarefas") {
+    if (tarefasVencidas === 0) return null;
+    return (
+      <span className="ml-auto inline-flex items-center">
         <span
           aria-label={`${tarefasVencidas} tarefa(s) vencida(s)`}
           title={`${tarefasVencidas} tarefa(s) vencida(s)`}
@@ -135,15 +144,19 @@ export function ContadorNaoLidas() {
         >
           {tarefasVencidas > 99 ? "99+" : tarefasVencidas}
         </span>
-      ) : null}
-      {naoLidas > 0 ? (
-        <span
-          aria-label={`${naoLidas} conversa(s) não lida(s)`}
-          className="inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-full bg-primary-600 px-0.5 font-mono text-xs font-medium text-neutral-0 tabular-nums"
-        >
-          {naoLidas > 99 ? "99+" : naoLidas}
-        </span>
-      ) : null}
+      </span>
+    );
+  }
+
+  if (naoLidas === 0) return null;
+  return (
+    <span className="ml-auto inline-flex items-center">
+      <span
+        aria-label={`${naoLidas} conversa(s) não lida(s)`}
+        className="inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-full bg-primary-600 px-0.5 font-mono text-xs font-medium text-neutral-0 tabular-nums"
+      >
+        {naoLidas > 99 ? "99+" : naoLidas}
+      </span>
     </span>
   );
 }
