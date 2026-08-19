@@ -144,11 +144,20 @@ export async function POST(request: NextRequest) {
         if (!["sent", "delivered", "read", "failed"].includes(status.status)) {
           continue;
         }
-        const { data: linha } = await service
+        let { data: linha } = await service
           .from("lead_interactions")
           .select("id, lead_id, metadados")
           .eq("metadados->>message_id", status.id)
           .maybeSingle();
+        if (!linha) {
+          // Envio com vários anexos: cada arquivo tem um wamid próprio,
+          // guardados em metadados.message_ids — o recibo casa por qualquer um.
+          ({ data: linha } = await service
+            .from("lead_interactions")
+            .select("id, lead_id, metadados")
+            .contains("metadados", { message_ids: [status.id] })
+            .maybeSingle());
+        }
         if (linha) {
           const falha = status.errors?.[0];
           const erro = falha ? descreverErroMeta(falha) : null;
@@ -339,10 +348,29 @@ async function processarMensagem(
       .select("id")
       .single();
 
-    if (error) throw new Error(error.message);
-    leadId = novo.id;
+    if (error) {
+      // Corrida: duas mensagens do MESMO contato novo em POSTs paralelos —
+      // o perdedor do índice único de telefone reaproveita o lead do outro,
+      // em vez de perder a mensagem para sempre.
+      if (error.code === "23505") {
+        const { data: corrida } = await service
+          .from("leads")
+          .select("id")
+          .eq("telefone_e164", telefone)
+          .maybeSingle();
+        if (corrida) {
+          leadId = corrida.id;
+        } else {
+          throw new Error(error.message);
+        }
+      } else {
+        throw new Error(error.message);
+      }
+    } else {
+      leadId = novo.id;
+    }
 
-    if (!instancia?.vendedor_id && vendedor) {
+    if (!error && !instancia?.vendedor_id && vendedor) {
       await service.from("lead_interactions").insert({
         lead_id: leadId,
         tipo: "atribuicao",
@@ -366,7 +394,7 @@ async function processarMensagem(
       .eq("id", leadId);
   }
 
-  await service.from("lead_interactions").insert({
+  const { error: erroInteracao } = await service.from("lead_interactions").insert({
     lead_id: leadId,
     tipo: "mensagem_recebida",
     conteudo: texto,
@@ -377,6 +405,12 @@ async function processarMensagem(
       ...(anexos.length > 0 ? { anexos } : {}),
     },
   });
+
+  if (erroInteracao) {
+    // Sem a interação gravada, o evento não pode virar "processado" — a falha
+    // fica visível em webhook_events.erro em vez de sumir com a mensagem.
+    throw new Error(`Falha ao gravar a mensagem: ${erroInteracao.message}`);
+  }
 
   // CPF/CNPJ dito na conversa: grava no lead — o gatilho do banco vincula à
   // base de clientes na hora, ou a próxima importação vincula (0018). Sem a

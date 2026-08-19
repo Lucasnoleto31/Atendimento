@@ -33,6 +33,7 @@ import {
   agendarMensagemLead,
   cancelarMensagemAgendada,
   enviarMensagemLead,
+  marcarChatLido,
   type ResultadoEnvio,
 } from "./actions";
 
@@ -60,6 +61,9 @@ function lerPonteiroGrosso() {
 }
 const MAX_ANEXOS = 5;
 const MAX_TAMANHO_ANEXO = 16 * 1024 * 1024; // teto do WhatsApp para mídia
+// A Vercel corta o corpo da requisição em ~4,5MB — acima disso o envio nem
+// chega ao servidor e a página quebra. Trava no cliente com aviso claro.
+const MAX_TOTAL_ENVIO = 4 * 1024 * 1024;
 const LIMIAR_FIM_PX = 80;
 
 const EMOJIS = [
@@ -308,7 +312,10 @@ export function Janela({
   ontemChave: string;
   agendadas: Agendada[];
 }) {
-  const [estado, formAction] = useActionState(enviarMensagemLead, ESTADO);
+  const [estado, formAction, enviandoAcao] = useActionState(
+    enviarMensagemLead,
+    ESTADO,
+  );
   const [texto, setTexto] = useState("");
   const [modo, setModo] = useState<"responder" | "nota">("responder");
   const assinar = useSyncExternalStore(
@@ -379,6 +386,13 @@ export function Janela({
     // roda uma vez, ao montar/trocar de conversa
   }, [leadId]);
 
+  // Abrir a conversa marca como lida — UMA vez, na montagem. Antes o servidor
+  // marcava a cada render: a aba aberta de um colega apagava o "não lida" da
+  // equipe a cada 30s e desfazia o "marcar como não lida".
+  useEffect(() => {
+    void marcarChatLido(leadId);
+  }, [leadId]);
+
   // Mensagens novas aparecem sozinhas (aba visível).
   useEffect(() => {
     const intervalo = setInterval(() => {
@@ -395,24 +409,34 @@ export function Janela({
     () => false,
   );
 
-  // Limpa campo e anexos após envio (ajuste durante o render).
+  // A caixa limpa no envio (aoEnviar); aqui só o desfecho: sucesso descarta o
+  // backup, erro devolve texto e anexos para o atendente tentar de novo.
+  const [backupEnvio, setBackupEnvio] = useState<{
+    texto: string;
+    arquivos: File[];
+  } | null>(null);
   const [estadoAnterior, setEstadoAnterior] = useState(estado);
   if (estado !== estadoAnterior) {
     setEstadoAnterior(estado);
     if (estado.ok) {
-      setTexto("");
-      setArquivos([]);
+      setBackupEnvio(null);
       setAvisoArquivo(null);
+    } else if (estado.erro && backupEnvio) {
+      setTexto(backupEnvio.texto);
+      setArquivos(backupEnvio.arquivos);
+      setBackupEnvio(null);
     }
   }
 
-  // Input de arquivo e rascunho são externos ao React — limpa num efeito.
+  // O input de arquivo é externo ao React: espelha o estado num efeito — cobre
+  // adicionar, remover, limpar no envio e restaurar depois de um erro.
   useEffect(() => {
-    if (estado.ok) {
-      if (inputArquivosRef.current) inputArquivosRef.current.value = "";
-      localStorage.removeItem(chaveRascunho);
-    }
-  }, [estado, chaveRascunho]);
+    const input = inputArquivosRef.current;
+    if (!input) return;
+    const dt = new DataTransfer();
+    arquivos.forEach((arquivo) => dt.items.add(arquivo));
+    input.files = dt.files;
+  }, [arquivos]);
 
   const atualizarTexto = (valor: string) => {
     setTexto(valor);
@@ -488,14 +512,6 @@ export function Janela({
     area?.focus();
   };
 
-  const sincronizarInput = (lista: File[]) => {
-    const input = inputArquivosRef.current;
-    if (!input) return;
-    const dt = new DataTransfer();
-    lista.forEach((arquivo) => dt.items.add(arquivo));
-    input.files = dt.files;
-  };
-
   const adicionarArquivos = (novos: FileList | null) => {
     if (!novos || novos.length === 0) return;
     setAvisoArquivo(null);
@@ -515,14 +531,16 @@ export function Janela({
       setAvisoArquivo(`No máximo ${MAX_ANEXOS} anexos por mensagem.`);
     }
     const combinado = [...arquivos, ...aceitos].slice(0, MAX_ANEXOS);
+    if (combinado.reduce((soma, a) => soma + a.size, 0) > MAX_TOTAL_ENVIO) {
+      setAvisoArquivo(
+        "Os anexos somam mais de 4MB — o envio aceita até 4MB por vez.",
+      );
+    }
     setArquivos(combinado);
-    sincronizarInput(combinado);
   };
 
   const removerArquivo = (indice: number) => {
-    const restantes = arquivos.filter((_, i) => i !== indice);
-    setArquivos(restantes);
-    sincronizarInput(restantes);
+    setArquivos(arquivos.filter((_, i) => i !== indice));
   };
 
   const podeEnviar =
@@ -548,6 +566,13 @@ export function Janela({
 
   const aoEnviar = (formData: FormData) => {
     const textoEnvio = String(formData.get("texto") ?? "").trim();
+    const totalAnexos = arquivos.reduce((soma, a) => soma + a.size, 0);
+    if (modo === "responder" && totalAnexos > MAX_TOTAL_ENVIO) {
+      setAvisoArquivo(
+        "Os anexos somam mais de 4MB — o envio aceita até 4MB por vez. Remova ou reduza arquivos.",
+      );
+      return;
+    }
     if (modo === "responder" && (textoEnvio || arquivos.length > 0)) {
       contadorOtimistaRef.current += 1;
       adicionarOtimista({
@@ -560,6 +585,13 @@ export function Janela({
       });
       pertoDoFimRef.current = true; // envio próprio sempre desce a tela
     }
+    // A caixa limpa no clique, não quando o servidor responder — se o envio
+    // falhar, o texto e os anexos voltam (backup restaurado no estado.erro).
+    // Nota privada não envia anexos: eles ficam para a resposta ao lead.
+    setBackupEnvio({ texto, arquivos });
+    setTexto("");
+    if (modo !== "nota") setArquivos([]);
+    localStorage.removeItem(chaveRascunho);
     formAction(formData);
   };
 
@@ -1013,8 +1045,18 @@ export function Janela({
             ref={textareaRef}
             value={texto}
             onChange={(e) => atualizarTexto(e.target.value)}
+            onPaste={(e) => {
+              // Print/imagem no Ctrl+V vira anexo (nota não aceita anexo).
+              if (modo === "nota") return;
+              const colados = Array.from(e.clipboardData?.files ?? []);
+              if (colados.length === 0) return;
+              e.preventDefault();
+              const dt = new DataTransfer();
+              colados.forEach((arquivo) => dt.items.add(arquivo));
+              adicionarArquivos(dt.files);
+            }}
             onKeyDown={(e) => {
-              if (painelAberto && prontasFiltradas.length > 0) {
+              if (painelAberto) {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
                   setIdxSel((i) =>
@@ -1028,8 +1070,12 @@ export function Janela({
                   return;
                 }
                 if (e.key === "Enter" && !e.shiftKey) {
+                  // Painel aberto: Enter nunca envia — sem resultado, só
+                  // engole (antes mandava o "/busca" cru para o cliente).
                   e.preventDefault();
-                  aplicarPronta(prontasFiltradas[idxAtivo]);
+                  if (prontasFiltradas.length > 0) {
+                    aplicarPronta(prontasFiltradas[idxAtivo]);
+                  }
                   return;
                 }
               }
@@ -1039,8 +1085,9 @@ export function Janela({
                 return;
               }
               // No teclado do iPhone não existe Shift+Enter: lá o return
-              // quebra linha e o envio é só pelo botão.
-              if (e.key === "Enter" && !e.shiftKey && !ehToque) {
+              // quebra linha e o envio é só pelo botão. Envio pendente
+              // segura o Enter — segurar a tecla duplicava a mensagem.
+              if (e.key === "Enter" && !e.shiftKey && !ehToque && !enviandoAcao) {
                 e.preventDefault();
                 if (podeEnviar) formRef.current?.requestSubmit();
               }

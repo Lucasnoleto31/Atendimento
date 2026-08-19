@@ -110,7 +110,9 @@ export async function processarAgendadas(): Promise<number> {
 
       await service
         .from("leads")
-        .update({ ultima_interacao_em: agora, chat_lido_em: agora })
+        // Só ultima_interacao_em: robô não "lê" a conversa — marcar lida aqui
+        // apagava o não-lida de mensagem do cliente que ninguém viu.
+        .update({ ultima_interacao_em: agora })
         .eq("id", agendada.lead_id);
 
       enviadas++;

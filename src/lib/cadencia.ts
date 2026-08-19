@@ -185,7 +185,8 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
 
         await service
           .from("leads")
-          .update({ ultima_interacao_em: agora, chat_lido_em: agora })
+          // Robô não "lê" a conversa (ver agendadas.ts) — só o timestamp.
+          .update({ ultima_interacao_em: agora })
           .eq("id", alvo.leadId);
 
         await avancarAposDisparo(service, [alvo.leadId]);

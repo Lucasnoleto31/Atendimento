@@ -155,6 +155,8 @@ export async function enviarMensagemLead(
   const canal = canalAtivo();
   let mensagemId: string | number | null = null;
   let anexos: { tipo: string; url: string }[] = [];
+  const wamids: string[] = [];
+  let falhaParcial: string | null = null;
 
   if (canal === "meta") {
     if (!lead.telefone_e164) {
@@ -162,23 +164,39 @@ export async function enviarMensagemLead(
         erro: "Este lead não tem telefone para receber WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
       };
     }
-    try {
-      if (arquivos.length > 0) {
-        // Texto vira legenda do primeiro anexo; áudio não aceita legenda.
-        for (const [i, arquivo] of arquivos.entries()) {
-          mensagemId = await enviarMidiaMeta(
+    if (arquivos.length > 0) {
+      // Texto vira legenda do primeiro anexo; áudio não aceita legenda.
+      // Cada arquivo é um envio próprio: se um falhar no meio, os anteriores
+      // JÁ chegaram ao lead — registra o que foi e avisa, em vez de fingir
+      // que nada saiu (o reenvio duplicava texto e arquivos para o cliente).
+      for (const [i, arquivo] of arquivos.entries()) {
+        try {
+          const id = await enviarMidiaMeta(
             lead.telefone_e164,
             arquivo,
             i === 0 && texto ? texto : undefined,
           );
+          if (id) wamids.push(id);
+        } catch (e) {
+          falhaParcial = `"${arquivo.name}" (${e instanceof Error ? e.message : String(e)})`;
+          break;
         }
-      } else {
-        mensagemId = await enviarTextoMeta(lead.telefone_e164, texto);
       }
-    } catch (e) {
-      return {
-        erro: `A Meta recusou o envio: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template aprovado chega — use o botão Template.`,
-      };
+      mensagemId = wamids[wamids.length - 1] ?? null;
+      if (falhaParcial && wamids.length === 0) {
+        return {
+          erro: `A Meta recusou o envio de ${falhaParcial}. Fora da janela de 24h só template aprovado chega — use o botão Template.`,
+        };
+      }
+    } else {
+      try {
+        mensagemId = await enviarTextoMeta(lead.telefone_e164, texto);
+        if (mensagemId) wamids.push(mensagemId);
+      } catch (e) {
+        return {
+          erro: `A Meta recusou o envio: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template aprovado chega — use o botão Template.`,
+        };
+      }
     }
   } else {
     if (!lead.chatwoot_conversation_id) {
@@ -216,10 +234,13 @@ export async function enviarMensagemLead(
   }
 
   // Sem texto, o histórico guarda o rótulo do primeiro anexo como prévia.
+  // Envio parcial registra quantos arquivos de fato chegaram.
+  const enviados = canal === "meta" && arquivos.length > 0 ? wamids.length : arquivos.length;
   const conteudo =
     texto ||
     (arquivos.length > 0
-      ? (ROTULO_TIPO[tipoDoArquivo(arquivos[0].type)] ?? "[arquivo]")
+      ? (ROTULO_TIPO[tipoDoArquivo(arquivos[0].type)] ?? "[arquivo]") +
+        (arquivos.length > 1 ? ` (${enviados}/${arquivos.length})` : "")
       : texto);
 
   const agora = new Date().toISOString();
@@ -233,7 +254,20 @@ export async function enviarMensagemLead(
     metadados: {
       via: "crm",
       ...(canal === "meta"
-        ? { message_id: mensagemId }
+        ? {
+            message_id: mensagemId,
+            // Recibos (✓✓/falhou) casam por qualquer wamid do envio, não só
+            // o do último arquivo.
+            ...(wamids.length > 1 ? { message_ids: wamids } : {}),
+            ...(arquivos.length > 0
+              ? {
+                  anexos_enviados: arquivos
+                    .slice(0, enviados)
+                    .map((a) => ({ nome: a.name, tipo: tipoDoArquivo(a.type) })),
+                }
+              : {}),
+            ...(falhaParcial ? { falha_parcial: falhaParcial } : {}),
+          }
         : {
             chatwoot_message_id: mensagemId,
             chatwoot_conversation_id: lead.chatwoot_conversation_id,
@@ -253,6 +287,12 @@ export async function enviarMensagemLead(
   revalidatePath("/chat");
   revalidatePath("/atendimento");
   revalidatePath(`/leads/${leadId}`);
+
+  if (falhaParcial) {
+    return {
+      erro: `Atenção: ${enviados} de ${arquivos.length} anexos e o texto JÁ chegaram ao lead (registrados no histórico). Falhou ${falhaParcial} — reenvie SÓ esse arquivo.`,
+    };
+  }
   return { ok: true };
 }
 

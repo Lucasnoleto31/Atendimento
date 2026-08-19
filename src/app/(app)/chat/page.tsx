@@ -38,7 +38,6 @@ import {
   type ReceitaCliente,
 } from "./painel";
 import { type TarefaLead } from "./tarefas-lead";
-import { marcarChatLido } from "./actions";
 
 export const metadata: Metadata = { title: "Chat · Zeve CRM" };
 
@@ -330,7 +329,10 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   let agendadas: Agendada[] = [];
 
   if (atual) {
-    if (naoLida(atual)) await marcarChatLido(atual.id);
+    // A leitura é marcada pelo CLIENTE ao montar a conversa (Janela), não
+    // aqui: marcar no render fazia qualquer aba aberta de um colega apagar o
+    // "não lida" da equipe a cada atualização automática (30s), inclusive
+    // desfazendo o "marcar como não lida".
 
     const [
       { data: interacoes },
@@ -736,6 +738,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             />
 
             <Janela
+              // key: trocar de conversa REMONTA o composer — anexos, erro e
+              // rascunho de um lead nunca vazam para o outro.
+              key={atual.id}
               leadId={atual.id}
               temConversa={temCanalEnvio}
               mensagens={mensagens}
