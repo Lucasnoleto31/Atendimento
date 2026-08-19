@@ -405,7 +405,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       conteudo: string | null;
       criado_em: string;
       metadados: {
-        anexos?: { tipo?: string | null; url?: string | null }[];
+        anexos?: { tipo?: string | null; nome?: string | null; url?: string | null }[];
         status_envio?: string | null;
         erro_envio?: string | null;
       } | null;
@@ -420,7 +420,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         criado_em: m.criado_em,
         autor: m.autor?.nome ?? null,
         anexos: (m.metadados?.anexos ?? []).flatMap((a) =>
-          a.url ? [{ tipo: a.tipo ?? "file", url: a.url }] : [],
+          a.url
+            ? [{ tipo: a.tipo ?? "file", nome: a.nome ?? null, url: a.url }]
+            : [],
         ),
         statusEnvio: m.metadados?.status_envio ?? null,
         erroEnvio: m.metadados?.erro_envio ?? null,

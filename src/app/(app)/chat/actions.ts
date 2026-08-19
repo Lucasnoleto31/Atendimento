@@ -300,6 +300,7 @@ export async function enviarMensagemLead(
     const service = createServiceClient();
     anexos = anexosRemotos.slice(0, wamids.length).map((a) => ({
       tipo: tipoDoArquivo(a.tipo || ""),
+      nome: a.nome,
       url: service.storage.from(BUCKET_MIDIA).getPublicUrl(a.caminho).data.publicUrl,
     }));
   }
@@ -310,7 +311,9 @@ export async function enviarMensagemLead(
   const conteudo =
     texto ||
     (arquivos.length > 0
-      ? (ROTULO_TIPO[tipoDoArquivo(arquivos[0].type)] ?? "[arquivo]") +
+      ? (anexosRemotos[0]?.nome ??
+          ROTULO_TIPO[tipoDoArquivo(arquivos[0].type)] ??
+          "[arquivo]") +
         (arquivos.length > 1 ? ` (${enviados}/${arquivos.length})` : "")
       : texto);
 

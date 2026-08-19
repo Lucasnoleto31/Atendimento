@@ -78,7 +78,7 @@ const FORMATO_DIA = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
 });
 
-export type Anexo = { tipo: string; url: string };
+export type Anexo = { tipo: string; url: string; nome?: string | null };
 
 export type Mensagem = {
   id: string;
@@ -128,7 +128,7 @@ function AnexoMensagem({ anexo }: { anexo: Anexo }) {
         {/* eslint-disable-next-line @next/next/no-img-element -- URL externa do Chatwoot, sem otimização do Next */}
         <img
           src={anexo.url}
-          alt="Imagem recebida na conversa"
+          alt={anexo.nome ?? "Imagem da conversa"}
           loading="lazy"
           className="max-h-[240px] w-auto max-w-full rounded-md border border-neutral-200"
         />
@@ -147,14 +147,22 @@ function AnexoMensagem({ anexo }: { anexo: Anexo }) {
       />
     );
   }
+  // Documento: cartão com o nome do arquivo (o link solto "Abrir anexo" não
+  // dizia nem o que era).
   return (
     <a
       href={anexo.url}
       target="_blank"
       rel="noreferrer"
-      className="text-sm text-primary-500 underline underline-offset-2"
+      className="inline-flex max-w-full items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
     >
-      Abrir anexo
+      <Paperclip
+        size={16}
+        strokeWidth={1.5}
+        aria-hidden
+        className="shrink-0 text-neutral-400"
+      />
+      <span className="truncate">{anexo.nome ?? "Abrir documento"}</span>
     </a>
   );
 }
