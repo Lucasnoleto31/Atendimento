@@ -393,33 +393,6 @@ export function Janela({
     void marcarChatLido(leadId);
   }, [leadId]);
 
-  // Ctrl+V em QUALQUER lugar da conversa anexa o print/imagem — como no
-  // WhatsApp Web, sem exigir foco na caixa de texto. Colagem em outros
-  // campos (busca, datas, variáveis de template) segue normal.
-  useEffect(() => {
-    const aoColar = (e: ClipboardEvent) => {
-      if (modo === "nota" || !temConversa) return;
-      const alvo = e.target as HTMLElement | null;
-      if (
-        alvo &&
-        alvo !== textareaRef.current &&
-        (alvo.tagName === "INPUT" ||
-          alvo.tagName === "TEXTAREA" ||
-          alvo.isContentEditable)
-      ) {
-        return;
-      }
-      const colados = Array.from(e.clipboardData?.files ?? []);
-      if (colados.length === 0) return;
-      e.preventDefault();
-      const dt = new DataTransfer();
-      colados.forEach((arquivo) => dt.items.add(arquivo));
-      adicionarArquivos(dt.files);
-    };
-    window.addEventListener("paste", aoColar);
-    return () => window.removeEventListener("paste", aoColar);
-  });
-
   // Mensagens novas aparecem sozinhas (aba visível).
   useEffect(() => {
     const intervalo = setInterval(() => {
@@ -569,6 +542,33 @@ export function Janela({
   const removerArquivo = (indice: number) => {
     setArquivos(arquivos.filter((_, i) => i !== indice));
   };
+
+  // Ctrl+V em QUALQUER lugar da conversa anexa o print/imagem — como no
+  // WhatsApp Web, sem exigir foco na caixa de texto. Colagem em outros
+  // campos (busca, datas, variáveis de template) segue normal.
+  useEffect(() => {
+    const aoColar = (e: ClipboardEvent) => {
+      if (modo === "nota" || !temConversa) return;
+      const alvo = e.target as HTMLElement | null;
+      if (
+        alvo &&
+        alvo !== textareaRef.current &&
+        (alvo.tagName === "INPUT" ||
+          alvo.tagName === "TEXTAREA" ||
+          alvo.isContentEditable)
+      ) {
+        return;
+      }
+      const colados = Array.from(e.clipboardData?.files ?? []);
+      if (colados.length === 0) return;
+      e.preventDefault();
+      const dt = new DataTransfer();
+      colados.forEach((arquivo) => dt.items.add(arquivo));
+      adicionarArquivos(dt.files);
+    };
+    window.addEventListener("paste", aoColar);
+    return () => window.removeEventListener("paste", aoColar);
+  });
 
   const podeEnviar =
     modo === "nota"
