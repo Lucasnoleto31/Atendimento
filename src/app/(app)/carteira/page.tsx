@@ -384,6 +384,8 @@ export default async function CarteiraPage({
                 temReceita={temReceita}
                 etiquetas={etiquetas}
                 templates={templates}
+                total={total}
+                filtro={{ escopo: filtro, status: statusFiltro, busca }}
               />
 
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">

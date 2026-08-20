@@ -10,6 +10,8 @@ import { AbrirConversa } from "./abrir-conversa";
 import {
   dispararTemplateEmMassa,
   etiquetarClientesEmMassa,
+  etiquetarPorFiltroCarteira,
+  type FiltroCarteira,
   type ResultadoMassa,
 } from "./massa";
 
@@ -62,13 +64,21 @@ export function TabelaCarteira({
   temReceita,
   etiquetas,
   templates,
+  total,
+  filtro,
 }: {
   linhas: LinhaCarteira[];
   temReceita: boolean;
   etiquetas: { id: string; nome: string }[];
   templates: TemplateWhatsapp[];
+  /** Quantos clientes o filtro atual tem ao todo, não só nesta página. */
+  total: number;
+  filtro: FiltroCarteira;
 }) {
   const [marcados, setMarcados] = useState<Set<string>>(new Set());
+  // Lista como "os 1159 em churn" não cabe numa seleção de 100 por página:
+  // este modo manda o FILTRO para o servidor em vez dos ids marcados.
+  const [filtroInteiro, setFiltroInteiro] = useState(false);
   const [painel, setPainel] = useState<"etiqueta" | "template" | null>(null);
   const [pendente, iniciar] = useTransition();
   const [resultado, setResultado] = useState<ResultadoMassa | null>(null);
@@ -83,16 +93,25 @@ export function TabelaCarteira({
 
   const ids = [...marcados];
   const todosMarcados = linhas.length > 0 && marcados.size === linhas.length;
+  const temMaisForaDaPagina = total > linhas.length;
+  const quantidade = filtroInteiro ? total : marcados.size;
   const template =
     indiceTemplate === "" ? null : (templates[Number(indiceTemplate)] ?? null);
 
-  const alternar = (id: string) =>
+  const alternar = (id: string) => {
+    setFiltroInteiro(false);
     setMarcados((atual) => {
       const novo = new Set(atual);
       if (novo.has(id)) novo.delete(id);
       else novo.add(id);
       return novo;
     });
+  };
+
+  const marcarPagina = (marcar: boolean) => {
+    setFiltroInteiro(false);
+    setMarcados(marcar ? new Set(linhas.map((l) => l.customer_id)) : new Set());
+  };
 
   const fechar = () => {
     setPainel(null);
@@ -109,6 +128,7 @@ export function TabelaCarteira({
       setResultado(r);
       if (r.ok) {
         setMarcados(new Set());
+        setFiltroInteiro(false);
         fechar();
       }
     });
@@ -121,13 +141,7 @@ export function TabelaCarteira({
           <div className="flex flex-wrap items-center gap-1">
             <button
               type="button"
-              onClick={() =>
-                setMarcados(
-                  todosMarcados
-                    ? new Set()
-                    : new Set(linhas.map((l) => l.customer_id)),
-                )
-              }
+              onClick={() => marcarPagina(!todosMarcados)}
               className="inline-flex h-[32px] items-center gap-0.5 rounded-md px-1 text-sm font-medium text-primary-900 transition-colors duration-[120ms] hover:bg-primary-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
             >
               {todosMarcados ? (
@@ -135,7 +149,7 @@ export function TabelaCarteira({
               ) : (
                 <Square size={14} strokeWidth={1.5} aria-hidden />
               )}
-              {marcados.size} selecionado(s)
+              {quantidade} selecionado(s)
             </button>
 
             <span aria-hidden className="text-neutral-300">
@@ -156,7 +170,7 @@ export function TabelaCarteira({
               Etiquetar para campanha
             </button>
 
-            {templates.length > 0 ? (
+            {templates.length > 0 && !filtroInteiro ? (
               <button
                 type="button"
                 disabled={pendente}
@@ -176,6 +190,7 @@ export function TabelaCarteira({
               type="button"
               aria-label="Limpar seleção"
               onClick={() => {
+                setFiltroInteiro(false);
                 setMarcados(new Set());
                 fechar();
               }}
@@ -184,6 +199,35 @@ export function TabelaCarteira({
               <X size={16} strokeWidth={1.5} aria-hidden />
             </button>
           </div>
+
+          {todosMarcados && temMaisForaDaPagina ? (
+            <p className="mt-1 border-t border-primary-500/30 pt-1 text-sm text-primary-900">
+              {filtroInteiro ? (
+                <>
+                  Os <strong className="font-medium">{total}</strong> clientes
+                  do filtro estão selecionados.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setFiltroInteiro(false)}
+                    className="rounded-sm font-medium underline underline-offset-2 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  >
+                    Voltar para só os {linhas.length} desta página
+                  </button>
+                </>
+              ) : (
+                <>
+                  Os {linhas.length} desta página estão marcados.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setFiltroInteiro(true)}
+                    className="rounded-sm font-medium underline underline-offset-2 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  >
+                    Selecionar os {total} do filtro inteiro
+                  </button>
+                </>
+              )}
+            </p>
+          ) : null}
 
           {painel === "etiqueta" ? (
             <div className="mt-1.5 grid gap-1 border-t border-primary-500/30 pt-1.5 sm:grid-cols-[1fr_1fr_auto]">
@@ -226,17 +270,22 @@ export function TabelaCarteira({
                 <button
                   type="button"
                   disabled={pendente || (!tagEscolhida && !tagNova.trim())}
-                  onClick={() =>
+                  onClick={() => {
+                    const escolha = {
+                      id: tagEscolhida || undefined,
+                      novoNome: tagNova.trim() || undefined,
+                    };
                     executar(() =>
-                      etiquetarClientesEmMassa(ids, {
-                        id: tagEscolhida || undefined,
-                        novoNome: tagNova.trim() || undefined,
-                      }),
-                    )
-                  }
+                      filtroInteiro
+                        ? etiquetarPorFiltroCarteira(filtro, escolha)
+                        : etiquetarClientesEmMassa(ids, escolha),
+                    );
+                  }}
                   className="inline-flex h-[40px] items-center rounded-md bg-primary-600 px-2 text-sm font-medium text-neutral-0 transition-colors duration-[120ms] hover:bg-primary-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {pendente ? "Etiquetando…" : "Etiquetar"}
+                  {pendente
+                    ? "Etiquetando…"
+                    : `Etiquetar ${quantidade} cliente(s)`}
                 </button>
               </div>
               <p className="text-xs text-neutral-600 sm:col-span-3">
