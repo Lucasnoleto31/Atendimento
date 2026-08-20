@@ -402,6 +402,8 @@ export async function enviarMensagemLead(
   await avancarAposDisparo(createServiceClient(), [leadId]);
 
   revalidatePath("/chat");
+  // A carteira mostra "último contato": sem isto ela seguia no valor velho.
+  revalidatePath("/carteira");
   revalidatePath("/atendimento");
   revalidatePath(`/leads/${leadId}`);
 
@@ -546,6 +548,8 @@ export async function enviarTemplateLead(
     .eq("id", leadId);
 
   revalidatePath("/chat");
+  // A carteira mostra "último contato": sem isto ela seguia no valor velho.
+  revalidatePath("/carteira");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true };
 }
