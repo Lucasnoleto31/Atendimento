@@ -10,6 +10,7 @@ import { Usuarios, type UsuarioLinha } from "./usuarios";
 import { ChatwootImport } from "./chatwoot-import";
 import { HistoricoImport } from "./historico-import";
 import { importarClientes, importarLeads, importarLotes } from "./actions";
+import { EtiquetaLista } from "./etiqueta-lista";
 
 export const metadata: Metadata = { title: "Administração · Zeve CRM" };
 
@@ -163,88 +164,49 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
 
         <ImportForm
           titulo="Lista de leads"
-          descricao="Sobe a lista de uma campanha (Google Sheets exportado em CSV). Por padrão só entram os telefones que o CRM ainda não conhece — quem já é lead ou cliente fica exatamente como está. Quem entra sai com etiqueta, que é o público da campanha."
+          descricao="Sobe a lista de uma campanha (CSV do Google Sheets ou Excel)."
           colunas="colunas: telefone · opcionais: nome, email, campanha"
           acao={importarLeads}
           extras={
             <>
-              {etiquetas.length > 0 ? (
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="etiqueta-existente"
-                    className="text-sm font-medium text-neutral-800"
-                  >
-                    Juntar a uma etiqueta que já existe
-                  </label>
-                  <select
-                    id="etiqueta-existente"
-                    name="etiqueta_id"
-                    defaultValue=""
-                    className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-                  >
-                    <option value="">Nenhuma — criar/usar pelo nome abaixo</option>
-                    {etiquetas.map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.nome}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-neutral-600">
-                    A lista inteira entra nesta etiqueta, somando ao público
-                    que já está lá. Escolhendo aqui, o campo de nome abaixo é
-                    ignorado — e ninguém corre o risco de criar etiqueta
-                    repetida por causa de um acento.
-                  </p>
-                </div>
-              ) : null}
+              <EtiquetaLista etiquetas={etiquetas} />
 
-              <div className="flex flex-col gap-1">
-                <label
-                  htmlFor="etiqueta-leads"
-                  className="text-sm font-medium text-neutral-800"
-                >
-                  …ou etiqueta nova, pelo nome (opcional)
-                </label>
-                <input
-                  id="etiqueta-leads"
-                  name="etiqueta"
-                  type="text"
-                  placeholder="Comunidade Instagram"
-                  className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-                />
-                <p className="text-xs text-neutral-600">
-                  Em branco, o CRM usa a coluna “campanha” da planilha e, na
-                  falta dela, o nome do arquivo.
-                </p>
-              </div>
+              <fieldset className="flex flex-col gap-1">
+                <legend className="mb-0.5 text-sm font-medium text-neutral-800">
+                  Ao importar
+                </legend>
 
-              <label className="flex items-start gap-1 text-sm text-neutral-800">
-                <input
-                  name="somente_novos"
-                  type="checkbox"
-                  value="sim"
-                  defaultChecked
-                  className="mt-[3px] h-[16px] w-[16px] shrink-0 accent-primary-600"
-                />
-                <span>
-                  Só números novos
-                  <span className="block text-xs text-neutral-600">
-                    Quem já é lead ou cliente não é tocado — nem recebe a
-                    etiqueta. Desmarque para somar a lista inteira ao público
-                    da campanha, inclusive quem já está em atendimento.
+                <label className="flex items-start gap-1 text-sm text-neutral-800">
+                  <input
+                    name="somente_novos"
+                    type="checkbox"
+                    value="sim"
+                    defaultChecked
+                    className="mt-[3px] h-[16px] w-[16px] shrink-0 accent-primary-600"
+                  />
+                  <span>
+                    Trazer só os telefones novos
+                    <span className="block text-xs text-neutral-600">
+                      Quem já é lead ou cliente fica como está.
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
 
-              <label className="flex min-h-[40px] items-center gap-1 text-sm text-neutral-800">
-                <input
-                  name="distribuir"
-                  type="checkbox"
-                  defaultChecked
-                  className="h-[16px] w-[16px] accent-primary-600"
-                />
-                Dividir a lista entre a equipe
-              </label>
+                <label className="flex items-start gap-1 text-sm text-neutral-800">
+                  <input
+                    name="distribuir"
+                    type="checkbox"
+                    defaultChecked
+                    className="mt-[3px] h-[16px] w-[16px] shrink-0 accent-primary-600"
+                  />
+                  <span>
+                    Dividir entre a equipe
+                    <span className="block text-xs text-neutral-600">
+                      Cada vendedor fica com uma parte igual da lista.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
             </>
           }
           rotulo="Importar leads"
