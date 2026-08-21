@@ -131,8 +131,12 @@ export function ImportForm({
             {estado.leadsNovos !== undefined ? (
               <>
                 {" "}
-                · {estado.leadsNovos} novo(s), {estado.leadsAtualizados} já
-                existiam
+                · {estado.leadsNovos} novo(s),{" "}
+                {estado.leadsAtualizados ?? 0} já existiam
+                {estado.leadsIntactos ? " e ficaram intactos" : ""}
+                {estado.jaEramClientes
+                  ? ` · ${estado.jaEramClientes} já eram cliente e ficaram de fora`
+                  : ""}
               </>
             ) : null}
             {estado.duplicadosNoArquivo ? (
@@ -141,8 +145,11 @@ export function ImportForm({
           </p>
           {estado.etiquetasAplicadas?.length ? (
             <p className="mt-1 text-sm text-neutral-600">
-              Etiqueta aplicada: {estado.etiquetasAplicadas.join(", ")} — já
-              serve de público para uma campanha.
+              Etiqueta aplicada: {estado.etiquetasAplicadas.join(", ")} —{" "}
+              {estado.etiquetouExistentes
+                ? "na lista inteira, inclusive em quem já era lead."
+                : "só nos números novos; quem já era lead ou cliente não entrou nela."}{" "}
+              Já serve de público para uma campanha.
             </p>
           ) : null}
 

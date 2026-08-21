@@ -34,6 +34,11 @@ export type ResultadoImport = {
   reativacao?: { queda: number; semGiro: number };
   leadsNovos?: number;
   leadsAtualizados?: number;
+  /** Já eram lead/cliente e não foram tocados (nem etiquetados). */
+  leadsIntactos?: number;
+  /** Estavam só na base de clientes e ficaram de fora da lista. */
+  jaEramClientes?: number;
+  etiquetouExistentes?: boolean;
   duplicadosNoArquivo?: number;
   etiquetasAplicadas?: string[];
 };
@@ -635,6 +640,9 @@ async function garantirEtiqueta(service: Service, nome: string) {
     .from("tags")
     .select("id")
     .ilike("nome", limpo)
+    // limit(1): dois nomes que só diferem no caixa fariam maybeSingle
+    // devolver erro, e aí o CRM criaria uma etiqueta repetida.
+    .limit(1)
     .maybeSingle();
   if (existente) return existente.id as string;
 
@@ -653,8 +661,16 @@ export async function importarLeads(
   const perfil = await validarGestor();
   if (!perfil) return { erro: "Só administração e gestão podem importar." };
 
+  // Etiqueta que já existe, escolhida na lista, vale para o arquivo inteiro
+  // e dispensa digitar o nome de novo (digitar cria etiqueta repetida).
+  const etiquetaExistenteId = String(formData.get("etiqueta_id") ?? "").trim();
   const nomeEtiqueta = String(formData.get("etiqueta") ?? "").trim();
   const distribuir = formData.get("distribuir") === "on";
+  // Caixa marcada (o padrão do formulário): telefone que já é lead ou cliente
+  // fica exatamente como está, nem etiqueta nova. Desmarcada, o navegador não
+  // manda o campo — por isso a comparação é pelo valor presente, não pela
+  // ausência dele.
+  const somenteNovos = formData.get("somente_novos") === "sim";
 
   const lido = await lerArquivo(formData);
   if ("erro" in lido) return { erro: lido.erro };
@@ -695,10 +711,26 @@ export async function importarLeads(
       nomeEtiqueta || lead.campanha || nomeDoArquivo || "Importação";
 
     const idPorEtiqueta = new Map<string, string>();
-    for (const nome of new Set(leads.map(etiquetaDoLead))) {
-      const id = await garantirEtiqueta(service, nome);
-      if (id) idPorEtiqueta.set(nome, id);
+    let etiquetaFixa: string | null = null;
+
+    if (etiquetaExistenteId) {
+      const { data: escolhida } = await service
+        .from("tags")
+        .select("id, nome")
+        .eq("id", etiquetaExistenteId)
+        .maybeSingle();
+      if (!escolhida) return { erro: "A etiqueta escolhida não existe mais." };
+      etiquetaFixa = escolhida.id as string;
+      idPorEtiqueta.set(escolhida.nome as string, etiquetaFixa);
+    } else {
+      for (const nome of new Set(leads.map(etiquetaDoLead))) {
+        const id = await garantirEtiqueta(service, nome);
+        if (id) idPorEtiqueta.set(nome, id);
+      }
     }
+
+    const tagDoLead = (lead: { campanha: string | null }) =>
+      etiquetaFixa ?? idPorEtiqueta.get(etiquetaDoLead(lead));
 
     const telefones = leads.map((l) => l.telefone);
 
@@ -754,7 +786,17 @@ export async function importarLeads(
       equipe = (data ?? []).map((p: { id: string }) => p.id);
     }
 
-    const novos = leads.filter((l) => !jaExiste.has(l.telefone));
+    // "Já é lead ou cliente" cobre os dois: o telefone que só existe na base
+    // de clientes ainda não tem lead, e criar um agora seria justamente
+    // "mexer" em quem a lista deveria deixar em paz.
+    const eraCliente = (l: { telefone: string }) =>
+      somenteNovos && !jaExiste.has(l.telefone) &&
+      clientePorTelefone.has(l.telefone);
+
+    const jaEramClientes = leads.filter(eraCliente).length;
+    const novos = leads.filter(
+      (l) => !jaExiste.has(l.telefone) && !eraCliente(l),
+    );
     const agora = new Date().toISOString();
 
     const linhasNovas = novos.map((lead, i) => ({
@@ -816,10 +858,15 @@ export async function importarLeads(
       );
     }
 
-    const vinculos = leads
+    // "Só números novos": quem já era lead ou cliente não recebe nem a
+    // etiqueta — entrar numa campanha nova É mexer em quem já está sendo
+    // atendido, e foi justamente isso que se pediu para não acontecer.
+    const aEtiquetar = somenteNovos ? novos : leads;
+
+    const vinculos = aEtiquetar
       .map((l) => ({
         lead_id: jaExiste.get(l.telefone),
-        tag_id: idPorEtiqueta.get(etiquetaDoLead(l)),
+        tag_id: tagDoLead(l),
       }))
       .filter(
         (v): v is { lead_id: string; tag_id: string } =>
@@ -851,6 +898,9 @@ export async function importarLeads(
       exemplosErro: erros.slice(0, 5),
       leadsNovos: linhasNovas.length,
       leadsAtualizados: leads.length - linhasNovas.length,
+      leadsIntactos: somenteNovos ? leads.length - linhasNovas.length : 0,
+      jaEramClientes,
+      etiquetouExistentes: !somenteNovos,
       duplicadosNoArquivo: duplicados,
       etiquetasAplicadas: [...idPorEtiqueta.keys()],
     };

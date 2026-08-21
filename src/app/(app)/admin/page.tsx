@@ -63,6 +63,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
     { data: etapas },
     { data: usuarios },
     { data: instancias },
+    { data: tags },
   ] = await Promise.all([
     supabase
       .from("imports")
@@ -87,7 +88,10 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       .from("whatsapp_instances")
       .select("id, nome, meta_phone_number_id")
       .order("nome"),
+    supabase.from("tags").select("id, nome").eq("ativo", true).order("nome"),
   ]);
+
+  const etiquetas = (tags ?? []) as { id: string; nome: string }[];
 
   // Quantos leads em cada etapa (trava a exclusão de etapa em uso).
   const contagens = new Map<string, number>();
@@ -159,17 +163,47 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
 
         <ImportForm
           titulo="Lista de leads"
-          descricao="Sobe a lista de uma campanha (Google Sheets exportado em CSV). Todo mundo ganha a etiqueta da campanha automaticamente. Telefone repetido não vira lead duplicado: quem já existe só recebe a etiqueta. Quem já é cliente entra vinculado."
+          descricao="Sobe a lista de uma campanha (Google Sheets exportado em CSV). Por padrão só entram os telefones que o CRM ainda não conhece — quem já é lead ou cliente fica exatamente como está. Quem entra sai com etiqueta, que é o público da campanha."
           colunas="colunas: telefone · opcionais: nome, email, campanha"
           acao={importarLeads}
           extras={
             <>
+              {etiquetas.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="etiqueta-existente"
+                    className="text-sm font-medium text-neutral-800"
+                  >
+                    Juntar a uma etiqueta que já existe
+                  </label>
+                  <select
+                    id="etiqueta-existente"
+                    name="etiqueta_id"
+                    defaultValue=""
+                    className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  >
+                    <option value="">Nenhuma — criar/usar pelo nome abaixo</option>
+                    {etiquetas.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.nome}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-neutral-600">
+                    A lista inteira entra nesta etiqueta, somando ao público
+                    que já está lá. Escolhendo aqui, o campo de nome abaixo é
+                    ignorado — e ninguém corre o risco de criar etiqueta
+                    repetida por causa de um acento.
+                  </p>
+                </div>
+              ) : null}
+
               <div className="flex flex-col gap-1">
                 <label
                   htmlFor="etiqueta-leads"
                   className="text-sm font-medium text-neutral-800"
                 >
-                  Etiqueta da lista (opcional)
+                  …ou etiqueta nova, pelo nome (opcional)
                 </label>
                 <input
                   id="etiqueta-leads"
@@ -179,11 +213,28 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                   className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                 />
                 <p className="text-xs text-neutral-600">
-                  Todo lead importado sai com etiqueta — é por ela que a
-                  campanha encontra o público. Em branco, o CRM usa a coluna
-                  “campanha” da planilha e, na falta dela, o nome do arquivo.
+                  Em branco, o CRM usa a coluna “campanha” da planilha e, na
+                  falta dela, o nome do arquivo.
                 </p>
               </div>
+
+              <label className="flex items-start gap-1 text-sm text-neutral-800">
+                <input
+                  name="somente_novos"
+                  type="checkbox"
+                  value="sim"
+                  defaultChecked
+                  className="mt-[3px] h-[16px] w-[16px] shrink-0 accent-primary-600"
+                />
+                <span>
+                  Só números novos
+                  <span className="block text-xs text-neutral-600">
+                    Quem já é lead ou cliente não é tocado — nem recebe a
+                    etiqueta. Desmarque para somar a lista inteira ao público
+                    da campanha, inclusive quem já está em atendimento.
+                  </span>
+                </span>
+              </label>
 
               <label className="flex min-h-[40px] items-center gap-1 text-sm text-neutral-800">
                 <input
