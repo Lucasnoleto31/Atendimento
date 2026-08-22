@@ -8,8 +8,12 @@ import { perfilInstagram } from "@/lib/instagram";
  * Webhook do Direct do Instagram.
  *
  * Mesmo desenho do webhook do WhatsApp: GET responde o desafio de
- * verificação, POST recebe os eventos com assinatura validada pelo
- * META_APP_SECRET (o app da Meta é o mesmo).
+ * verificação e POST recebe os eventos com assinatura HMAC.
+ *
+ * O app do Instagram costuma ser OUTRO — a conta do perfil pode viver numa
+ * Business Manager diferente da do WhatsApp, e o caminho "Instagram Login"
+ * nem exige página do Facebook. Por isso o segredo e o token de verificação
+ * têm variáveis próprias, caindo nas do WhatsApp quando o app é o mesmo.
  *
  * O que muda: aqui a identidade do lead é o IGSID, não o telefone. Um lead
  * do Direct nasce SEM telefone — e isso é normal. Ele ganha telefone se e
@@ -24,7 +28,9 @@ export async function GET(request: NextRequest) {
   const modo = params.get("hub.mode");
   const token = params.get("hub.verify_token");
   const challenge = params.get("hub.challenge");
-  const esperado = process.env.META_WEBHOOK_VERIFY_TOKEN;
+  const esperado =
+    process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN ??
+    process.env.META_WEBHOOK_VERIFY_TOKEN;
 
   if (modo === "subscribe" && esperado && token === esperado && challenge) {
     return new Response(challenge, { status: 200 });
@@ -33,7 +39,8 @@ export async function GET(request: NextRequest) {
 }
 
 function assinaturaValida(corpo: string, assinatura: string | null): boolean {
-  const segredo = process.env.META_APP_SECRET;
+  const segredo =
+    process.env.INSTAGRAM_APP_SECRET ?? process.env.META_APP_SECRET;
   // Sem segredo o endpoint é público e escreve com service role: em produção,
   // recusa tudo.
   if (!segredo) return process.env.NODE_ENV !== "production";
