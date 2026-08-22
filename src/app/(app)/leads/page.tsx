@@ -11,62 +11,198 @@ import { DistribuirLeads } from "./distribuir";
 import { DispararTemplate } from "./disparar-template";
 import { cn } from "@/lib/utils";
 
-const LISTAS_DISPARO = new Set<string>([
-  "esfriando",
-  "sem_contato_30",
-  "sem_contato_60",
-  "sem_contato_nunca",
-  "nunca_respondeu",
-]);
-
 export const metadata: Metadata = { title: "Leads · Zeve CRM" };
 
 const POR_PAGINA = 50;
 
-const LISTAS = [
-  { chave: "todos", rotulo: "Todos" },
-  { chave: "nao_cliente", rotulo: "Não são clientes" },
-  { chave: "so_abriu_conta", rotulo: "Só abriram a conta" },
-  { chave: "girou_30d", rotulo: "Giraram (30d)" },
-  { chave: "nunca_girou", rotulo: "Nunca giraram" },
-  { chave: "sem_giro_30d", rotulo: "Sem giro" },
-  { chave: "nunca_respondeu", rotulo: "Nunca responderam" },
-] as const;
-
-// Filas de contato da equipe: quem esfriou aparece antes de sumir (exclui
-// ganhos e perdidos). Faixas contínuas por tempo desde a última interação:
-// 0–7, 7–30, 30–60, +60, nunca. Antes "Ativos" era só 24h e "Esfriando"
-// começava em 7 dias — quem foi contatado entre 1 e 7 dias sumia de todas.
-const LISTAS_CONTATO = [
-  { chave: "ativos_24h", rotulo: "Ativos (7d)" },
-  { chave: "esfriando", rotulo: "Esfriando (7–30d)" },
-  { chave: "sem_contato_30", rotulo: "30–60d sem contato" },
-  { chave: "sem_contato_60", rotulo: "+60d sem contato" },
-  { chave: "sem_contato_nunca", rotulo: "Nunca contatados" },
-] as const;
-
-type ChaveLista =
-  | (typeof LISTAS)[number]["chave"]
-  | (typeof LISTAS_CONTATO)[number]["chave"];
-
-const CAMPOS_CONTATO = `id, nome, telefone_e164, status, criado_em, customer_id, campanha,
-  ultima_interacao_em, primeira_resposta_em,
-  responsavel:profiles(nome), channel:channels(nome), stage:pipeline_stages(nome)`;
-
-type LinhaContatoBruta = {
-  id: string;
-  nome: string;
-  telefone_e164: string | null;
-  status: string;
-  criado_em: string;
-  customer_id: string | null;
-  campanha: string | null;
-  ultima_interacao_em: string | null;
-  primeira_resposta_em: string | null;
-  responsavel: { nome: string } | null;
-  channel: { nome: string } | null;
-  stage: { nome: string } | null;
+/**
+ * As listas que a equipe trabalha. Cada uma é um filtro booleano na view
+ * v_leads_listas (migração 0032) — nada é calculado na página.
+ *
+ * O princípio: lista tem que caber num dia de trabalho e disparar UMA decisão.
+ * Balde gigante ("nunca giraram: 1.248") não é fila, é relatório; por isso a
+ * massa parada é fatiada por tempo de conta, e o que é campanha fica marcado
+ * como campanha em vez de virar lista de telefone.
+ */
+type DefLista = {
+  chave: string;
+  rotulo: string;
+  /** Coluna booleana da view que define a lista. */
+  coluna?: string;
+  /** Explicação curta que aparece quando a lista está aberta. */
+  ajuda: string;
+  /** Destaque visual: dinheiro escorrendo ou cliente esperando. */
+  urgente?: boolean;
+  /** Vazia é sinal de saúde, não de tela quebrada. */
+  vaziaOk?: boolean;
+  /** Coluna de ordenação e direção dentro da lista. */
+  ordem?: { coluna: string; ascendente: boolean };
 };
+
+const GRUPOS: { titulo: string; descricao: string; listas: DefLista[] }[] = [
+  {
+    titulo: "Agir agora",
+    descricao: "A fila do dia — esvazia conforme a equipe trabalha.",
+    listas: [
+      {
+        chave: "aguardando",
+        rotulo: "Aguardando resposta",
+        coluna: "aguardando_resposta",
+        ajuda:
+          "O cliente mandou a última mensagem e ninguém voltou. Quem espera há mais tempo vem primeiro.",
+        urgente: true,
+        vaziaOk: true,
+        ordem: { coluna: "ultima_mensagem_em", ascendente: true },
+      },
+      {
+        chave: "janela_aberta",
+        rotulo: "Janela de 24h aberta",
+        coluna: "janela_aberta",
+        ajuda:
+          "Responderam nas últimas 24h: dá para mandar mensagem livre agora. Passou disso, só template aprovado chega.",
+        urgente: true,
+        ordem: { coluna: "ultima_recebida_em", ascendente: true },
+      },
+      {
+        chave: "adiado_vencido",
+        rotulo: "Adiados sem volta",
+        coluna: "adiado_vencido",
+        ajuda:
+          "Foram adiados há mais de 3 dias, sumiram da caixa do chat e ninguém retomou.",
+        vaziaOk: true,
+        ordem: { coluna: "ultima_interacao_em", ascendente: true },
+      },
+      {
+        chave: "responderam_sem_conta",
+        rotulo: "Responderam, sem conta",
+        coluna: "quente_sem_conta",
+        ajuda:
+          "Já conversaram com a mesa e ainda não abriram conta na Genial. É o lead mais quente que existe.",
+        ordem: { coluna: "ultima_interacao_em", ascendente: false },
+      },
+    ],
+  },
+  {
+    titulo: "Abrir o primeiro giro",
+    descricao:
+      "Conta aberta que nunca operou. A receita só começa no primeiro lote — é a maior massa parada da empresa.",
+    listas: [
+      {
+        chave: "primeiro_giro",
+        rotulo: "Conta nova sem giro",
+        coluna: "primeiro_giro_recente",
+        ajuda:
+          "Abriram conta nos últimos 90 dias e não operaram nenhum lote. Janela curta: isto é telefone, não campanha.",
+        urgente: true,
+        ordem: { coluna: "conta_aberta_em", ascendente: false },
+      },
+      {
+        chave: "sem_giro_ja_conversou",
+        rotulo: "Já conversou, nunca girou",
+        coluna: "sem_giro_ja_conversou",
+        ajuda:
+          "Tem conta, já respondeu a mesa em algum momento, mas nunca operou. Retomar uma conversa que já existiu é mais barato que abrir uma nova.",
+        ordem: { coluna: "ultima_interacao_em", ascendente: false },
+      },
+      {
+        chave: "primeiro_giro_parado",
+        rotulo: "Parados há +90 dias",
+        coluna: "primeiro_giro_dormente",
+        ajuda:
+          "Abriram conta há mais de 90 dias e nunca operaram. Volume grande demais para telefone: marque com etiqueta e deixe a campanha trabalhar no ritmo diário.",
+        ordem: { coluna: "conta_aberta_em", ascendente: false },
+      },
+    ],
+  },
+  {
+    titulo: "Manter girando",
+    descricao: "Quem já gera receita — e quem está prestes a parar de gerar.",
+    listas: [
+      {
+        chave: "giro_em_risco",
+        rotulo: "Giro em risco",
+        coluna: "giro_em_risco",
+        ajuda:
+          "Caíram mais de 25% de volume ou zeraram nos últimos 30 dias. Receita escorrendo agora.",
+        urgente: true,
+        vaziaOk: true,
+        ordem: { coluna: "lotes_30d_anterior", ascendente: false },
+      },
+      {
+        chave: "girando",
+        rotulo: "Girando",
+        coluna: "girando",
+        ajuda:
+          "Operaram nos últimos 30 dias. Carteira viva: relacionamento, não resgate.",
+        ordem: { coluna: "lotes_30d", ascendente: false },
+      },
+    ],
+  },
+  {
+    titulo: "Organizar a base",
+    descricao: "Higiene e matéria-prima para as campanhas.",
+    listas: [
+      {
+        chave: "sem_dono",
+        rotulo: "Sem dono",
+        coluna: "sem_dono",
+        ajuda:
+          "Ninguém é responsável por estes leads. Use Distribuir para dividir entre a equipe.",
+        ordem: { coluna: "criado_em", ascendente: false },
+      },
+      {
+        chave: "nunca_contatado",
+        rotulo: "Nunca contatados",
+        coluna: "nunca_contatado",
+        ajuda:
+          "Nenhuma mensagem trocada. É o público das campanhas — etiquete e deixe o disparo diário trabalhar.",
+        ordem: { coluna: "criado_em", ascendente: false },
+      },
+      {
+        chave: "nao_contatavel",
+        rotulo: "Não dá para contatar",
+        coluna: "nao_contatavel",
+        ajuda:
+          "Sem telefone ou desativaram marketing no WhatsApp. Complete o número na ficha em Carteira; quem recusou marketing só recebe se responder primeiro.",
+        vaziaOk: true,
+        ordem: { coluna: "criado_em", ascendente: false },
+      },
+      {
+        chave: "todos",
+        rotulo: "Todos",
+        ajuda: "A base inteira, sem filtro. Serve para busca e exportação.",
+        ordem: { coluna: "criado_em", ascendente: false },
+      },
+    ],
+  },
+];
+
+const TODAS_LISTAS = GRUPOS.flatMap((g) => g.listas);
+
+// Nestas listas o assunto é lote operado; nas outras, o que importa é quando
+// foi o último contato. Mostrar as três colunas sempre só empurraria a tabela
+// para a rolagem lateral.
+const LISTAS_COM_GIRO = new Set(
+  GRUPOS.filter((g) =>
+    g.titulo === "Abrir o primeiro giro" || g.titulo === "Manter girando",
+  ).flatMap((g) => g.listas.map((l) => l.chave)),
+);
+
+// Listas em que o disparo de template em massa faz sentido.
+const LISTAS_DISPARO = new Set<string>([
+  "primeiro_giro",
+  "sem_giro_ja_conversou",
+  "primeiro_giro_parado",
+  "nunca_contatado",
+  "giro_em_risco",
+]);
+
+const CAMPOS_VIEW =
+  "lead_id, nome, telefone_e164, status, criado_em, customer_id, campanha, " +
+  "responsavel_nome, canal_nome, etapa_nome, ultima_interacao_em, " +
+  "lotes_30d, ultimo_giro_em, conta_aberta_em, dias_conta_aberta, " +
+  "ultima_mensagem_em, ultima_recebida_em, horas_esperando, sem_dono, " +
+  "primeira_resposta_em";
 
 type Linha = {
   lead_id: string;
@@ -79,14 +215,19 @@ type Linha = {
   responsavel_nome: string | null;
   canal_nome: string | null;
   etapa_nome: string | null;
-  lista: string;
-  nunca_respondeu: boolean;
+  ultima_interacao_em: string | null;
   lotes_30d: number | null;
   ultimo_giro_em: string | null;
-  ultima_interacao_em?: string | null;
+  conta_aberta_em: string | null;
+  dias_conta_aberta: number | null;
+  ultima_mensagem_em: string | null;
+  ultima_recebida_em: string | null;
+  horas_esperando: number | null;
+  sem_dono: boolean | null;
+  primeira_resposta_em: string | null;
 };
 
-function urlLista(lista: ChaveLista, busca: string) {
+function urlLista(lista: string, busca: string) {
   const p = new URLSearchParams();
   if (lista !== "todos") p.set("lista", lista);
   if (busca) p.set("busca", busca);
@@ -96,15 +237,13 @@ function urlLista(lista: ChaveLista, busca: string) {
 
 export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const params = await searchParams;
-  const chavesValidas = [...LISTAS, ...LISTAS_CONTATO].map(
-    (l) => l.chave as string,
-  );
-  const listaAtiva = (
-    typeof params.lista === "string" && chavesValidas.includes(params.lista)
+  const listaAtiva =
+    typeof params.lista === "string" &&
+    TODAS_LISTAS.some((l) => l.chave === params.lista)
       ? params.lista
-      : "todos"
-  ) as ChaveLista;
-  const ehListaContato = LISTAS_CONTATO.some((l) => l.chave === listaAtiva);
+      : "todos";
+  const def =
+    TODAS_LISTAS.find((l) => l.chave === listaAtiva) ?? TODAS_LISTAS[0];
   const busca = typeof params.busca === "string" ? params.busca.trim() : "";
   const pagina = Math.max(1, Number(params.pagina) || 1);
   const aviso = typeof params.aviso === "string" ? params.aviso : null;
@@ -113,32 +252,24 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const perfil = await perfilAtual();
   const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
 
-  // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
-  const agoraMs = Date.now();
-  const dataAtras = (dias: number) =>
-    new Date(agoraMs - dias * 86_400_000).toISOString();
-  const d7 = dataAtras(7);
-  const d30 = dataAtras(30);
-  const d60 = dataAtras(60);
-
-  function consultaContato(chave: ChaveLista, modo: "dados" | "contagem") {
-    let q =
+  /**
+   * Toda lista é o mesmo desenho: a view v_leads_listas com um filtro
+   * booleano. Sem ramo especial por lista, sem cálculo na página.
+   */
+  function consulta(chave: string, modo: "dados" | "contagem") {
+    const alvo = TODAS_LISTAS.find((l) => l.chave === chave);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
+    let q: any =
       modo === "contagem"
-        ? supabase.from("leads").select("id", { count: "exact", head: true })
-        : supabase.from("leads").select(CAMPOS_CONTATO, { count: "exact" });
+        ? supabase
+            .from("v_leads_listas")
+            .select("lead_id", { count: "exact", head: true })
+        : supabase.from("v_leads_listas").select(CAMPOS_VIEW, { count: "exact" });
 
-    // Ganhos e perdidos ficam fora da fila de contato.
-    q = q.not("status", "in", "(ganho,perdido)");
-
-    if (chave === "ativos_24h") q = q.gte("ultima_interacao_em", d7);
-    if (chave === "esfriando")
-      q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);
-    if (chave === "sem_contato_30")
-      q = q.lt("ultima_interacao_em", d30).gte("ultima_interacao_em", d60);
-    if (chave === "sem_contato_60") q = q.lt("ultima_interacao_em", d60);
-    if (chave === "sem_contato_nunca") q = q.is("ultima_interacao_em", null);
+    if (alvo?.coluna) q = q.eq(alvo.coluna, true);
 
     if (modo === "dados" && busca) {
+      // Vírgula e parênteses quebram a sintaxe do .or() do PostgREST.
       const termo = busca.replace(/[,()]/g, " ").trim();
       const digitos = termo.replace(/\D/g, "");
       q =
@@ -146,51 +277,24 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
           ? q.or(`nome.ilike.%${termo}%,telefone_e164.ilike.%${digitos}%`)
           : q.ilike("nome", `%${termo}%`);
     }
-
-    return q;
-  }
-
-  function consultaBase() {
-    let q = supabase
-      .from("v_listas_atendimento")
-      .select("*", { count: "exact" });
-
-    if (listaAtiva === "nunca_respondeu") {
-      q = q.eq("nunca_respondeu", true);
-    } else if (listaAtiva !== "todos") {
-      q = q.eq("lista", listaAtiva);
-    }
-
-    if (busca) {
-      const termo = busca.replace(/[,()]/g, " ").trim();
-      const digitos = termo.replace(/\D/g, "");
-      q =
-        digitos.length >= 4
-          ? q.or(`nome.ilike.%${termo}%,telefone_e164.ilike.%${digitos}%`)
-          : q.ilike("nome", `%${termo}%`);
-    }
-
     return q;
   }
 
   const de = (pagina - 1) * POR_PAGINA;
 
-  // Filas de contato: quem está parado há mais tempo aparece primeiro.
-  const ordemContato =
-    listaAtiva === "ativos_24h"
-      ? { coluna: "ultima_interacao_em", ascendente: false }
-      : listaAtiva === "sem_contato_nunca"
-        ? { coluna: "criado_em", ascendente: true }
-        : { coluna: "ultima_interacao_em", ascendente: true };
+  const ordem = def.ordem ?? { coluna: "criado_em", ascendente: false };
 
-  const [{ data, count, error }, { count: semResponsavel }, { count: equipeAtiva }, ...contagens] = await Promise.all([
-    ehListaContato
-      ? consultaContato(listaAtiva, "dados")
-          .order(ordemContato.coluna, { ascending: ordemContato.ascendente })
-          .range(de, de + POR_PAGINA - 1)
-      : consultaBase()
-          .order("criado_em", { ascending: false })
-          .range(de, de + POR_PAGINA - 1),
+  const [
+    { data, count, error },
+    { count: semResponsavel },
+    { count: equipeAtiva },
+    ...contagens
+  ] = await Promise.all([
+    consulta(listaAtiva, "dados")
+      // nullsFirst=false: linha sem a data de ordenação vai para o fim em vez
+      // de encabeçar a fila (ex.: cliente sem data de abertura de conta).
+      .order(ordem.coluna, { ascending: ordem.ascendente, nullsFirst: false })
+      .range(de, de + POR_PAGINA - 1),
     supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
@@ -199,18 +303,9 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
       .from("profiles")
       .select("id", { count: "exact", head: true })
       .eq("ativo", true),
-    ...LISTAS.map(async (l) => {
-      let q = supabase
-        .from("v_listas_atendimento")
-        .select("lead_id", { count: "exact", head: true });
-      if (l.chave === "nunca_respondeu") q = q.eq("nunca_respondeu", true);
-      else if (l.chave !== "todos") q = q.eq("lista", l.chave);
-      const { count: total } = await q;
+    ...TODAS_LISTAS.map(async (l) => {
+      const { count: total } = await consulta(l.chave, "contagem");
       return { chave: l.chave, total: total ?? 0 };
-    }),
-    ...LISTAS_CONTATO.map(async (l) => {
-      const { count: total } = await consultaContato(l.chave, "contagem");
-      return { chave: l.chave as string, total: total ?? 0 };
     }),
   ]);
 
@@ -219,27 +314,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
       ? await listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[])
       : [];
 
-  const linhas = ehListaContato
-    ? ((data ?? []) as unknown as LinhaContatoBruta[]).map(
-        (l): Linha => ({
-          lead_id: l.id,
-          nome: l.nome,
-          telefone_e164: l.telefone_e164,
-          status: l.status,
-          criado_em: l.criado_em,
-          customer_id: l.customer_id,
-          campanha: l.campanha,
-          responsavel_nome: l.responsavel?.nome ?? null,
-          canal_nome: l.channel?.nome ?? null,
-          etapa_nome: l.stage?.nome ?? null,
-          lista: listaAtiva,
-          nunca_respondeu: l.primeira_resposta_em === null,
-          lotes_30d: null,
-          ultimo_giro_em: null,
-          ultima_interacao_em: l.ultima_interacao_em,
-        }),
-      )
-    : ((data ?? []) as unknown as Linha[]);
+  const linhas = (data ?? []) as unknown as Linha[];
   const total = count ?? 0;
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const totalPorLista = new Map(contagens.map((c) => [c.chave, c.total]));
@@ -276,17 +351,18 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
         </p>
       ) : null}
 
-      {[
-        { rotulo: "Listas da base", listas: LISTAS },
-        { rotulo: "Filas de contato", listas: LISTAS_CONTATO },
-      ].map((grupo) => (
-        <nav aria-label={grupo.rotulo} key={grupo.rotulo} className="mt-2">
+      {GRUPOS.map((grupo) => (
+        <nav aria-label={grupo.titulo} key={grupo.titulo} className="mt-2">
           <p className="text-xs font-medium tracking-[0.06em] text-neutral-400 uppercase">
-            {grupo.rotulo}
+            {grupo.titulo}
           </p>
           <ul className="mt-0.5 flex flex-wrap gap-1">
             {grupo.listas.map((l) => {
               const ativa = l.chave === listaAtiva;
+              const qtd = totalPorLista.get(l.chave) ?? 0;
+              // Urgente com fila é o que a equipe tem que ver primeiro; a
+              // mesma lista zerada é boa notícia e volta a ser discreta.
+              const chamar = Boolean(l.urgente) && qtd > 0 && !ativa;
               return (
                 <li key={l.chave}>
                   <Link
@@ -296,17 +372,23 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                       "inline-flex h-[32px] items-center gap-1 rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
                       ativa
                         ? "bg-primary-50 font-medium text-primary-900"
-                        : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
+                        : chamar
+                          ? "bg-warning-bg font-medium text-warning hover:brightness-95"
+                          : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
                     )}
                   >
                     {l.rotulo}
                     <span
                       className={cn(
                         "font-mono text-xs tabular-nums",
-                        ativa ? "text-primary-600" : "text-neutral-400",
+                        ativa
+                          ? "text-primary-600"
+                          : chamar
+                            ? "text-warning"
+                            : "text-neutral-400",
                       )}
                     >
-                      {totalPorLista.get(l.chave) ?? 0}
+                      {qtd}
                     </span>
                   </Link>
                 </li>
@@ -315,6 +397,8 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
           </ul>
         </nav>
       ))}
+
+      <p className="mt-2 max-w-[68ch] text-sm text-neutral-600">{def.ajuda}</p>
 
       <form action="/leads" method="get" className="mt-2 flex max-w-[400px] gap-1">
         {listaAtiva !== "todos" ? (
@@ -343,10 +427,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
         {ehGestor && LISTAS_DISPARO.has(listaAtiva) ? (
           <DispararTemplate
             lista={listaAtiva}
-            rotuloLista={
-              [...LISTAS, ...LISTAS_CONTATO].find((l) => l.chave === listaAtiva)
-                ?.rotulo ?? listaAtiva
-            }
+            rotuloLista={def.rotulo}
             total={total}
             templates={templatesDisparo}
           />
@@ -366,16 +447,25 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
           role="alert"
           className="mt-2 max-w-[68ch] rounded-md border border-danger bg-danger-bg px-1.5 py-1 text-sm text-danger"
         >
-          Não foi possível carregar os leads. Verifique se a migration 0007 foi
-          aplicada.
+          Rode a migração 0032 no SQL Editor do Supabase para as listas
+          funcionarem — ela cria a view que alimenta esta tela.
         </p>
       ) : linhas.length === 0 ? (
         <div className="mt-3 max-w-[68ch] rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm">
-          <h2 className="text-h3 text-neutral-900">Nada por aqui</h2>
+          <h2 className="text-h3 text-neutral-900">
+            {busca
+              ? "Nada encontrado"
+              : def.vaziaOk
+                ? "Tudo em dia"
+                : "Lista vazia"}
+          </h2>
           <p className="mt-1 text-sm text-neutral-600">
             {busca
               ? "Nenhum lead corresponde à busca nesta lista."
-              : "Esta lista está vazia no momento."}
+              : def.vaziaOk
+                ? // Lista de urgência vazia é o objetivo, não uma tela quebrada.
+                  "Nenhum caso pendente nesta fila — é o resultado esperado."
+                : "Nenhum lead se encaixa nesta lista no momento."}
           </p>
         </div>
       ) : (
@@ -388,7 +478,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                   <Th>Situação</Th>
                   <Th>Origem</Th>
                   <Th>Etapa</Th>
-                  {ehListaContato ? (
+                  {!LISTAS_COM_GIRO.has(listaAtiva) ? (
                     <Th alinhar="right">Último contato</Th>
                   ) : (
                     <>
@@ -429,7 +519,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                       >
                         {linha.customer_id ? "Cliente" : "Não cliente"}
                       </span>
-                      {linha.nunca_respondeu ? (
+                      {linha.primeira_resposta_em === null ? (
                         <span className="mt-0.5 block text-xs text-neutral-400">
                           nunca respondeu
                         </span>
@@ -442,7 +532,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                     <td className="px-2 text-sm text-neutral-600">
                       {linha.etapa_nome ?? "—"}
                     </td>
-                    {ehListaContato ? (
+                    {!LISTAS_COM_GIRO.has(listaAtiva) ? (
                       <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
                         {linha.ultima_interacao_em
                           ? tempoDesde(linha.ultima_interacao_em)
@@ -504,7 +594,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   );
 }
 
-function urlPagina(lista: ChaveLista, busca: string, pagina: number) {
+function urlPagina(lista: string, busca: string, pagina: number) {
   const p = new URLSearchParams();
   if (lista !== "todos") p.set("lista", lista);
   if (busca) p.set("busca", busca);
