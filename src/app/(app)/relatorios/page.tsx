@@ -31,11 +31,12 @@ type Relatorio = {
     clientes: number;
     gasto_centavos: number;
   }[];
-  /** Uma linha por campanha; quem não veio de campanha entra pelo canal. */
+  /** Uma linha por etiqueta; sem etiqueta, cai na campanha e depois no canal. */
   por_origem?: {
     origem?: string;
     canal?: string;
     campanha?: boolean;
+    etiqueta?: boolean;
     leads?: number;
     ganhos?: number;
     clientes?: number;
@@ -70,17 +71,23 @@ export default async function RelatoriosPage({
   const r = (data ?? null) as Relatorio | null;
 
   // A função no banco pode estar em qualquer versão: sem a 0022 só existe
-  // por_canal, e uma 0022 antiga vem sem `templates`. Normalizar aqui evita
-  // a página inteira cair por causa de um campo que ainda não existe.
+  // por_canal, uma 0022 antiga vem sem `templates` e antes da 0031 não há
+  // `etiqueta`. Normalizar aqui evita a página cair por um campo ausente.
   type LinhaOrigem = NonNullable<Relatorio["por_origem"]>[number];
   const brutas: LinhaOrigem[] =
     r?.por_origem ??
-    (r?.por_canal ?? []).map((c) => ({ ...c, origem: c.canal, campanha: false }));
+    (r?.por_canal ?? []).map((c) => ({
+      ...c,
+      origem: c.canal,
+      campanha: false,
+      etiqueta: false,
+    }));
 
   const origens = brutas.map((o) => ({
     origem: o.origem ?? "Sem origem",
     canal: o.canal ?? "Sem canal",
     campanha: o.campanha ?? false,
+    etiqueta: o.etiqueta ?? false,
     leads: o.leads ?? 0,
     ganhos: o.ganhos ?? 0,
     clientes: o.clientes ?? 0,
@@ -629,21 +636,28 @@ export default async function RelatoriosPage({
           {/* Campanhas */}
           <section aria-labelledby="origens-titulo" className="mt-3">
             <h2 id="origens-titulo" className="text-h3 text-neutral-900">
-              Detalhamento por campanha
+              Detalhamento por etiqueta
             </h2>
             <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
-              Uma linha por campanha. Lead que não veio de campanha aparece
-              pelo canal de entrada. O gasto conta cada template enviado aos
-              leads da campanha (R$ 0,25 por disparo, editável em
-              configurações) mais o que estiver lançado à mão por canal. O
-              custo por ganho divide esse gasto pelos leads ganhos — quanto
-              custou cada cliente, não cada disparo.
+              Uma linha por etiqueta — é assim que a equipe separa campanha e
+              interesse, e é o que o motor de campanhas mira. Lead sem
+              etiqueta aparece pela campanha de origem e, na falta dela, pelo
+              canal de entrada. O gasto conta cada template enviado (R$ 0,25
+              por disparo, editável em Configurações) mais o que estiver
+              lançado à mão por canal; o custo por ganho divide esse gasto
+              pelos leads ganhos — quanto custou cada cliente, não cada
+              disparo.
+            </p>
+            <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
+              Lead com duas etiquetas conta nas duas linhas, então a soma das
+              linhas pode passar do total de leads. A coluna Canal mostra
+              “vários” quando a etiqueta atravessa mais de um canal de entrada.
             </p>
             <div className="mt-2 overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-0 shadow-sm">
               <table className="w-full min-w-[900px] border-collapse text-left">
                 <thead>
                   <tr className="border-b border-neutral-200 bg-neutral-50">
-                    <Th>Campanha</Th>
+                    <Th>Etiqueta</Th>
                     <Th>Canal</Th>
                     <Th alinhar>Leads</Th>
                     <Th alinhar>Clientes</Th>
@@ -662,9 +676,9 @@ export default async function RelatoriosPage({
                     >
                       <td className="px-2 text-sm font-medium text-neutral-800">
                         {origem.origem}
-                        {origem.campanha ? null : (
+                        {origem.etiqueta ? null : (
                           <span className="ml-1 text-xs font-normal text-neutral-400">
-                            sem campanha
+                            {origem.campanha ? "campanha" : "sem etiqueta"}
                           </span>
                         )}
                       </td>
