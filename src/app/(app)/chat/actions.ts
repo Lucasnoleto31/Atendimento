@@ -20,6 +20,11 @@ import {
   enviarTextoMeta,
 } from "@/lib/whatsapp";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+import {
+  descreverErroInstagram,
+  enviarMidiaInstagram,
+  enviarTextoInstagram,
+} from "@/lib/instagram";
 
 const MAX_ANEXOS = 5;
 const MAX_TAMANHO_ANEXO = 16 * 1024 * 1024; // teto do WhatsApp para mídia
@@ -111,7 +116,7 @@ async function leadComConversa(leadId: string) {
   const { data: lead } = await supabase
     .from("leads")
     .select(
-      "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
+      "id, nome, telefone_e164, instagram_id, instagram_usuario, chatwoot_contact_id, chatwoot_conversation_id",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -119,6 +124,8 @@ async function leadComConversa(leadId: string) {
     id: string;
     nome: string;
     telefone_e164: string | null;
+    instagram_id: string | null;
+    instagram_usuario: string | null;
     chatwoot_contact_id: number | null;
     chatwoot_conversation_id: number | null;
   } | null;
@@ -255,7 +262,51 @@ export async function enviarMensagemLead(
   const wamids: string[] = [];
   let falhaParcial: string | null = null;
 
-  if (canal === "meta") {
+  // O canal é decidido POR LEAD, não globalmente: quem chegou pelo Direct é
+  // respondido pelo Direct (não tem telefone), quem chegou pelo WhatsApp pelo
+  // WhatsApp. A mensagem sai pelo perfil do Instagram do negócio, e o CRM
+  // guarda em autor_id quem de fato respondeu.
+  const viaInstagram = Boolean(lead.instagram_id && !lead.telefone_e164);
+
+  if (viaInstagram && lead.instagram_id) {
+    const service = createServiceClient();
+    try {
+      if (texto) {
+        const id = await enviarTextoInstagram(lead.instagram_id, texto);
+        if (id) wamids.push(id);
+      }
+      for (const [i, anexo] of anexosRemotos.entries()) {
+        const tipo = tipoDoArquivo(arquivos[i]?.type ?? "");
+        const url = service.storage
+          .from(BUCKET_MIDIA)
+          .getPublicUrl(anexo.caminho).data.publicUrl;
+        // O Direct só aceita imagem, vídeo e áudio como mídia; o resto vai
+        // como link, do mesmo jeito que no WhatsApp.
+        const id =
+          tipo === "image" || tipo === "video" || tipo === "audio"
+            ? await enviarMidiaInstagram(lead.instagram_id, url, tipo)
+            : await enviarTextoInstagram(
+                lead.instagram_id,
+                `📎 ${anexo.nome}\n${url}`,
+              );
+        if (id) wamids.push(id);
+      }
+    } catch (e) {
+      const bruto = e instanceof Error ? e.message : String(e);
+      if (wamids.length === 0) {
+        return { erro: descreverErroInstagram(bruto) };
+      }
+      falhaParcial = descreverErroInstagram(bruto);
+    }
+    mensagemId = wamids[wamids.length - 1] ?? null;
+
+    anexos = anexosRemotos.slice(0, wamids.length).map((a) => ({
+      tipo: tipoDoArquivo(a.tipo || ""),
+      nome: a.nome,
+      url: service.storage.from(BUCKET_MIDIA).getPublicUrl(a.caminho).data
+        .publicUrl,
+    }));
+  } else if (canal === "meta") {
     if (!lead.telefone_e164) {
       return {
         erro: "Este lead não tem telefone para receber WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
@@ -346,7 +397,7 @@ export async function enviarMensagemLead(
 
   // No canal Meta os anexos ficam no histórico com a URL pública do Storage
   // (o navegador subiu direto para lá) — antes o envio sumia da conversa.
-  if (canal === "meta" && anexosRemotos.length > 0) {
+  if (!viaInstagram && canal === "meta" && anexosRemotos.length > 0) {
     const service = createServiceClient();
     anexos = anexosRemotos.slice(0, wamids.length).map((a) => ({
       tipo: tipoDoArquivo(a.tipo || ""),
@@ -357,7 +408,13 @@ export async function enviarMensagemLead(
 
   // Sem texto, o histórico guarda o rótulo do primeiro anexo como prévia.
   // Envio parcial registra quantos arquivos de fato chegaram.
-  const enviados = canal === "meta" && arquivos.length > 0 ? wamids.length : arquivos.length;
+  // Quantos ARQUIVOS chegaram de fato. No Direct o texto também devolve um
+  // id, então descontá-lo evita dizer "2/1 enviados".
+  const enviados = viaInstagram
+    ? Math.max(wamids.length - (texto ? 1 : 0), 0)
+    : canal === "meta" && arquivos.length > 0
+      ? wamids.length
+      : arquivos.length;
   const conteudo =
     texto ||
     (arquivos.length > 0

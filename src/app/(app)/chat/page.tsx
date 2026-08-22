@@ -57,6 +57,8 @@ type ConversaLinha = {
   id: string;
   nome: string;
   telefone_e164: string | null;
+  instagram_id?: string | null;
+  instagram_usuario?: string | null;
   customer_id: string | null;
   responsavel_id: string | null;
   stage_id: string | null;
@@ -69,7 +71,7 @@ type ConversaLinha = {
 };
 
 const CAMPOS_BASE =
-  "id, nome, telefone_e164, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em, chatwoot_conversation_id";
+  "id, nome, telefone_e164, instagram_id, instagram_usuario, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em, chatwoot_conversation_id";
 // Sem a migração 0017 a coluna não existe: a consulta cai para os campos base.
 const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em, chat_resolvido_em, marketing_bloqueado_em`;
 
@@ -565,6 +567,15 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         : null,
       href: urlChat(filtro, busca, etiquetaFiltro, atendenteFiltro, conversa.id),
       hora: horaCurta(conversa.ultima_interacao_em),
+      // De onde veio a conversa: no Direct o @ identifica melhor que o nome.
+      origem: conversa.instagram_id
+        ? {
+            canal: "instagram" as const,
+            identificador: conversa.instagram_usuario
+              ? `@${conversa.instagram_usuario}`
+              : "Direct",
+          }
+        : null,
       previa: previas.get(conversa.id) ?? "—",
       pendente,
       aberta,

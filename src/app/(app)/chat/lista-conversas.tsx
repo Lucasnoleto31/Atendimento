@@ -2,7 +2,15 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, CheckSquare, Clock, Mail, Square, X } from "lucide-react";
+import {
+  Check,
+  CheckSquare,
+  Clock,
+  AtSign,
+  Mail,
+  Square,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   adiarConversasEmMassa,
@@ -20,6 +28,8 @@ export type ItemConversa = {
   atendente: string | null;
   href: string;
   hora: string;
+  /** Canal de origem, quando não é o WhatsApp padrão da mesa. */
+  origem: { canal: "instagram"; identificador: string } | null;
   previa: string;
   pendente: boolean;
   aberta: boolean;
@@ -277,6 +287,14 @@ export function ListaConversas({
                         {item.hora}
                       </span>
                     </span>
+                    {item.origem ? (
+                      <span className="flex items-center gap-0.5 text-xs text-accent-700">
+                        <AtSign size={12} strokeWidth={1.5} aria-hidden />
+                        <span className="truncate">
+                          {item.origem.identificador}
+                        </span>
+                      </span>
+                    ) : null}
                     <span className="flex items-center justify-between gap-1">
                       <span
                         className={cn(
