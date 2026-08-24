@@ -2,7 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 
 /**
  * Disparo de template move o lead da primeira coluna para a segunda
- * (Novos -> Em contato).
+ * (Novo -> Em Contato).
  *
  * A regra é estreita de propósito: só o kanban padrão e só quem ainda está
  * na primeira coluna. Lead que já avançou não volta nem pula etapa, e o
@@ -59,7 +59,7 @@ export async function avancarAposDisparo(
     const ids = (movidos ?? []).map((l: { id: string }) => l.id);
     if (ids.length === 0) return 0;
 
-    // Quem saiu de "Novos" está em contato — o status acompanha a coluna.
+    // Quem saiu de "Novo" está em contato — o status acompanha a coluna.
     await service
       .from("leads")
       .update({ status: "em_atendimento" })

@@ -320,7 +320,7 @@ export async function dispararTemplateLista(
     }
   }
 
-  // Quem recebeu template saiu de "Novos": vai para "Em contato".
+  // Quem recebeu template saiu de "Novo": vai para "Em Contato".
   await avancarAposDisparo(service, contatados);
 
   const { count: restantes } = await consultaFila("contagem");

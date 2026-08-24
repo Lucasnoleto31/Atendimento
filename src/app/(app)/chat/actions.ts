@@ -455,7 +455,7 @@ export async function enviarMensagemLead(
     .update({ ultima_interacao_em: agora, chat_lido_em: agora })
     .eq("id", leadId);
 
-  // Template disparado é contato feito: sai de "Novos" para "Em contato".
+  // Template disparado é contato feito: sai de "Novo" para "Em Contato".
   await avancarAposDisparo(createServiceClient(), [leadId]);
 
   revalidatePath("/chat");

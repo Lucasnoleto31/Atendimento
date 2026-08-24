@@ -46,7 +46,7 @@ export async function criarKanban(formData: FormData) {
   // Todo kanban nasce com uma etapa inicial — sem etapa não há coluna.
   await supabase
     .from("pipeline_stages")
-    .insert({ pipeline_id: data.id, nome: "Novos", ordem: 1 });
+    .insert({ pipeline_id: data.id, nome: "Novo", ordem: 1 });
 
   terminar();
 }
