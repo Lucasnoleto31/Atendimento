@@ -7,6 +7,7 @@ import {
 import { enviarTemplateMeta } from "@/lib/whatsapp";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { avancarAposDisparo } from "@/lib/kanban";
+import { agoraEmBrasilia } from "@/lib/format";
 
 /**
  * Cadência de follow-up com duas famílias de regras (followup_rules.ancora):
@@ -24,6 +25,21 @@ import { avancarAposDisparo } from "@/lib/kanban";
 
 const INTERVALO_HEARTBEAT_MS = 5 * 60_000;
 const LOTE_POR_REGRA = 10;
+/**
+ * Teto DIÁRIO, somando todas as regras. O LOTE_POR_REGRA acima limita a
+ * rodada, não o dia — e o throttle de 5 min vive numa variável de módulo, que
+ * na Vercel morre a cada instância fria. Ou seja: o número de rodadas por dia
+ * era ilimitado, e o único teto real não existia.
+ *
+ * Em 24/08/2026 isso mandou 740 templates numa tacada, quando os 879 leads de
+ * reativação criados no mesmo dia (17/08) cruzaram juntos o limiar de 6 dias
+ * da regra `lead_criado`. A qualidade do número caiu de GREEN para YELLOW.
+ * Ajustável em settings.cadencia_por_dia.
+ */
+const PADRAO_POR_DIA = 60;
+/** Mesma janela das campanhas: template de madrugada também derruba nota. */
+const HORA_INICIO = 9;
+const HORA_FIM = 18;
 const VARREDURA_MAXIMA = 300;
 const EPISODIO_UNICO = "2000-01-01";
 
@@ -90,12 +106,43 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
     return { enviados: 0, pulados: 0, regras: 0 };
   }
 
+  // Janela de expediente, em Brasília.
+  const relogio = agoraEmBrasilia();
+  if (
+    relogio.fimDeSemana ||
+    relogio.hora < HORA_INICIO ||
+    relogio.hora >= HORA_FIM
+  ) {
+    return { enviados: 0, pulados: 0, regras: 0 };
+  }
+
+  // Cota do dia contada NO BANCO, nunca em memória. Toda tentativa conta,
+  // inclusive a que falhou — a Meta pode ter aberto a conversa mesmo
+  // devolvendo erro, e é a conversa aberta que pesa na reputação.
+  const { data: cfgDia } = await service
+    .from("settings")
+    .select("valor")
+    .eq("chave", "cadencia_por_dia")
+    .maybeSingle();
+  const porDia = Number(cfgDia?.valor ?? PADRAO_POR_DIA) || PADRAO_POR_DIA;
+
+  const { count: jaHoje } = await service
+    .from("followup_envios")
+    .select("lead_id", { count: "exact", head: true })
+    .gte("enviado_em", relogio.inicioDoDia);
+
+  let restaHoje = porDia - (jaHoje ?? 0);
+  if (restaHoje <= 0) {
+    return { enviados: 0, pulados: 0, regras: regras.length };
+  }
+
   const templates = await listarTemplatesCanal();
   const canal = canalAtivo();
   let enviados = 0;
   let pulados = 0;
 
   for (const regra of regras as Regra[]) {
+    if (restaHoje <= 0) break;
     const template = templates.find(
       (t) =>
         t.nome === regra.template_nome && t.idioma === regra.template_idioma,
@@ -117,6 +164,7 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
     let enviadosRegra = 0;
     for (const alvo of alvos) {
       if (enviadosRegra >= LOTE_POR_REGRA) break;
+      if (restaHoje <= 0) break;
 
       // Âncora mensal: virada de mês não zera o espaço mínimo de 30 dias
       // desde o último envio desta regra para este lead.
@@ -147,6 +195,7 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
         .from("followup_envios")
         .insert(registroEnvio);
       if (dupErro) continue;
+      restaHoje--;
 
       try {
         const valores: Record<string, string> =
