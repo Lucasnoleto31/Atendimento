@@ -147,7 +147,7 @@ export function normalizarNumero(bruto: string): number | null {
 }
 
 /**
- * As duas grafias do mesmo celular brasileiro: com e sem o nono dígito.
+ * As duas grafias do mesmo CELULAR brasileiro: com e sem o nono dígito.
  * O WhatsApp registra números antigos sem o 9 (wa_id "556296073230"),
  * mas as pessoas digitam com o 9 ("5562996073230") — comparar telefone
  * por igualdade exata separa a mesma pessoa em dois registros.
@@ -155,7 +155,9 @@ export function normalizarNumero(bruto: string): number | null {
 export function variantesTelefone(telefone: string): string[] {
   const variantes = [telefone];
   if (telefone.startsWith("55")) {
-    if (telefone.length === 12) {
+    // Fixo é 55 + DDD + 8 dígitos começando em 2..5; celular antigo, em 6..9.
+    // Somar um 9 a um fixo inventa o número de outra pessoa.
+    if (telefone.length === 12 && telefone[4] >= "6" && telefone[4] <= "9") {
       variantes.push(`${telefone.slice(0, 4)}9${telefone.slice(4)}`);
     }
     if (telefone.length === 13 && telefone[4] === "9") {

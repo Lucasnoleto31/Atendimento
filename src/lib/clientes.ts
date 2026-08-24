@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { normalizarConta } from "@/lib/imports/tabular";
+import { variantesTelefone } from "@/lib/csv";
 
 /**
  * Lead ganho vira cliente: cria (ou encontra, por conta e por telefone) o
@@ -79,12 +80,14 @@ export async function garantirClienteDoLead(
     customerId = (data?.customer_id as string | undefined) ?? null;
   }
 
-  // Telefone já na base também evita duplicar.
+  // Telefone já na base também evita duplicar — nas duas grafias do nono
+  // dígito, senão o cliente que já existe vira um segundo cadastro.
   if (!customerId && lead.telefone_e164) {
     const { data } = await service
       .from("customers")
       .select("id")
-      .eq("telefone_e164", lead.telefone_e164)
+      .in("telefone_e164", variantesTelefone(lead.telefone_e164))
+      .limit(1)
       .maybeSingle();
     customerId = (data?.id as string | undefined) ?? null;
   }

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { normalizarTelefone } from "@/lib/csv";
+import { normalizarTelefone, variantesTelefone } from "@/lib/csv";
 
 export async function criarLead(formData: FormData) {
   const perfil = await perfilAtual();
@@ -30,6 +30,31 @@ export async function criarLead(formData: FormData) {
   }
 
   const supabase = await createClient();
+
+  // Mesmo telefone, duas grafias: o WhatsApp registra celular antigo sem o
+  // nono dígito e a planilha traz com ele. Cadastrar sem olhar as duas cria um
+  // segundo card para quem já está sendo atendido — e a resposta do lead cai
+  // sempre no card antigo, porque é o número que o WhatsApp usa.
+  if (telefone) {
+    const { data: existente } = await supabase
+      .from("leads")
+      .select("id, nome, responsavel:profiles(nome)")
+      .in("telefone_e164", variantesTelefone(telefone))
+      .limit(1)
+      .maybeSingle();
+    if (existente) {
+      const dono = (
+        existente as { responsavel?: { nome?: string } | null }
+      ).responsavel?.nome;
+      redirect(
+        `/leads/${existente.id}?aviso=${encodeURIComponent(
+          `Esse telefone já é o lead "${existente.nome}"${
+            dono ? `, com ${dono}` : ""
+          }. Continue o atendimento por aqui.`,
+        )}`,
+      );
+    }
+  }
 
   // Primeira etapa do kanban escolhido (ou do padrão).
   let etapaId: string | null = null;
