@@ -10,10 +10,15 @@
 --    etiquetagem em massa do chat e o relatório por etiqueta (0031), que passa
 --    a mostrar leads, ganhos e conversão de cada passo sozinho.
 --
--- 2. RESGATE TRAVADO. gerar_leads_reativacao não redispara enquanto houver
---    tarefa "Resgatar:" aberta para o cliente — e essa trava não tinha prazo.
---    Com 1.201 tarefas abertas e 15 concluídas na história inteira, o motor de
---    retenção se desligou sozinho para esses clientes, em silêncio.
+-- 2. RESGATE COM TRAVA SEM PRAZO. gerar_leads_reativacao não redispara enquanto
+--    houver tarefa "Resgatar:" aberta para o cliente — e essa trava não tinha
+--    prazo nenhum. Uma tarefa esquecida tirava o cliente da retenção PARA
+--    SEMPRE, sem erro e sem aviso.
+--
+--    A correção é preventiva, não um incêndio: existem 13 tarefas "Resgatar:"
+--    na história e todas estão concluídas. Quem segura os 1.213 clientes já
+--    disparados é o cooldown de 30 dias em customer_events — esse é o gate
+--    certo, porque tem prazo e é auditável.
 --
 --    Aqui a função é a MESMA da 0015, com uma única linha a mais na trava: ela
 --    passa a valer só enquanto a tarefa for recente (janela de dias_sem_giro).
