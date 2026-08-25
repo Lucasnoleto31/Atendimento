@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Download, MessageSquare, Plus, Search } from "lucide-react";
+import { Download, MessageSquare, Plus, Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { formatarData, formatarTelefone, tempoDesde } from "@/lib/format";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { DistribuirLeads } from "./distribuir";
 import { DispararTemplate } from "./disparar-template";
 import { cn } from "@/lib/utils";
+import { LISTAS_DISPARO } from "@/lib/listas-leads";
 
 export const metadata: Metadata = { title: "Leads · Zeve CRM" };
 
@@ -188,15 +189,6 @@ const LISTAS_COM_GIRO = new Set(
   ).flatMap((g) => g.listas.map((l) => l.chave)),
 );
 
-// Listas em que o disparo de template em massa faz sentido.
-const LISTAS_DISPARO = new Set<string>([
-  "primeiro_giro",
-  "sem_giro_ja_conversou",
-  "primeiro_giro_parado",
-  "nunca_contatado",
-  "giro_em_risco",
-]);
-
 const CAMPOS_VIEW =
   "lead_id, nome, telefone_e164, status, criado_em, customer_id, campanha, " +
   "responsavel_nome, canal_nome, etapa_nome, ultima_interacao_em, " +
@@ -227,10 +219,22 @@ type Linha = {
   primeira_resposta_em: string | null;
 };
 
-function urlLista(lista: string, busca: string) {
+/**
+ * Lista, busca e etiqueta são filtros independentes que se combinam: trocar de
+ * lista não pode derrubar a etiqueta escolhida, senão medir uma campanha ao
+ * longo do funil vira reescolher o filtro a cada clique.
+ */
+function urlLeads(
+  lista: string,
+  busca: string,
+  etiqueta: string,
+  pagina = 1,
+) {
   const p = new URLSearchParams();
   if (lista !== "todos") p.set("lista", lista);
   if (busca) p.set("busca", busca);
+  if (etiqueta) p.set("etiqueta", etiqueta);
+  if (pagina > 1) p.set("pagina", String(pagina));
   const q = p.toString();
   return q ? `/leads?${q}` : "/leads";
 }
@@ -245,6 +249,8 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const def =
     TODAS_LISTAS.find((l) => l.chave === listaAtiva) ?? TODAS_LISTAS[0];
   const busca = typeof params.busca === "string" ? params.busca.trim() : "";
+  const etiqueta =
+    typeof params.etiqueta === "string" && params.etiqueta ? params.etiqueta : "";
   const pagina = Math.max(1, Number(params.pagina) || 1);
   const aviso = typeof params.aviso === "string" ? params.aviso : null;
 
@@ -268,6 +274,11 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
 
     if (alvo?.coluna) q = q.eq(alvo.coluna, true);
 
+    // Etiqueta entra nos dois modos de propósito: com uma campanha escolhida,
+    // o número em cada aba passa a ser "quantos desta campanha estão aqui" —
+    // que é a pergunta que se faz olhando a tela.
+    if (etiqueta) q = q.contains("etiqueta_ids", [etiqueta]);
+
     if (modo === "dados" && busca) {
       // Vírgula e parênteses quebram a sintaxe do .or() do PostgREST.
       const termo = busca.replace(/[,()]/g, " ").trim();
@@ -288,6 +299,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
     { data, count, error },
     { count: semResponsavel },
     { count: equipeAtiva },
+    { data: tags },
     ...contagens
   ] = await Promise.all([
     consulta(listaAtiva, "dados")
@@ -303,6 +315,11 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
       .from("profiles")
       .select("id", { count: "exact", head: true })
       .eq("ativo", true),
+    supabase
+      .from("v_tags_uso")
+      .select("id, nome, leads")
+      .eq("ativo", true)
+      .order("nome"),
     ...TODAS_LISTAS.map(async (l) => {
       const { count: total } = await consulta(l.chave, "contagem");
       return { chave: l.chave, total: total ?? 0 };
@@ -318,6 +335,8 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const total = count ?? 0;
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const totalPorLista = new Map(contagens.map((c) => [c.chave, c.total]));
+  const etiquetas = (tags ?? []) as { id: string; nome: string; leads: number }[];
+  const etiquetaAtiva = etiquetas.find((t) => t.id === etiqueta) ?? null;
 
   return (
     <div className="flex min-h-full flex-col p-2 md:p-3">
@@ -366,7 +385,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
               return (
                 <li key={l.chave}>
                   <Link
-                    href={urlLista(l.chave, busca)}
+                    href={urlLeads(l.chave, busca, etiqueta)}
                     aria-current={ativa ? "page" : undefined}
                     className={cn(
                       "inline-flex h-[32px] items-center gap-1 rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
@@ -400,10 +419,32 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
 
       <p className="mt-2 max-w-[68ch] text-sm text-neutral-600">{def.ajuda}</p>
 
-      <form action="/leads" method="get" className="mt-2 flex max-w-[400px] gap-1">
+      <form
+        action="/leads"
+        method="get"
+        className="mt-2 flex flex-wrap items-center gap-1"
+      >
         {listaAtiva !== "todos" ? (
           <input type="hidden" name="lista" value={listaAtiva} />
         ) : null}
+
+        <label htmlFor="etiqueta" className="sr-only">
+          Filtrar por etiqueta
+        </label>
+        <select
+          id="etiqueta"
+          name="etiqueta"
+          defaultValue={etiqueta}
+          className="h-[40px] max-w-[260px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+        >
+          <option value="">Todas as etiquetas</option>
+          {etiquetas.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.nome} ({t.leads})
+            </option>
+          ))}
+        </select>
+
         <label htmlFor="busca" className="sr-only">
           Buscar por nome ou telefone
         </label>
@@ -412,28 +453,47 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
           name="busca"
           defaultValue={busca}
           placeholder="Nome ou telefone…"
-          className="h-[40px] min-w-0 flex-1 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          className="h-[40px] w-[220px] min-w-0 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-base text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         />
         <button
           type="submit"
-          aria-label="Buscar"
-          className="inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md border border-neutral-300 bg-neutral-0 text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          className="inline-flex h-[40px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         >
           <Search size={18} strokeWidth={1.5} aria-hidden />
+          Filtrar
         </button>
+
+        {/* Filtro ativo tem que ser visível fora do <select>: número de aba
+            menor do que a pessoa espera é confuso quando o motivo está
+            escondido dentro de uma caixa fechada. */}
+        {etiquetaAtiva ? (
+          <Link
+            href={urlLeads(listaAtiva, busca, "")}
+            className="inline-flex h-[40px] items-center gap-0.5 rounded-md bg-primary-50 px-1.5 text-sm font-medium text-primary-900 transition-colors duration-[120ms] hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          >
+            {etiquetaAtiva.nome}
+            <X size={16} strokeWidth={1.5} aria-hidden />
+            <span className="sr-only">Remover filtro de etiqueta</span>
+          </Link>
+        ) : null}
       </form>
 
       <div className="mt-2 flex flex-wrap items-center gap-1">
         {ehGestor && LISTAS_DISPARO.has(listaAtiva) ? (
           <DispararTemplate
             lista={listaAtiva}
-            rotuloLista={def.rotulo}
+            rotuloLista={
+              etiquetaAtiva
+                ? `${def.rotulo} · ${etiquetaAtiva.nome}`
+                : def.rotulo
+            }
+            etiqueta={etiqueta}
             total={total}
             templates={templatesDisparo}
           />
         ) : null}
         <a
-          href={`/api/exportar/leads?lista=${listaAtiva}${busca ? `&busca=${encodeURIComponent(busca)}` : ""}`}
+          href={`/api/exportar/leads?lista=${listaAtiva}${busca ? `&busca=${encodeURIComponent(busca)}` : ""}${etiqueta ? `&etiqueta=${etiqueta}` : ""}`}
           download
           className="inline-flex h-[40px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-2 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         >
@@ -462,10 +522,12 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
           <p className="mt-1 text-sm text-neutral-600">
             {busca
               ? "Nenhum lead corresponde à busca nesta lista."
-              : def.vaziaOk
-                ? // Lista de urgência vazia é o objetivo, não uma tela quebrada.
-                  "Nenhum caso pendente nesta fila — é o resultado esperado."
-                : "Nenhum lead se encaixa nesta lista no momento."}
+              : etiquetaAtiva
+                ? `Nenhum lead com a etiqueta "${etiquetaAtiva.nome}" está nesta lista.`
+                : def.vaziaOk
+                  ? // Lista de urgência vazia é o objetivo, não tela quebrada.
+                    "Nenhum caso pendente nesta fila — é o resultado esperado."
+                  : "Nenhum lead se encaixa nesta lista no momento."}
           </p>
         </div>
       ) : (
@@ -579,12 +641,12 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
               <PaginaLink
                 rotulo="Anterior"
                 desabilitado={pagina <= 1}
-                href={urlPagina(listaAtiva, busca, pagina - 1)}
+                href={urlLeads(listaAtiva, busca, etiqueta, pagina - 1)}
               />
               <PaginaLink
                 rotulo="Próxima"
                 desabilitado={pagina >= totalPaginas}
-                href={urlPagina(listaAtiva, busca, pagina + 1)}
+                href={urlLeads(listaAtiva, busca, etiqueta, pagina + 1)}
               />
             </div>
           </div>
@@ -592,15 +654,6 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
       )}
     </div>
   );
-}
-
-function urlPagina(lista: string, busca: string, pagina: number) {
-  const p = new URLSearchParams();
-  if (lista !== "todos") p.set("lista", lista);
-  if (busca) p.set("busca", busca);
-  if (pagina > 1) p.set("pagina", String(pagina));
-  const q = p.toString();
-  return q ? `/leads?${q}` : "/leads";
 }
 
 function Th({

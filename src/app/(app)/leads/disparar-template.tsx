@@ -33,11 +33,14 @@ function BotaoDisparar({ restantes }: { restantes: number | null }) {
 export function DispararTemplate({
   lista,
   rotuloLista,
+  etiqueta,
   total,
   templates,
 }: {
   lista: string;
   rotuloLista: string;
+  /** Id da etiqueta filtrada na tela — o disparo segue o mesmo recorte. */
+  etiqueta: string;
   total: number;
   templates: TemplateWhatsapp[];
 }) {
@@ -101,6 +104,7 @@ export function DispararTemplate({
 
         <form action={formAction} className="flex flex-col gap-2">
           <input type="hidden" name="lista" value={lista} />
+          <input type="hidden" name="etiqueta" value={etiqueta} />
           <input
             type="hidden"
             name="template_nome"

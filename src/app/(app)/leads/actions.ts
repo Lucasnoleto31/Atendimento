@@ -108,17 +108,13 @@ import {
 } from "@/lib/chatwoot";
 import { enviarTemplateMeta } from "@/lib/whatsapp";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+import { COLUNA_DISPARO, LISTAS_DISPARO } from "@/lib/listas-leads";
 
 const LIMITE_MS_DISPARO = 100_000;
 const MAX_POR_EXECUCAO = 30; // ritmo por leva — respeita os limites da Meta
 
-const LISTAS_DISPARO = new Set([
-  "esfriando",
-  "sem_contato_30",
-  "sem_contato_60",
-  "sem_contato_nunca",
-  "nunca_respondeu",
-]);
+// As filas e suas colunas moram em lib/listas-leads para tela e disparo não
+// divergirem de novo.
 
 export type ResultadoDisparo = {
   ok?: boolean;
@@ -145,6 +141,7 @@ export async function dispararTemplateLista(
   }
 
   const lista = String(formData.get("lista") ?? "");
+  const etiqueta = String(formData.get("etiqueta") ?? "");
   const nome = String(formData.get("template_nome") ?? "");
   const idioma = String(formData.get("template_idioma") ?? "");
   const iniciadoEm =
@@ -173,44 +170,38 @@ export async function dispararTemplateLista(
 
   const service = createServiceClient();
 
-  // Quem desligou marketing no WhatsApp não recebe template dessa categoria:
-  // insistir só gera falha e derruba a reputação do número. Checagem única —
-  // sem a migração 0019 a coluna não existe e o filtro é ignorado.
-  const { error: erroColunaBloqueio } = await service
-    .from("leads")
-    .select("marketing_bloqueado_em")
-    .limit(1);
-  const podeFiltrarBloqueio = !erroColunaBloqueio;
-
+  /**
+   * A fila é a MESMA da tela: v_leads_listas com a coluna booleana da lista,
+   * mais a etiqueta escolhida. Antes isto era um punhado de filtros por data
+   * copiados à mão, que ficaram para trás quando as listas mudaram.
+   *
+   * Dois cuidados que o desenho antigo tinha de graça e este não:
+   *
+   * - `perdido` sai, mas `ganho` NÃO. As filas de primeiro giro são de gente
+   *   que já abriu conta — filtrar ganho esvaziaria justamente as listas que
+   *   mais precisam de disparo.
+   * - ultimo_disparo_em segura o reenvio. As filas antigas eram por data de
+   *   contato e o envio tirava o lead do filtro sozinho; "conta aberta e nunca
+   *   girou" continua verdade depois do template, então sem esta trava cada
+   *   clique repetiria o disparo nas mesmas pessoas.
+   */
   function consultaFila(modo: "dados" | "contagem") {
-    const d7 = new Date(Date.parse(iniciadoEm) - 7 * 86_400_000).toISOString();
-    const d30 = new Date(Date.parse(iniciadoEm) - 30 * 86_400_000).toISOString();
-    const d60 = new Date(Date.parse(iniciadoEm) - 60 * 86_400_000).toISOString();
-
-    let q =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
+    let q: any =
       modo === "contagem"
-        ? service.from("leads").select("id", { count: "exact", head: true })
-        : service
-            .from("leads")
-            .select(
-              "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
-            );
+        ? service
+            .from("v_leads_listas")
+            .select("lead_id", { count: "exact", head: true })
+        : service.from("v_leads_listas").select("lead_id, nome, telefone_e164");
 
     q = q
-      .not("status", "in", "(ganho,perdido)")
-      .not("telefone_e164", "is", null);
-    if (podeFiltrarBloqueio) q = q.is("marketing_bloqueado_em", null);
+      .eq(COLUNA_DISPARO[lista], true)
+      .neq("status", "perdido")
+      // nao_contatavel já cobre sem telefone E marketing recusado.
+      .eq("nao_contatavel", false)
+      .or(`ultimo_disparo_em.is.null,ultimo_disparo_em.lt.${iniciadoEm}`);
 
-    if (lista === "esfriando")
-      q = q.lt("ultima_interacao_em", d7).gte("ultima_interacao_em", d30);
-    if (lista === "sem_contato_30")
-      q = q.lt("ultima_interacao_em", d30).gte("ultima_interacao_em", d60);
-    if (lista === "sem_contato_60") q = q.lt("ultima_interacao_em", d60);
-    if (lista === "sem_contato_nunca") q = q.is("ultima_interacao_em", null);
-    if (lista === "nunca_respondeu")
-      q = q
-        .is("primeira_resposta_em", null)
-        .or(`ultima_interacao_em.is.null,ultima_interacao_em.lt.${iniciadoEm}`);
+    if (etiqueta) q = q.contains("etiqueta_ids", [etiqueta]);
 
     return q;
   }
@@ -228,7 +219,18 @@ export async function dispararTemplateLista(
       .order("criado_em", { ascending: true })
       .limit(Math.min(10, MAX_POR_EXECUCAO - enviados - pulados));
 
-    const leads = (lote ?? []) as {
+    const ids = ((lote ?? []) as { lead_id: string }[]).map((l) => l.lead_id);
+    // A view não carrega os ids do Chatwoot; busca só os do lote (até 10).
+    const { data: detalhes } = ids.length
+      ? await service
+          .from("leads")
+          .select(
+            "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
+          )
+          .in("id", ids)
+      : { data: [] };
+
+    const leads = (detalhes ?? []) as {
       id: string;
       nome: string;
       telefone_e164: string;
