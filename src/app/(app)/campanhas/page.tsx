@@ -1,13 +1,17 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { AlertTriangle, Pause, Play, Trash2 } from "lucide-react";
+import { AlertTriangle, Pause, Pencil, Play, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { listarTemplatesCanal } from "@/lib/canal";
 import { inicioDoDiaSaoPaulo } from "@/lib/campanhas";
 import { formatarDataCurta } from "@/lib/format";
 import { NovaCampanha, type TemplateOpcao } from "./nova-campanha";
-import { alterarStatusCampanha, excluirCampanha } from "./actions";
+import {
+  alterarStatusCampanha,
+  editarRitmoCampanha,
+  excluirCampanha,
+} from "./actions";
 
 export const metadata: Metadata = { title: "Campanhas · Zeve CRM" };
 
@@ -250,6 +254,93 @@ export default async function CampanhasPage({
                         </form>
                       </div>
                     </div>
+
+                    {c.status !== "concluida" ? (
+                      <details className="mt-1">
+                        <summary className="inline-flex h-[32px] cursor-pointer list-none items-center gap-0.5 rounded-md px-1 text-xs font-medium text-neutral-600 transition-colors duration-[120ms] select-none hover:bg-neutral-100 hover:text-neutral-800 [&::-webkit-details-marker]:hidden">
+                          <Pencil size={14} strokeWidth={1.5} aria-hidden />
+                          Editar ritmo
+                        </summary>
+                        <form
+                          action={editarRitmoCampanha}
+                          className="mt-1 flex flex-wrap items-end gap-1.5 rounded-md border border-neutral-200 bg-neutral-50 p-1.5"
+                        >
+                          <input type="hidden" name="id" value={c.id} />
+                          <div className="flex flex-col gap-0.5">
+                            <label
+                              htmlFor={`por-dia-${c.id}`}
+                              className="text-xs font-medium text-neutral-800"
+                            >
+                              Envios por dia
+                            </label>
+                            <input
+                              id={`por-dia-${c.id}`}
+                              name="por_dia"
+                              type="number"
+                              min={1}
+                              max={500}
+                              defaultValue={c.por_dia}
+                              className="h-[36px] w-[90px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <label
+                              htmlFor={`inicio-${c.id}`}
+                              className="text-xs font-medium text-neutral-800"
+                            >
+                              Das
+                            </label>
+                            <input
+                              id={`inicio-${c.id}`}
+                              name="hora_inicio"
+                              type="number"
+                              min={0}
+                              max={23}
+                              defaultValue={c.hora_inicio}
+                              className="h-[36px] w-[64px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <label
+                              htmlFor={`fim-${c.id}`}
+                              className="text-xs font-medium text-neutral-800"
+                            >
+                              Às
+                            </label>
+                            <input
+                              id={`fim-${c.id}`}
+                              name="hora_fim"
+                              type="number"
+                              min={1}
+                              max={24}
+                              defaultValue={c.hora_fim}
+                              className="h-[36px] w-[64px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                            />
+                          </div>
+                          <label className="flex h-[36px] items-center gap-1 text-sm text-neutral-800">
+                            <input
+                              name="dias_uteis"
+                              type="checkbox"
+                              defaultChecked={c.dias_uteis}
+                              className="h-[16px] w-[16px] accent-primary-600"
+                            />
+                            Só seg a sex
+                          </label>
+                          <button
+                            type="submit"
+                            className="inline-flex h-[36px] items-center rounded-md bg-primary-600 px-1.5 text-sm font-medium text-neutral-0 transition-colors duration-[120ms] hover:bg-primary-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                          >
+                            Salvar
+                          </button>
+                          <p className="w-full text-xs text-neutral-600">
+                            Vale a partir de agora: se o ritmo novo for maior
+                            que o já enviado hoje, o motor completa a cota do
+                            dia. Template e etiqueta não mudam — para outra
+                            mensagem ou outro público, crie outra campanha.
+                          </p>
+                        </form>
+                      </details>
+                    ) : null}
 
                     <div
                       className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-neutral-100"
