@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
@@ -87,7 +88,12 @@ export async function alterarStatusCampanha(formData: FormData) {
   if (error) terminar(`Não deu para atualizar: ${error.message}`);
 
   // Ativou dentro da janela: manda o primeiro lote agora, sem esperar o cron.
-  if (status === "ativa") await executarCampanhas().catch(() => {});
+  // Depois da resposta (after): em horário de envio o motor leva dezenas de
+  // segundos, e segurar o redirect até lá faz o clique parecer morto — na
+  // Vercel a função ainda estoura o tempo e a resposta se perde de vez.
+  if (status === "ativa") {
+    after(() => executarCampanhas().catch(() => {}));
+  }
   terminar();
 }
 
@@ -136,8 +142,9 @@ export async function editarRitmoCampanha(formData: FormData) {
     .eq("id", id);
   if (error) terminar(`Não deu para salvar: ${error.message}`);
 
-  // Subiu o ritmo dentro da janela: o motor completa a cota nova do dia já.
-  await executarCampanhas().catch(() => {});
+  // Subiu o ritmo dentro da janela: o motor completa a cota nova do dia —
+  // depois da resposta, pelo mesmo motivo do alterarStatusCampanha.
+  after(() => executarCampanhas().catch(() => {}));
   terminar();
 }
 
