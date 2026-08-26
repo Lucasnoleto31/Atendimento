@@ -101,11 +101,11 @@ export default async function CampanhasPage({
 
   const progresso = new Map<
     string,
-    { enviados: number; hoje: number; falhas: number }
+    { enviados: number; hoje: number; falhas: number; novosDepois: number }
   >();
   await Promise.all(
     campanhas.map(async (c) => {
-      const [total, doDia, falhas] = await Promise.all([
+      const [total, doDia, falhas, novos] = await Promise.all([
         supabase
           .from("campanha_envios")
           .select("lead_id", { count: "exact", head: true })
@@ -120,11 +120,22 @@ export default async function CampanhasPage({
           .select("lead_id", { count: "exact", head: true })
           .eq("campanha_id", c.id)
           .not("erro", "is", null),
+        // Campanha concluída NÃO volta a rodar. Quem entrou na etiqueta
+        // depois disso nunca vai receber — e antes a tela chamava essa gente
+        // de "faltam", como se fosse fila andando.
+        c.status === "concluida" && c.concluida_em && c.etiqueta_id
+          ? supabase
+              .from("lead_tags")
+              .select("lead_id", { count: "exact", head: true })
+              .eq("tag_id", c.etiqueta_id)
+              .gt("criado_em", c.concluida_em)
+          : Promise.resolve({ count: 0 }),
       ]);
       progresso.set(c.id, {
         enviados: total.count ?? 0,
         hoje: doDia.count ?? 0,
         falhas: falhas.count ?? 0,
+        novosDepois: novos.count ?? 0,
       });
     }),
   );
@@ -176,18 +187,27 @@ export default async function CampanhasPage({
                   enviados: 0,
                   hoje: 0,
                   falhas: 0,
+                  novosDepois: 0,
                 };
                 const publico = c.etiqueta_id
                   ? (publicoPorEtiqueta.get(c.etiqueta_id) ?? 0)
                   : 0;
-                const faltam = Math.max(publico - dados.enviados, 0);
+                const entregues = Math.max(dados.enviados - dados.falhas, 0);
+                // Quem entrou na etiqueta depois de concluir não é fila: essa
+                // campanha não vai buscá-los. Fica de fora da conta do que
+                // "falta" e vira um aviso com ação própria.
+                const naFila = Math.max(
+                  publico - dados.enviados - dados.novosDepois,
+                  0,
+                );
+                const alvo = Math.max(publico - dados.novosDepois, 0);
                 const percentual =
-                  publico > 0
-                    ? Math.round((dados.enviados / publico) * 100)
+                  alvo > 0
+                    ? Math.min(Math.round((dados.enviados / alvo) * 100), 100)
                     : 0;
                 const previsao =
                   c.status === "ativa"
-                    ? previsaoTermino(faltam, c.por_dia, c.dias_uteis)
+                    ? previsaoTermino(naFila, c.por_dia, c.dias_uteis)
                     : null;
                 const etiqueta = etiquetas.find((e) => e.id === c.etiqueta_id);
 
@@ -355,12 +375,30 @@ export default async function CampanhasPage({
 
                     <p className="mt-1 text-sm text-neutral-600">
                       <span className="font-mono tabular-nums text-neutral-800">
-                        {dados.enviados}
+                        {entregues}
                       </span>{" "}
                       de{" "}
-                      <span className="font-mono tabular-nums">{publico}</span>{" "}
-                      enviados · {dados.hoje} hoje · faltam{" "}
-                      <span className="font-mono tabular-nums">{faltam}</span>
+                      <span className="font-mono tabular-nums">{alvo}</span>{" "}
+                      entregues
+                      {dados.falhas > 0 ? (
+                        <>
+                          {" "}
+                          ·{" "}
+                          <span className="font-mono tabular-nums text-warning">
+                            {dados.falhas}
+                          </span>{" "}
+                          recusados pela Meta
+                        </>
+                      ) : null}
+                      {c.status !== "concluida" ? (
+                        <>
+                          {" "}
+                          · {dados.hoje} hoje · faltam{" "}
+                          <span className="font-mono tabular-nums">
+                            {naFila}
+                          </span>
+                        </>
+                      ) : null}
                       {previsao ? (
                         <>
                           {" "}
@@ -370,11 +408,34 @@ export default async function CampanhasPage({
                       ) : null}
                     </p>
 
-                    {dados.falhas > 0 ? (
-                      <p className="mt-0.5 inline-flex items-center gap-0.5 text-xs text-warning">
-                        <AlertTriangle size={14} strokeWidth={1.5} aria-hidden />
-                        {dados.falhas} envio(s) recusado(s) pela Meta
-                      </p>
+                    {dados.novosDepois > 0 ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-1 rounded-md bg-warning-bg px-1.5 py-1">
+                        <AlertTriangle
+                          size={14}
+                          strokeWidth={1.5}
+                          aria-hidden
+                          className="shrink-0 text-warning"
+                        />
+                        <span className="text-sm text-warning">
+                          <span className="font-mono tabular-nums">
+                            {dados.novosDepois}
+                          </span>{" "}
+                          entraram na etiqueta depois que ela concluiu. Uma
+                          campanha concluída não volta sozinha — reabra para
+                          alcançar essa gente.
+                        </span>
+                        <form action={alterarStatusCampanha} className="ml-auto">
+                          <input type="hidden" name="id" value={c.id} />
+                          <input type="hidden" name="status" value="ativa" />
+                          <button
+                            type="submit"
+                            className="inline-flex h-[32px] items-center gap-0.5 rounded-md border border-warning bg-neutral-0 px-1.5 text-sm font-medium text-warning transition-colors duration-[120ms] hover:bg-warning-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                          >
+                            <Play size={14} strokeWidth={1.5} aria-hidden />
+                            Reabrir para os {dados.novosDepois}
+                          </button>
+                        </form>
+                      </div>
                     ) : null}
                   </li>
                 );
