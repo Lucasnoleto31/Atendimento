@@ -961,7 +961,7 @@ export default async function PagamentosPage({
                         <td className="max-w-[220px] truncate px-2">
                           {venda.lead ? (
                             <Link
-                              href={`/leads/${venda.lead.id}`}
+                              href={`/leads/${venda.lead.id}?aba=vendas`}
                               className="rounded-sm text-sm font-medium text-neutral-800 underline-offset-2 hover:text-primary-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                             >
                               {venda.lead.nome}

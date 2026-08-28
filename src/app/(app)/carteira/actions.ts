@@ -107,6 +107,8 @@ export async function abrirConversaCliente(
 import { redirect } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
 import { normalizarTelefone } from "@/lib/csv";
+import { formatarTelefone } from "@/lib/format";
+import { parsearContas } from "@/lib/clientes";
 
 /**
  * Edição da ficha do cliente — o único lugar onde dá para gravar o telefone
@@ -119,10 +121,19 @@ export async function salvarFichaCliente(formData: FormData) {
 
   const customerId = String(formData.get("customer_id") ?? "");
   if (!customerId) redirect("/carteira");
+  // A Ficha 360 (aba Cliente de /leads/[id]) usa esta MESMA action — o
+  // formulário manda o lead para a volta cair na aba certa.
+  const voltarLead = String(formData.get("voltar_lead") ?? "");
 
   function terminar(aviso: string): never {
     revalidatePath(`/carteira/${customerId}`);
     revalidatePath("/carteira");
+    if (voltarLead) {
+      revalidatePath(`/leads/${voltarLead}`);
+      redirect(
+        `/leads/${voltarLead}?aba=cliente&aviso=${encodeURIComponent(aviso)}`,
+      );
+    }
     redirect(`/carteira/${customerId}?aviso=${encodeURIComponent(aviso)}`);
   }
 
@@ -134,8 +145,19 @@ export async function salvarFichaCliente(formData: FormData) {
   if (!nome) terminar("O nome não pode ficar vazio.");
 
   const telefoneBruto = String(formData.get("telefone") ?? "").trim();
+  // O campo vem preenchido com o número atual formatado. Se o gestor NÃO
+  // mexeu nele, o telefone fica fora do update: regravar um número que o
+  // webhook guardou fora do padrão BR o corromperia (ou travaria a ficha
+  // inteira no "telefone inválido"), e o gatilho 0024 — vincular leads por
+  // telefone — redispararia a cada save.
+  const telefoneOriginal = String(formData.get("telefone_original") ?? "");
+  const telefoneIntocado =
+    telefoneBruto === telefoneOriginal ||
+    (telefoneOriginal !== "" &&
+      telefoneBruto === formatarTelefone(telefoneOriginal)) ||
+    (telefoneOriginal === "" && telefoneBruto === "");
   let telefone: string | null = null;
-  if (telefoneBruto) {
+  if (!telefoneIntocado && telefoneBruto) {
     telefone = normalizarTelefone(telefoneBruto);
     if (!telefone) {
       terminar(
@@ -157,7 +179,7 @@ export async function salvarFichaCliente(formData: FormData) {
   const service = createServiceClient();
 
   // Telefone é único entre clientes: avisa em vez de estourar erro do banco.
-  if (telefone) {
+  if (!telefoneIntocado && telefone) {
     const { data: conflito } = await service
       .from("customers")
       .select("id, nome_completo")
@@ -171,23 +193,45 @@ export async function salvarFichaCliente(formData: FormData) {
     }
   }
 
+  const mudancas: Record<string, unknown> = {
+    nome_completo: nome,
+    documento: documento || null,
+    email: email || null,
+    conta_aberta_em: abertura || null,
+    responsavel_id: responsavel || null,
+    ativo,
+  };
+  if (!telefoneIntocado) mudancas.telefone_e164 = telefone;
+
   const { error } = await service
     .from("customers")
-    .update({
-      nome_completo: nome,
-      telefone_e164: telefone,
-      documento: documento || null,
-      email: email || null,
-      conta_aberta_em: abertura || null,
-      responsavel_id: responsavel || null,
-      ativo,
-    })
+    .update(mudancas)
     .eq("id", customerId);
 
   if (error) terminar(`Não deu para salvar: ${error.message}`);
 
+  // Contas adicionais (veio do antigo atualizarCliente da ficha do lead):
+  // acrescenta sem apagar — a importação da base manda na lista completa.
+  // O texto NÃO começa com "Ficha salva": a ficha classifica esse prefixo
+  // como sucesso (banner verde), e falha parcial tem que sair como aviso.
+  const parse = parsearContas(String(formData.get("contas") ?? ""));
+  if ("erro" in parse) {
+    terminar(`Dados salvos, mas as contas não: ${parse.erro}`);
+  }
+  if (parse.contas.length > 0) {
+    const { error: erroContas } = await service
+      .from("customer_accounts")
+      .upsert(
+        parse.contas.map((conta) => ({ customer_id: customerId, conta })),
+        { onConflict: "conta", ignoreDuplicates: true },
+      );
+    if (erroContas) {
+      terminar(`Dados salvos, mas as contas não: ${erroContas.message}`);
+    }
+  }
+
   terminar(
-    telefone
+    !telefoneIntocado && telefone
       ? "Ficha salva. Com o telefone no cadastro, dá para abrir a conversa."
       : "Ficha salva.",
   );

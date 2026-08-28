@@ -547,7 +547,7 @@ export function TabelaCarteira({
                           />
                         </Link>
                         <Link
-                          href={`/leads/${linha.lead_id}`}
+                          href={`/leads/${linha.lead_id}?aba=cliente`}
                           aria-label={`Abrir ficha de ${linha.nome_completo}`}
                           title="Abrir ficha"
                           className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"

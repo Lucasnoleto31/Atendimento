@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, MessageSquare, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
@@ -56,6 +56,17 @@ export default async function ClientePage({
     ]);
 
   if (!cliente) notFound();
+
+  // Ficha 360 (6.2): cliente com atendimento tem UMA ficha só — a do lead,
+  // aba Cliente. Esta tela fica para o cliente sem lead (importado da
+  // corretora e nunca atendido) e para o inativo fora da v_carteira.
+  if (giro?.lead_id) {
+    redirect(
+      `/leads/${giro.lead_id}?aba=cliente${
+        aviso ? `&aviso=${encodeURIComponent(aviso)}` : ""
+      }`,
+    );
+  }
 
   const status = ROTULO_STATUS[cliente.status as string] ?? {
     texto: cliente.status,
@@ -221,6 +232,13 @@ export default async function ClientePage({
               className="mt-2 flex max-w-[560px] flex-col gap-2"
             >
               <input type="hidden" name="customer_id" value={cliente.id} />
+              {/* Intocado, o telefone fica fora do update (número fora do
+                  padrão BR não pode ser regravado nem travar a ficha). */}
+              <input
+                type="hidden"
+                name="telefone_original"
+                value={cliente.telefone_e164 ?? ""}
+              />
 
               <div className="flex flex-col gap-1">
                 <label
@@ -325,6 +343,17 @@ export default async function ClientePage({
                     className={CAMPO}
                   >
                     <option value="">Sem dono</option>
+                    {/* Assessor desativado segue como opção: sem ela o
+                        select cai em "Sem dono" e qualquer save removeria
+                        o dono sem ninguém pedir. */}
+                    {cliente.responsavel_id &&
+                    !((equipe ?? []) as { id: string }[]).some(
+                      (p) => p.id === cliente.responsavel_id,
+                    ) ? (
+                      <option value={cliente.responsavel_id}>
+                        Assessor atual (desativado)
+                      </option>
+                    ) : null}
                     {((equipe ?? []) as { id: string; nome: string }[]).map(
                       (p) => (
                         <option key={p.id} value={p.id}>

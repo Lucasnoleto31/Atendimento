@@ -1019,7 +1019,7 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
               {pendentes.map((v) => (
                 <li key={v.id}>
                   <Link
-                    href={v.lead ? `/leads/${v.lead.id}` : "/pagamentos"}
+                    href={v.lead ? `/leads/${v.lead.id}?aba=vendas` : "/pagamentos"}
                     className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                   >
                     <span className="min-w-0 flex-1">

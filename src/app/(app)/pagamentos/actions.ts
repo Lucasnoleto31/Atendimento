@@ -22,7 +22,7 @@ export async function registrarVenda(formData: FormData) {
   const observacao = String(formData.get("observacao") ?? "").trim();
 
   function falhar(aviso: string): never {
-    redirect(`/leads/${leadId}?aviso=${encodeURIComponent(aviso)}`);
+    redirect(`/leads/${leadId}?aba=vendas&aviso=${encodeURIComponent(aviso)}`);
   }
 
   if (!leadId) redirect("/leads");
@@ -76,7 +76,9 @@ export async function registrarVenda(formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/pagamentos");
   revalidatePath("/relatorios");
-  redirect(`/leads/${leadId}?aviso=${encodeURIComponent("Venda registrada.")}`);
+  redirect(
+    `/leads/${leadId}?aba=vendas&aviso=${encodeURIComponent("Venda registrada.")}`,
+  );
 }
 
 /** Cancela (não apaga): a operação sai dos totais mas fica no histórico. */
