@@ -355,6 +355,44 @@ export async function salvarMeta(formData: FormData) {
   terminar();
 }
 
+/**
+ * Metas mensais por TIPO (contas abertas, ativações) — inteiros, 0 = sem
+ * meta. Mesma regra da meta em R$: só o admin altera (o gatilho da 0050
+ * garante isso também no banco).
+ */
+export async function salvarMetaTipo(formData: FormData) {
+  const perfil = await exigirGestor();
+  if (perfil.papel !== "admin") terminar("Só o admin altera metas.");
+
+  const id = String(formData.get("id") ?? "");
+  const campo = String(formData.get("campo") ?? "");
+  const bruto = String(formData.get("meta") ?? "").trim();
+  const valor = Number(bruto);
+
+  if (!id || (campo !== "contas" && campo !== "ativacoes")) {
+    terminar("Meta inválida.");
+  }
+  if (!Number.isInteger(valor) || valor < 0 || valor > 10_000) {
+    terminar("Meta inválida. Use um número inteiro (0 para sem meta).");
+  }
+
+  const coluna =
+    campo === "contas" ? "meta_contas_mes" : "meta_ativacoes_mes";
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ [coluna]: valor })
+    .eq("id", id);
+  if (error) {
+    terminar(
+      error.code === "42703"
+        ? "Rode a migração 0050 para as metas por tipo existirem."
+        : amigavel(error.code, error.message),
+    );
+  }
+  terminar();
+}
+
 // ===========================================================================
 // Parâmetros de reativação
 // ===========================================================================

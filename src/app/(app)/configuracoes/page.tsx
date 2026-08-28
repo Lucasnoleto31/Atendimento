@@ -28,6 +28,7 @@ import {
   excluirRegraCadencia,
   excluirTag,
   salvarMeta,
+  salvarMetaTipo,
   salvarMetaContatos,
   salvarParametro,
 } from "./actions";
@@ -142,7 +143,9 @@ export default async function ConfiguracoesPage({
       .order("nome"),
     supabase
       .from("profiles")
-      .select("id, nome, papel, ativo, meta_mensal_centavos")
+      // "*": as metas por tipo (0050) entram quando a migração rodar, e a
+      // tela funciona igual antes dela.
+      .select("*")
       .eq("ativo", true)
       .order("nome"),
     supabase.from("settings").select("chave, valor"),
@@ -160,7 +163,12 @@ export default async function ConfiguracoesPage({
     nome: string;
     papel: string;
     meta_mensal_centavos: number;
+    meta_contas_mes?: number | null;
+    meta_ativacoes_mes?: number | null;
   }[];
+  const metasTipoDisponiveis = listaEquipe.some(
+    (v) => v.meta_contas_mes !== undefined,
+  );
 
   // Recursos da migração 0013 e templates: tolerantes a ambiente incompleto.
   const [{ data: regrasCadencia }, { data: metasContato }, templatesWhatsapp] =
@@ -719,8 +727,15 @@ export default async function ConfiguracoesPage({
           <p className="mt-1 text-sm text-neutral-600">
             Só o admin altera metas. As atuais:{" "}
             {listaEquipe
-              .map((v) => `${v.nome} ${formatarReais(v.meta_mensal_centavos)}`)
-              .join(" · ")}
+              .map(
+                (v) =>
+                  `${v.nome} ${formatarReais(v.meta_mensal_centavos)}${
+                    metasTipoDisponiveis
+                      ? ` · ${v.meta_contas_mes ?? 0} conta(s) · ${v.meta_ativacoes_mes ?? 0} ativação(ões)`
+                      : ""
+                  }`,
+              )
+              .join(" — ")}
           </p>
         ) : (
           <div className="mt-2 flex flex-col gap-1">
@@ -783,6 +798,58 @@ export default async function ConfiguracoesPage({
                       <Check size={18} strokeWidth={1.5} aria-hidden />
                     </button>
                   </form>
+                ) : null}
+                {metasTipoDisponiveis ? (
+                  <>
+                    <form action={salvarMetaTipo} className="flex items-center gap-1">
+                      <input type="hidden" name="id" value={vendedor.id} />
+                      <input type="hidden" name="campo" value="contas" />
+                      <label
+                        htmlFor={`meta-contas-${vendedor.id}`}
+                        className="text-xs text-neutral-600"
+                      >
+                        contas/mês
+                      </label>
+                      <input
+                        id={`meta-contas-${vendedor.id}`}
+                        name="meta"
+                        defaultValue={vendedor.meta_contas_mes ?? 0}
+                        inputMode="numeric"
+                        className={cn(CAMPO, "w-[64px] text-right font-mono tabular-nums")}
+                      />
+                      <button
+                        type="submit"
+                        aria-label={`Salvar meta de contas de ${vendedor.nome}`}
+                        className={BOTAO_ICONE}
+                      >
+                        <Check size={18} strokeWidth={1.5} aria-hidden />
+                      </button>
+                    </form>
+                    <form action={salvarMetaTipo} className="flex items-center gap-1">
+                      <input type="hidden" name="id" value={vendedor.id} />
+                      <input type="hidden" name="campo" value="ativacoes" />
+                      <label
+                        htmlFor={`meta-ativ-${vendedor.id}`}
+                        className="text-xs text-neutral-600"
+                      >
+                        ativações/mês
+                      </label>
+                      <input
+                        id={`meta-ativ-${vendedor.id}`}
+                        name="meta"
+                        defaultValue={vendedor.meta_ativacoes_mes ?? 0}
+                        inputMode="numeric"
+                        className={cn(CAMPO, "w-[64px] text-right font-mono tabular-nums")}
+                      />
+                      <button
+                        type="submit"
+                        aria-label={`Salvar meta de ativações de ${vendedor.nome}`}
+                        className={BOTAO_ICONE}
+                      >
+                        <Check size={18} strokeWidth={1.5} aria-hidden />
+                      </button>
+                    </form>
+                  </>
                 ) : null}
               </div>
             ))}
