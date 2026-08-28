@@ -8,7 +8,7 @@
 --                 régua canônica da Fase 2) → compraram produto.
 --   por_pessoa  — contas e ativações do MÊS CORRENTE (meta é mensal, não
 --                 acompanha o seletor de período) + tempo médio entre
---                 abertura e ativação (histórico completo da pessoa).
+--                 abertura e ativação (só contas dentro do histórico de lotes).
 --   historico   — últimos 3 meses por pessoa: comissão, contas, ativações.
 --
 -- SECURITY INVOKER de propósito: roda com o RLS de quem chama — as tabelas
