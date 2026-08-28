@@ -318,14 +318,26 @@ export function ListaConversas({
                       </span>
                     ) : null}
                     <span className="flex items-center justify-between gap-1">
+                      {/* De quem é a vez: ↩ = o lead falou por último (a vez
+                          é nossa, prévia escura); "Você:" = já respondemos. */}
                       <span
                         className={cn(
                           "truncate text-xs",
-                          item.pendente
-                            ? "font-medium text-neutral-800"
-                            : "text-neutral-600",
+                          item.pendente && "font-medium",
+                          item.previaTipo === "mensagem_recebida"
+                            ? "text-neutral-800"
+                            : item.previaTipo === "mensagem_enviada"
+                              ? "text-neutral-600"
+                              : item.pendente
+                                ? "text-neutral-800"
+                                : "text-neutral-600",
                         )}
                       >
+                        {item.previaTipo === "mensagem_recebida"
+                          ? "↩ "
+                          : item.previaTipo === "mensagem_enviada"
+                            ? "Você: "
+                            : ""}
                         {item.previa}
                       </span>
                       {item.espera ? (

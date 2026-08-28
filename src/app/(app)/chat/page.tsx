@@ -20,9 +20,10 @@ import {
   type EtapaFunil,
   type PessoaEquipe,
 } from "./ferramentas";
-import { FiltrosLista } from "./filtros";
+import { FiltrosLista, SeletorAtendente } from "./filtros";
 import { ListaConversas, type ItemConversa } from "./lista-conversas";
 import {
+  BotaoPainelLead,
   PainelLead,
   type DetalheLead,
   type GiroCliente,
@@ -34,10 +35,11 @@ export const metadata: Metadata = { title: "Chat · Zeve CRM" };
 
 // Eixo "caixa": situação da conversa. O eixo "escopo" (Minhas / Sem dono /
 // Todas) vive no parâmetro v (atendente) e combina livremente com este —
-// dá para ver "adiadas minhas", "não lidas sem dono" etc.
+// dá para ver "adiadas minhas", "resolvidas sem dono" etc. A antiga aba
+// "Não lidas" virou ordenação da Caixa (não lidas primeiro) + contagem no
+// rótulo — era filtro client-side depois do limit, mentia por omissão.
 const CAIXAS = [
   { chave: "todas", rotulo: "Caixa" },
-  { chave: "naolidas", rotulo: "Não lidas" },
   { chave: "adiadas", rotulo: "Adiadas" },
   { chave: "resolvidas", rotulo: "Resolvidas" },
 ] as const;
@@ -93,6 +95,7 @@ function urlChat(
 export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const params = await searchParams;
   // f=minhas era o filtro antigo — virou escopo (v = o próprio usuário).
+  // f=naolidas também: a caixa padrão já ordena as não lidas primeiro.
   const fBruto = params.f === "minhas" ? "todas" : params.f;
   const filtro = (
     CAIXAS.some((c) => c.chave === fBruto) ? fBruto : "todas"
@@ -157,9 +160,22 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
     let q: any = supabase
       .from("leads")
-      .select(etiquetaFiltro ? `${campos}, lead_tags!inner(tag_id)` : campos)
-      .order("ultima_interacao_em", { ascending: false, nullsFirst: false })
-      .limit(100);
+      .select(etiquetaFiltro ? `${campos}, lead_tags!inner(tag_id)` : campos);
+    // Na aba Adiadas o que importa é quem volta primeiro: prazo ascendente
+    // (só no nível "prazo" — sem a coluna 0042 vale a ordem por hora).
+    q =
+      filtro === "adiadas" && nivel === "prazo"
+        ? q
+            .order("chat_adiado_ate", { ascending: true, nullsFirst: false })
+            .order("ultima_interacao_em", {
+              ascending: false,
+              nullsFirst: false,
+            })
+        : q.order("ultima_interacao_em", {
+            ascending: false,
+            nullsFirst: false,
+          });
+    q = q.limit(100);
 
     // Na Meta a conversa é o próprio telefone (basta ter havido mensagem);
     // no Chatwoot, o vínculo com a conversa de lá.
@@ -304,10 +320,20 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       contarEscopo("sem"),
       contarEscopo(""),
     ]);
-  let conversas = conversasBrutas;
-  if (filtro === "naolidas") {
-    conversas = conversas.filter(naoLida);
-  }
+  // A vez é nossa primeiro: na Caixa, as pendentes (não lida ou prazo de
+  // adiamento vencido) sobem — o sort é estável, então dentro de cada grupo
+  // vale a ordem por hora. A contagem vai para o rótulo da célula "Caixa".
+  const pendenteDeAtencao = (c: ConversaLinha) =>
+    naoLida(c) || adiadaVencida(c);
+  const conversas =
+    filtro === "todas"
+      ? [...conversasBrutas].sort(
+          (a, b) =>
+            Number(pendenteDeAtencao(b)) - Number(pendenteDeAtencao(a)),
+        )
+      : conversasBrutas;
+  const totalNaoLidas =
+    filtro === "todas" ? conversas.filter(pendenteDeAtencao).length : 0;
   const etiquetas = (tagsAtivas ?? []) as Etiqueta[];
   const equipeAtendentes = (pessoasFiltro ?? []) as { id: string; nome: string }[];
   const minutosAlerta = Math.max(1, Number(alertaCfg?.valor ?? 15));
@@ -509,6 +535,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         anexos?: { tipo?: string | null; nome?: string | null; url?: string | null }[];
         status_envio?: string | null;
         erro_envio?: string | null;
+        sistema?: boolean | null;
+        via?: string | null;
+        campanha?: string | null;
       } | null;
       autor: { nome: string } | null;
     }[];
@@ -527,6 +556,15 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         ),
         statusEnvio: m.metadados?.status_envio ?? null,
         erroEnvio: m.metadados?.erro_envio ?? null,
+        // O que a Janela lê dos metadados: log de sistema (linha fina) e
+        // origem do envio (selo "automático" + nome da campanha).
+        metadados: m.metadados
+          ? {
+              sistema: m.metadados.sistema === true,
+              via: m.metadados.via ?? null,
+              campanha: m.metadados.campanha ?? null,
+            }
+          : null,
       }))
       .reverse();
 
@@ -590,11 +628,21 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   );
 
   // Eixo de escopo do cabeçalho: Minhas / Sem dono / Todas, com contagem.
+  // "Sem dono" nunca teve conversa (a distribuição automática dá dono a
+  // todas): a célula só aparece quando a contagem sai do zero.
   const escopos = [
     { rotulo: "Minhas", v: perfil?.id ?? "", total: totalMinhas },
-    { rotulo: "Sem dono", v: "sem", total: totalSemDono },
+    ...(totalSemDono > 0
+      ? [{ rotulo: "Sem dono", v: "sem", total: totalSemDono }]
+      : []),
     { rotulo: "Todas", v: "", total: totalTodas },
   ];
+
+  // O select "por atendente" refina o escopo Todas — em Minhas/Sem dono não
+  // faz sentido e some (antes eram dois controles gravando o MESMO parâmetro).
+  const escopoTodas =
+    atendenteFiltro === "" ||
+    (atendenteFiltro !== "sem" && atendenteFiltro !== perfil?.id);
 
   // A lista é um componente cliente (seleção múltipla), então tudo que é
   // cálculo ou classe vai resolvido daqui.
@@ -703,9 +751,18 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             </form>
           </div>
 
-          {/* Eixo 1 — escopo (de quem), com contagem. Combina com a caixa. */}
-          <nav aria-label="Filtro por atendente" className="mt-1">
-            <ul className="grid grid-cols-3 gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 p-0.5">
+          {/* Eixo 1 — escopo (de quem), com contagem. Combina com a caixa.
+              Em Todas, o select compacto ao lado refina por atendente. */}
+          <nav
+            aria-label="Filtro por atendente"
+            className="mt-1 flex items-center gap-0.5"
+          >
+            <ul
+              className={cn(
+                "grid min-w-0 flex-1 gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 p-0.5",
+                escopos.length === 3 ? "grid-cols-3" : "grid-cols-2",
+              )}
+            >
               {escopos.map((escopo) => {
                 const ativo = atendenteFiltro === escopo.v;
                 return (
@@ -734,12 +791,21 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                 );
               })}
             </ul>
+            {escopoTodas ? (
+              <SeletorAtendente
+                equipe={equipeAtendentes}
+                filtro={filtro}
+                busca={busca}
+                etiquetaAtual={etiquetaFiltro}
+                atendenteAtual={atendenteFiltro}
+              />
+            ) : null}
           </nav>
 
           {/* Eixo 2 — caixa (situação da conversa), no mesmo desenho do eixo
               de escopo: células iguais, nunca quebra linha. */}
           <nav aria-label="Caixa de conversas" className="mt-1">
-            <ul className="grid grid-cols-4 gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 p-0.5">
+            <ul className="grid grid-cols-3 gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 p-0.5">
               {CAIXAS.map((caixa) => {
                 const ativo = filtro === caixa.chave;
                 const total =
@@ -747,13 +813,25 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                     ? totalAdiadas
                     : caixa.chave === "resolvidas"
                       ? totalResolvidas
-                      : 0;
+                      : totalNaoLidas;
+                // Adiadas mostra o total REAL (são milhares — "99+" escondia
+                // o tamanho da fila que a equipe empurra com a barriga).
+                const rotuloTotal =
+                  caixa.chave === "adiadas"
+                    ? total.toLocaleString("pt-BR")
+                    : total > 99
+                      ? "99+"
+                      : String(total);
                 return (
                   <li key={caixa.chave}>
                     <Link
                       href={urlChat(caixa.chave, busca, etiquetaFiltro, atendenteFiltro)}
                       aria-current={ativo ? "page" : undefined}
-                      title={total > 0 ? `${caixa.rotulo} (${total})` : caixa.rotulo}
+                      title={
+                        total > 0
+                          ? `${caixa.rotulo} (${total.toLocaleString("pt-BR")})`
+                          : caixa.rotulo
+                      }
                       className={cn(
                         "flex h-[32px] items-center justify-center gap-0.5 rounded-sm text-xs font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
                         ativo
@@ -769,7 +847,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                             ativo ? "text-primary-500" : "text-neutral-400",
                           )}
                         >
-                          {total > 99 ? "99+" : total}
+                          {rotuloTotal}
                         </span>
                       ) : null}
                     </Link>
@@ -781,7 +859,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
 
           <FiltrosLista
             etiquetas={etiquetas}
-            equipe={equipeAtendentes}
             filtro={filtro}
             busca={busca}
             etiquetaAtual={etiquetaFiltro}
@@ -841,6 +918,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                 <UserRound size={14} strokeWidth={1.5} aria-hidden />
                 Ficha
               </Link>
+              <BotaoPainelLead />
             </header>
 
             <FerramentasConversa

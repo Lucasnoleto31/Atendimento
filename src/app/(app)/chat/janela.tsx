@@ -78,6 +78,16 @@ const FORMATO_DIA = new Intl.DateTimeFormat("pt-BR", {
 
 export type Anexo = { tipo: string; url: string; nome?: string | null };
 
+/** O que a conversa precisa dos metadados da interação (page.tsx repassa). */
+export type MetadadosMensagem = {
+  /** Nota gerada por ação (adiar/resolver/atribuir) — vira linha de sistema. */
+  sistema?: boolean;
+  /** Por onde a mensagem saiu: "crm" (manual), "campanha", "cadencia"… */
+  via?: string | null;
+  /** Nome da campanha, quando o envio veio de uma. */
+  campanha?: string | null;
+};
+
 export type Mensagem = {
   id: string;
   tipo: "mensagem_recebida" | "mensagem_enviada" | "nota";
@@ -88,6 +98,7 @@ export type Mensagem = {
   statusEnvio?: string | null;
   erroEnvio?: string | null;
   pendente?: boolean;
+  metadados?: MetadadosMensagem | null;
 };
 
 export type MensagemPadrao = { id: string; titulo: string; corpo: string };
@@ -99,6 +110,24 @@ const horario = (iso: string) =>
     hour: "2-digit",
     minute: "2-digit",
   });
+
+// Notas geradas por ação (adiar/resolver/atribuir) nascem com
+// metadados.sistema = true; as antigas não têm o campo — reconhece pelo
+// texto padrão que as actions sempre gravaram.
+const PADROES_NOTA_SISTEMA = [
+  /^Conversa (adiada|resolvida|reaberta)/,
+  /^Atendimento atribuído/,
+  /^Abriu conta na corretora/,
+];
+
+const ehNotaSistema = (mensagem: Mensagem) =>
+  mensagem.tipo === "nota" &&
+  (mensagem.metadados?.sistema === true ||
+    PADROES_NOTA_SISTEMA.some((p) => p.test(mensagem.conteudo ?? "")));
+
+// Envio que saiu de um robô, não da mão do atendente — ganha o selo
+// "automático" na bolha (auditoria: ~1.600 envios indistinguíveis).
+const VIAS_AUTOMACAO = new Set(["campanha", "cadencia", "disparo", "sync"]);
 
 /**
  * As bolhas da conversa, memoizadas: cada tecla no compositor muda o estado
@@ -130,6 +159,30 @@ const Bolhas = memo(function Bolhas({
               const dia = rotuloDia(mensagem.criado_em);
               const mostraDia =
                 i === 0 || rotuloDia(mensagens[i - 1].criado_em) !== dia;
+              // Log de sistema não é conversa: vira uma linha fina no meio do
+              // fluxo — a bolha âmbar fica só para nota escrita por gente.
+              if (ehNotaSistema(mensagem)) {
+                return (
+                  <Fragment key={mensagem.id}>
+                    {mostraDia ? (
+                      <span className="self-center rounded-sm bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
+                        {dia}
+                      </span>
+                    ) : null}
+                    <p className="max-w-[75%] self-center px-1 text-center text-xs text-neutral-400">
+                      {mensagem.conteudo}
+                      {mensagem.autor ? ` — ${mensagem.autor}` : ""}
+                      <span className="font-mono tabular-nums">
+                        {" · "}
+                        {horario(mensagem.criado_em)}
+                      </span>
+                    </p>
+                  </Fragment>
+                );
+              }
+              const automatica =
+                enviada &&
+                VIAS_AUTOMACAO.has(mensagem.metadados?.via ?? "");
               return (
                 <Fragment key={mensagem.id}>
                   {mostraDia ? (
@@ -151,6 +204,14 @@ const Bolhas = memo(function Bolhas({
                     {nota ? (
                       <p className="text-xs font-medium tracking-[0.06em] text-accent-700 uppercase">
                         Nota privada
+                      </p>
+                    ) : null}
+                    {automatica ? (
+                      <p className="text-xs text-neutral-400">
+                        automático
+                        {mensagem.metadados?.campanha
+                          ? ` · ${mensagem.metadados.campanha}`
+                          : ""}
                       </p>
                     ) : null}
                     {anexos.length > 0 ? (

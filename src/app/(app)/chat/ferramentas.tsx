@@ -45,9 +45,9 @@ const ITEM_MENU =
 
 /**
  * Barra da conversa aberta, numa linha: etapa, atendente e etiquetas à
- * esquerda; a ação do momento à direita. O que é raro (não lida, adiar,
- * reabrir) fica no menu — antes eram três blocos empilhados competindo
- * pela atenção de quem só queria responder.
+ * esquerda; a ação do momento à direita. Adiar é o primário (split button:
+ * clique adia até amanhã, a setinha abre os outros prazos), Resolver é o
+ * secundário ao lado, e o raro (marcar não lida) fica no menu "⋯".
  */
 export function FerramentasConversa({
   leadId,
@@ -79,7 +79,9 @@ export function FerramentasConversa({
 }) {
   const [pendente, iniciar] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
-  const [aberto, setAberto] = useState<"etiquetas" | "mais" | null>(null);
+  const [aberto, setAberto] = useState<"etiquetas" | "adiar" | "mais" | null>(
+    null,
+  );
   const [expandidoMobile, setExpandidoMobile] = useState(false);
   const router = useRouter();
 
@@ -296,7 +298,9 @@ export function FerramentasConversa({
           ) : null}
         </div>
 
-        {/* Ação do momento + o resto no menu. */}
+        {/* Ação do momento: Adiar é o botão primário (é o que a equipe mais
+            faz — 1.801 adiamentos vs 161 resolver em 30d); Resolver fica de
+            secundário ao lado; o raro vive no menu "⋯". */}
         <span className="ml-auto inline-flex items-center gap-0.5">
           {situacao ? (
             <span
@@ -308,6 +312,97 @@ export function FerramentasConversa({
               {situacao.texto}
             </span>
           ) : null}
+
+          {adiada ? (
+            <button
+              type="button"
+              disabled={pendente}
+              onClick={() => executar(() => reativarConversa(leadId))}
+              className="inline-flex h-[32px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Inbox
+                size={14}
+                strokeWidth={1.5}
+                aria-hidden
+                className="text-accent-700"
+              />
+              Trazer de volta
+            </button>
+          ) : (
+            /* Split button: clicar adia até amanhã (o prazo padrão); a
+               setinha abre os outros prazos. Um clique, não dois. */
+            <div className="relative inline-flex">
+              <button
+                type="button"
+                disabled={pendente}
+                title="Some da caixa e volta amanhã (ou antes, se o lead responder)"
+                onClick={() =>
+                  executar(
+                    () => adiarConversa(leadId, "amanha"),
+                    voltarParaLista,
+                  )
+                }
+                className="inline-flex h-[32px] items-center gap-0.5 rounded-l-md bg-primary-600 px-1.5 text-sm font-medium text-neutral-0 transition-colors duration-[120ms] hover:bg-primary-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Clock size={14} strokeWidth={1.5} aria-hidden />
+                Adiar
+              </button>
+              <button
+                type="button"
+                disabled={pendente}
+                aria-label="Outros prazos para adiar"
+                aria-expanded={aberto === "adiar"}
+                onClick={() => setAberto(aberto === "adiar" ? null : "adiar")}
+                className="inline-flex h-[32px] w-[24px] items-center justify-center rounded-r-md border-l border-primary-700 bg-primary-600 text-neutral-0 transition-colors duration-[120ms] hover:bg-primary-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <ChevronDown size={14} strokeWidth={1.5} aria-hidden />
+              </button>
+
+              {aberto === "adiar" ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Fechar prazos"
+                    tabIndex={-1}
+                    onClick={() => setAberto(null)}
+                    className="fixed inset-0 z-10 cursor-default"
+                  />
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-[calc(100%+4px)] z-20 w-[184px] overflow-hidden rounded-[10px] border border-neutral-200 bg-neutral-0 py-0.5 shadow-lg"
+                  >
+                    <p className="px-1.5 pb-0.5 pt-1 text-xs uppercase tracking-[0.06em] text-neutral-600">
+                      Adiar até
+                    </p>
+                    {OPCOES_ADIAR.map((opcao) => (
+                      <button
+                        key={opcao.prazo}
+                        type="button"
+                        role="menuitem"
+                        disabled={pendente}
+                        title="Some da caixa e volta quando o prazo vencer (ou o lead responder)"
+                        onClick={() =>
+                          executar(
+                            () => adiarConversa(leadId, opcao.prazo),
+                            voltarParaLista,
+                          )
+                        }
+                        className={ITEM_MENU}
+                      >
+                        <Clock
+                          size={16}
+                          strokeWidth={1.5}
+                          aria-hidden
+                          className="text-neutral-400"
+                        />
+                        {opcao.rotulo}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          )}
 
           {temConversa ? (
             <button
@@ -324,12 +419,7 @@ export function FerramentasConversa({
                   estaResolvida ? undefined : voltarParaLista,
                 )
               }
-              className={cn(
-                "inline-flex h-[32px] items-center gap-0.5 rounded-md px-1.5 text-sm font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60",
-                estaResolvida
-                  ? "border border-neutral-300 bg-neutral-0 text-neutral-800 hover:bg-neutral-100"
-                  : "bg-primary-600 text-neutral-0 hover:bg-primary-700",
-              )}
+              className="inline-flex h-[32px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {estaResolvida ? (
                 <RotateCcw size={14} strokeWidth={1.5} aria-hidden />
@@ -381,56 +471,6 @@ export function FerramentasConversa({
                     />
                     Marcar como não lida
                   </button>
-
-                  {adiada ? (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={pendente}
-                      onClick={() => executar(() => reativarConversa(leadId))}
-                      className={ITEM_MENU}
-                    >
-                      <Inbox
-                        size={16}
-                        strokeWidth={1.5}
-                        aria-hidden
-                        className="text-accent-700"
-                      />
-                      Trazer de volta agora
-                    </button>
-                  ) : (
-                    <>
-                      {/* Some da caixa e volta quando o prazo vencer — ou
-                          antes, se o lead responder. */}
-                      <p className="px-1.5 pb-0.5 pt-1 text-xs uppercase tracking-[0.06em] text-neutral-600">
-                        Adiar até
-                      </p>
-                      {OPCOES_ADIAR.map((opcao) => (
-                        <button
-                          key={opcao.prazo}
-                          type="button"
-                          role="menuitem"
-                          disabled={pendente}
-                          title="Some da caixa e volta quando o prazo vencer (ou o lead responder)"
-                          onClick={() =>
-                            executar(
-                              () => adiarConversa(leadId, opcao.prazo),
-                              voltarParaLista,
-                            )
-                          }
-                          className={ITEM_MENU}
-                        >
-                          <Clock
-                            size={16}
-                            strokeWidth={1.5}
-                            aria-hidden
-                            className="text-neutral-400"
-                          />
-                          {opcao.rotulo}
-                        </button>
-                      ))}
-                    </>
-                  )}
                 </div>
               </>
             ) : null}

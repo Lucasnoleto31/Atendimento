@@ -714,7 +714,9 @@ export async function definirResponsavelChat(
       ? `Atendimento atribuído a ${responsavel.nome}`
       : "Atendimento ficou sem atendente",
     autor_id: perfil.id,
-    metadados: { via: "crm" },
+    // sistema: log de ação, não nota escrita — a conversa mostra como linha
+    // fina, não como bolha de "Nota privada".
+    metadados: { via: "crm", sistema: true },
   });
 
   // Espelho no Chatwoot é melhor esforço: falha lá não desfaz o CRM.
@@ -839,7 +841,7 @@ export async function alterarStatusConversaChat(
     conteudo:
       status === "resolved" ? "Conversa resolvida" : "Conversa reaberta",
     autor_id: perfil.id,
-    metadados: { via: "crm" },
+    metadados: { via: "crm", sistema: true },
   });
 
   revalidatePath("/chat");
@@ -1088,7 +1090,7 @@ export async function adiarConversa(
       ? `Conversa adiada até ${formatarData(ate)}`
       : "Conversa adiada até a próxima resposta do lead",
     autor_id: perfil.id,
-    metadados: { via: "crm" },
+    metadados: { via: "crm", sistema: true },
   });
 
   revalidatePath("/chat");
@@ -1177,7 +1179,7 @@ async function emMassa(
         tipo: "nota" as const,
         conteudo: nota,
         autor_id: perfil.id,
-        metadados: { via: "crm", em_massa: true },
+        metadados: { via: "crm", em_massa: true, sistema: true },
       })),
     );
   }
