@@ -793,6 +793,35 @@ export function Janela({
     return () => window.removeEventListener("paste", aoColar);
   }, [modo, temConversa, restanteJanela, adicionarArquivos]);
 
+  // Arrastar um print para a janela: sem interceptar, o navegador NAVEGA
+  // para o arquivo ("abre a imagem") e derruba a conversa. O preventDefault
+  // vale SEMPRE que houver arquivo no arrasto — anexar é que depende das
+  // mesmas condições do colar (modo, conversa, janela de 24h).
+  useEffect(() => {
+    const temArquivo = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    const aoArrastarSobre = (e: DragEvent) => {
+      if (temArquivo(e)) e.preventDefault();
+    };
+    const aoSoltar = (e: DragEvent) => {
+      if (!temArquivo(e)) return;
+      e.preventDefault();
+      if (modo === "nota" || !temConversa) return;
+      if (restanteJanela === null || restanteJanela <= 0) return;
+      const soltos = Array.from(e.dataTransfer?.files ?? []);
+      if (soltos.length === 0) return;
+      const dt = new DataTransfer();
+      soltos.forEach((arquivo) => dt.items.add(arquivo));
+      adicionarArquivos(dt.files);
+    };
+    window.addEventListener("dragover", aoArrastarSobre);
+    window.addEventListener("drop", aoSoltar);
+    return () => {
+      window.removeEventListener("dragover", aoArrastarSobre);
+      window.removeEventListener("drop", aoSoltar);
+    };
+  }, [modo, temConversa, restanteJanela, adicionarArquivos]);
+
   // Janela de 24h do WhatsApp: fora dela (ou se o lead nunca respondeu), a
   // Meta aceita a mensagem livre e DESCARTA depois — enviar é gritar no vazio.
   // O composer trava e aponta o template, que é o único que chega.
