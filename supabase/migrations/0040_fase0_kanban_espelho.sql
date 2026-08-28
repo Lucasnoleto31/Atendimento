@@ -315,11 +315,10 @@ begin
     limit 1;
 
     if lead_alvo.id is not null then
-      -- Reabre o lead existente na etapa de Resgate, com dono garantido.
+      -- Reabre o lead existente SEM mexer na coluna: se ele está na fila de
+      -- Ativação, o resgate não pode roubá-lo de lá — o quadro é do espelho.
       update leads
-      set stage_id = etapa_resgate,
-          entrou_na_etapa_em = now(),
-          entrada_motivo = motivo_atual,
+      set entrada_motivo = motivo_atual,
           responsavel_id = coalesce(leads.responsavel_id, cand.dono),
           status = case when status = 'ganho' then status
                         else 'em_atendimento' end,
