@@ -74,9 +74,26 @@ async function graph<T>(caminho: string, init?: RequestInit): Promise<T> {
 
   const json = (await resposta.json().catch(() => null)) as T | null;
   if (!resposta.ok) {
-    const detalhe =
-      (json as { error?: { message?: string } } | null)?.error?.message ??
-      `HTTP ${resposta.status}`;
+    // error_user_msg e o subcode carregam o motivo REAL — "Invalid
+    // parameter" sozinho não diz nada.
+    const erro = (
+      json as {
+        error?: {
+          message?: string;
+          error_user_msg?: string;
+          error_subcode?: number;
+        };
+      } | null
+    )?.error;
+    const detalhe = erro
+      ? [
+          erro.message,
+          erro.error_user_msg,
+          erro.error_subcode ? `subcode ${erro.error_subcode}` : null,
+        ]
+          .filter(Boolean)
+          .join(" — ")
+      : `HTTP ${resposta.status}`;
     throw new Error(`Meta: ${detalhe}`);
   }
   return json as T;
@@ -191,6 +208,9 @@ export async function criarTemplateResumoMeta(): Promise<string> {
         name: "resumo_diario",
         language: "pt_BR",
         category: "UTILITY",
+        // Se o classificador da Meta discordar da categoria, recategoriza
+        // em vez de recusar a criação inteira.
+        allow_category_change: true,
         components: [
           {
             type: "BODY",
