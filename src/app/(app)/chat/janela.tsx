@@ -471,6 +471,7 @@ export function Janela({
   marketingBloqueado,
   hojeChave,
   ontemChave,
+  aoEnviarComSucesso,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -482,6 +483,8 @@ export function Janela({
   marketingBloqueado: boolean;
   hojeChave: string;
   ontemChave: string;
+  /** Chamado quando um envio conclui com sucesso (painel da /hoje usa). */
+  aoEnviarComSucesso?: () => void;
 }) {
   const [estado, formAction, enviandoAcao] = useActionState(
     enviarMensagemLead,
@@ -607,6 +610,7 @@ export function Janela({
     if (estado.ok) {
       setBackupEnvio(null);
       setAvisoArquivo(null);
+      aoEnviarComSucesso?.();
       if (estado.interacao) {
         // O eco do Realtime desta mensagem não custa refresh…
         ignorarEcoRealtime(estado.interacao.id);

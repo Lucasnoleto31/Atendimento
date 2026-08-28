@@ -12,6 +12,7 @@ import {
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { TarefaDoDia, type TarefaDia } from "./tarefa-do-dia";
+import { BotaoSoneca, ItemConversa, PainelConversa } from "./painel-conversa";
 
 export const metadata: Metadata = { title: "Hoje · Zeve CRM" };
 
@@ -123,6 +124,21 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
     : perfil.nome;
 
   const hoje = agoraEmBrasilia();
+
+  // Itens sonecados pelo alvo (fase 5): somem das filas até amanhã de manhã.
+  // Consulta minúscula ANTES das demais — os ids entram como filtro. Sem a
+  // migração 0049 vem erro e as filas seguem completas.
+  const { data: sonecas } = await supabase
+    .from("hoje_soneca")
+    .select("tipo, alvo")
+    .eq("pessoa", alvoId)
+    .gt("ate", new Date().toISOString());
+  const sonecaAtivacao = (sonecas ?? [])
+    .filter((x) => x.tipo === "ativacao")
+    .map((x) => x.alvo);
+  const sonecaRisco = new Set(
+    (sonecas ?? []).filter((x) => x.tipo === "risco").map((x) => x.alvo),
+  );
   // Brasil não tem mais horário de verão — o deslocamento é fixo (lib/format).
   const fimDeHoje = `${hoje.dia}T23:59:59-03:00`;
   // eslint-disable-next-line react-hooks/purity -- Server Component: um render por request
@@ -210,12 +226,21 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
     (async () => {
       const campos =
         "lead_id, nome, telefone_e164, dias_conta_aberta, ultima_interacao_em, etiquetas";
-      const base = () =>
-        supabase
+      const base = () => {
+        let q = supabase
           .from("v_leads_listas")
           .select(campos, { count: "exact" })
           .or("primeiro_giro_recente.is.true,sem_giro_ja_conversou.is.true")
           .eq("responsavel_id", alvoId);
+        if (sonecaAtivacao.length > 0) {
+          q = q.not(
+            "lead_id",
+            "in",
+            `(${sonecaAtivacao.join(",")})`,
+          );
+        }
+        return q;
+      };
 
       const semRoteiro = await base()
         .not("etiquetas", "cs", `{"${ETIQUETA_ROTEIRO}"}`)
@@ -347,6 +372,7 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   // Critério exato do risco + ordenação pelo maior dinheiro em risco.
   const riscoTodos = ((riscoBruto ?? []) as unknown as LinhaRisco[])
     .filter((c) => {
+      if (sonecaRisco.has(c.customer_id)) return false;
       const atual = c.lotes_30d ?? 0;
       const anterior = c.lotes_30d_anterior ?? 0;
       return atual === 0 || (anterior > 0 && atual < anterior * 0.75);
@@ -691,10 +717,14 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
           <>
             <ul className="mt-1 flex flex-col gap-1">
               {espera.map((l) => (
-                <li key={l.lead_id}>
-                  <Link
-                    href={`/chat?lead=${l.lead_id}`}
-                    className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                <li
+                  key={l.lead_id}
+                  className="flex items-center gap-0.5 rounded-md border border-neutral-200 bg-neutral-0 pr-0.5 transition-colors duration-[120ms] hover:border-neutral-300"
+                >
+                  <ItemConversa
+                    leadId={l.lead_id}
+                    nome={l.nome}
+                    className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                   >
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1">
@@ -733,7 +763,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
                       aria-hidden
                       className="shrink-0 text-neutral-400"
                     />
-                  </Link>
+                  </ItemConversa>
+                  <BotaoSoneca tipo="conversa" alvo={l.lead_id} pessoa={alvoId} />
                 </li>
               ))}
             </ul>
@@ -774,10 +805,14 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
           <>
             <ul className="mt-1 flex flex-col gap-1">
               {ativacao.map((l) => (
-                <li key={l.lead_id}>
-                  <Link
-                    href={`/chat?lead=${l.lead_id}`}
-                    className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                <li
+                  key={l.lead_id}
+                  className="flex items-center gap-0.5 rounded-md border border-neutral-200 bg-neutral-0 pr-0.5 transition-colors duration-[120ms] hover:border-neutral-300"
+                >
+                  <ItemConversa
+                    leadId={l.lead_id}
+                    nome={l.nome}
+                    className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                   >
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1">
@@ -818,7 +853,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
                       aria-hidden
                       className="shrink-0 text-neutral-400"
                     />
-                  </Link>
+                  </ItemConversa>
+                  <BotaoSoneca tipo="ativacao" alvo={l.lead_id} pessoa={alvoId} />
                 </li>
               ))}
             </ul>
@@ -858,57 +894,32 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
           <>
             <ul className="mt-1 flex flex-col gap-1">
               {risco.map((c) => {
-                const atual = c.lotes_30d ?? 0;
-                const anterior = c.lotes_30d_anterior ?? 0;
-                const variacao =
-                  anterior > 0
-                    ? Math.round(((atual - anterior) / anterior) * 100)
-                    : null;
                 return (
-                  <li key={c.customer_id}>
-                    <Link
-                      href={
-                        c.lead_id
-                          ? `/chat?lead=${c.lead_id}`
-                          : `/carteira/${c.customer_id}`
-                      }
-                      className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-neutral-800">
-                          {c.nome_completo}
-                        </span>
-                        <span className="block font-mono text-xs text-neutral-600 tabular-nums">
-                          {atual} lote(s) 30d
-                          {variacao !== null ? (
-                            <span
-                              className={cn(
-                                "ml-0.5",
-                                variacao < 0 ? "text-danger" : "text-neutral-600",
-                              )}
-                            >
-                              ({variacao > 0 ? "+" : ""}
-                              {variacao}%)
-                            </span>
-                          ) : null}
-                          {c.dias_sem_giro !== null && c.dias_sem_giro > 0
-                            ? ` · sem giro há ${c.dias_sem_giro}d`
-                            : ""}
-                          {c.ultima_interacao_em
-                            ? ` · último contato ${horaOuData(c.ultima_interacao_em)}`
-                            : " · nunca contatado"}
-                        </span>
-                      </span>
-                      <span className="shrink-0 font-mono text-xs font-medium text-neutral-800 tabular-nums">
-                        {formatarReais(c.receita_30d_centavos ?? 0)}
-                      </span>
-                      <MessageSquare
-                        size={16}
-                        strokeWidth={1.5}
-                        aria-hidden
-                        className="shrink-0 text-neutral-400"
-                      />
-                    </Link>
+                  <li
+                    key={c.customer_id}
+                    className="flex items-center gap-0.5 rounded-md border border-neutral-200 bg-neutral-0 pr-0.5 transition-colors duration-[120ms] hover:border-neutral-300"
+                  >
+                    {c.lead_id ? (
+                      <ItemConversa
+                        leadId={c.lead_id}
+                        nome={c.nome_completo}
+                        className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                      >
+                        <ConteudoRisco c={c} />
+                      </ItemConversa>
+                    ) : (
+                      <Link
+                        href={`/carteira/${c.customer_id}`}
+                        className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                      >
+                        <ConteudoRisco c={c} />
+                      </Link>
+                    )}
+                    <BotaoSoneca
+                      tipo="risco"
+                      alvo={c.customer_id}
+                      pessoa={alvoId}
+                    />
                   </li>
                 );
               })}
@@ -988,7 +999,55 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
           (v_leads_listas) — rode-a no SQL Editor do Supabase.
         </p>
       ) : null}
+
+      <PainelConversa />
     </div>
+  );
+}
+
+/** O conteúdo da linha de Giro em risco — igual dentro do painel ou do link. */
+function ConteudoRisco({ c }: { c: LinhaRisco }) {
+  const atual = c.lotes_30d ?? 0;
+  const anterior = c.lotes_30d_anterior ?? 0;
+  const variacao =
+    anterior > 0 ? Math.round(((atual - anterior) / anterior) * 100) : null;
+  return (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-neutral-800">
+          {c.nome_completo}
+        </span>
+        <span className="block font-mono text-xs text-neutral-600 tabular-nums">
+          {atual} lote(s) 30d
+          {variacao !== null ? (
+            <span
+              className={cn(
+                "ml-0.5",
+                variacao < 0 ? "text-danger" : "text-neutral-600",
+              )}
+            >
+              ({variacao > 0 ? "+" : ""}
+              {variacao}%)
+            </span>
+          ) : null}
+          {c.dias_sem_giro !== null && c.dias_sem_giro > 0
+            ? ` · sem giro há ${c.dias_sem_giro}d`
+            : ""}
+          {c.ultima_interacao_em
+            ? ` · último contato ${horaOuData(c.ultima_interacao_em)}`
+            : " · nunca contatado"}
+        </span>
+      </span>
+      <span className="shrink-0 font-mono text-xs font-medium text-neutral-800 tabular-nums">
+        {formatarReais(c.receita_30d_centavos ?? 0)}
+      </span>
+      <MessageSquare
+        size={16}
+        strokeWidth={1.5}
+        aria-hidden
+        className="shrink-0 text-neutral-400"
+      />
+    </>
   );
 }
 
