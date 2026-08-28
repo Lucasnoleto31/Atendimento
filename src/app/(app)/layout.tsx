@@ -6,6 +6,7 @@ import { processarCadencia } from "@/lib/cadencia";
 import { processarAgendadas } from "@/lib/agendadas";
 import { processarCampanhas } from "@/lib/campanhas";
 import { garantirGiroFresco } from "@/lib/giro";
+import { sincronizarGenial } from "@/lib/genial";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const supabase = await createClient();
@@ -59,6 +60,9 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   // externo). Daqui, QUALQUER página aberta por QUALQUER pessoa alimenta os
   // motores — o freio de 5 min dentro de cada processador evita repetição.
   after(async () => {
+    // Genial antes do giro: se o dia trouxe arquivo novo, o giro que os
+    // motores leem já sai atualizado por ele.
+    await sincronizarGenial().catch(() => {});
     await garantirGiroFresco();
     await processarCadencia().catch(() => {});
     await processarAgendadas().catch(() => {});

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { formatarData } from "@/lib/format";
 import { perfilAtual } from "@/lib/auth";
+import { genialConfigurada } from "@/lib/genial";
 import { ImportForm } from "./import-form";
 import { ExcluirImportacao } from "./excluir-import";
 import { KanbanConfig, type PipelineComEtapas } from "./kanban-config";
@@ -212,6 +213,13 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
           rotulo="Importar leads"
         />
       </div>
+
+      <p className="mt-2 text-xs text-neutral-600">
+        Sincronização Genial:{" "}
+        {genialConfigurada()
+          ? "ativa — busca automática 1×/dia"
+          : "inativa — configure as variáveis GENIAL_S3_* na Vercel"}
+      </p>
 
       {perfil.papel === "admin" ? (
         <Usuarios
