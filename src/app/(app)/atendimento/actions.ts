@@ -100,6 +100,9 @@ export async function marcarPerdido(
       revalidatePath("/atendimento");
       return {};
     }
+    if (error.code === "23514") {
+      return { erro: "Rode a migração 0061 para este motivo existir." };
+    }
     return { erro: "Não foi possível marcar a perda." };
   }
 

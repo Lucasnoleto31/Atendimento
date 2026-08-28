@@ -9,6 +9,7 @@
  */
 export const MOTIVOS_PERDA = {
   sumiu: "Sumiu — parou de responder",
+  nunca_respondeu: "Nunca respondeu",
   concorrente: "Fechou com concorrente",
   sem_interesse: "Não quer abrir conta",
   sem_perfil: "Sem capital ou sem perfil agora",

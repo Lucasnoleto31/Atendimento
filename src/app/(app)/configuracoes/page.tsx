@@ -37,6 +37,7 @@ import {
   salvarWhatsapp,
   criarTemplateResumo,
 } from "./actions";
+import { AnexosMensagem, type AnexoMensagem } from "./anexos-mensagem";
 
 export const metadata: Metadata = { title: "Configurações · Zeve CRM" };
 
@@ -123,12 +124,15 @@ export default async function ConfiguracoesPage({
 
   const params = await searchParams;
   const aviso = typeof params.aviso === "string" ? params.aviso : null;
+  // Carimbo do terminar(): muda a cada volta de action e serve de key para
+  // resetar os formulários com estado de cliente (anexos das mensagens).
+  const carimboVolta = typeof params.t === "string" ? params.t : "0";
 
   const supabase = await createClient();
   const [
     { data: produtos },
     { data: tags },
-    { data: mensagens },
+    { data: mensagens, comAnexos: anexosMensagemDisponiveis },
     { data: instancias },
     { data: equipe },
     { data: parametros },
@@ -144,10 +148,21 @@ export default async function ConfiguracoesPage({
       .then((r) =>
         r.error ? supabase.from("tags").select("id, nome").order("nome") : r,
       ),
+    // Anexos das prontas (0060); sem a migração, cai para o formato antigo —
+    // e a marca comAnexos vem da CONSULTA (lista vazia não prova nada).
     supabase
       .from("quick_replies")
-      .select("id, titulo, corpo")
-      .order("titulo"),
+      .select("id, titulo, corpo, anexos")
+      .order("titulo")
+      .then((r) =>
+        r.error
+          ? supabase
+              .from("quick_replies")
+              .select("id, titulo, corpo")
+              .order("titulo")
+              .then((r2) => ({ ...r2, comAnexos: false }))
+          : { ...r, comAnexos: true },
+      ),
     supabase
       .from("whatsapp_instances")
       .select("id, nome, telefone_e164, vendedor_id, ativa, meta_phone_number_id")
@@ -489,10 +504,15 @@ export default async function ConfiguracoesPage({
         </p>
 
         <div className="mt-2 grid gap-2 lg:grid-cols-2">
-          {((mensagens ?? []) as { id: string; titulo: string; corpo: string }[]).map(
+          {((mensagens ?? []) as {
+            id: string;
+            titulo: string;
+            corpo: string;
+            anexos?: AnexoMensagem[] | null;
+          }[]).map(
             (msg) => (
               <form
-                key={msg.id}
+                key={`${msg.id}-${carimboVolta}`}
                 action={atualizarMensagem}
                 className="flex flex-col gap-1 rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
               >
@@ -535,11 +555,18 @@ export default async function ConfiguracoesPage({
                   rows={3}
                   className="rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                 />
+                {anexosMensagemDisponiveis ? (
+                  <AnexosMensagem
+                    idBase={msg.id}
+                    existentes={msg.anexos ?? []}
+                  />
+                ) : null}
               </form>
             ),
           )}
 
           <form
+            key={`nova-${carimboVolta}`}
             action={criarMensagem}
             className="flex flex-col gap-1 rounded-lg border border-dashed border-neutral-300 bg-neutral-50 p-2"
           >
@@ -573,6 +600,9 @@ export default async function ConfiguracoesPage({
               rows={3}
               className="rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
             />
+            {anexosMensagemDisponiveis ? (
+              <AnexosMensagem idBase="nova" existentes={[]} />
+            ) : null}
           </form>
         </div>
       </section>

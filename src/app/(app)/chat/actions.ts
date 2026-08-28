@@ -5,6 +5,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { avancarAposDisparo } from "@/lib/kanban";
 import { marcarRoteiroEnviado } from "@/lib/ativacao";
 import { perfilAtual } from "@/lib/auth";
+import { ehMotivoPerda } from "@/lib/perda";
 import { formatarData } from "@/lib/format";
 import {
   enviarMidiaMeta,
@@ -701,6 +702,230 @@ export async function alterarEtapaChat(
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/atendimento");
   return { ok: true };
+}
+
+/**
+ * Marcar perdido DIRETO DO CHAT (a equipe vive aqui, não no kanban): mesmo
+ * contrato do quadro — motivo obrigatório, detalhe opcional — e o lead vai
+ * para a última etapa final do kanban padrão (a coluna Perdido).
+ */
+export async function marcarPerdidoChat(
+  leadId: string,
+  motivo: string,
+  detalhe: string,
+): Promise<ResultadoEnvio> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!leadId) return { erro: "Lead não informado." };
+  if (!ehMotivoPerda(motivo)) return { erro: "Escolha o motivo da perda." };
+
+  const supabase = await createClient();
+  let { data: etapaFinal } = await supabase
+    .from("pipeline_stages")
+    .select("id, pipeline:pipelines!inner(padrao)")
+    .eq("pipeline.padrao", true)
+    .eq("is_final", true)
+    .order("ordem", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!etapaFinal) {
+    // Kanban sem etapa marcada como final (config mexida no Admin): tenta
+    // pelo nome antes de deixar o card parado numa coluna viva.
+    const porNome = await supabase
+      .from("pipeline_stages")
+      .select("id, pipeline:pipelines!inner(padrao)")
+      .eq("pipeline.padrao", true)
+      .ilike("nome", "perdid%")
+      .limit(1)
+      .maybeSingle();
+    etapaFinal = porNome.data;
+  }
+
+  const texto = detalhe.trim().slice(0, 280);
+  const mudancas: Record<string, unknown> = {
+    status: "perdido",
+    perda_motivo: motivo,
+    perda_detalhe: texto || null,
+  };
+  if (etapaFinal?.id) mudancas.stage_id = etapaFinal.id;
+
+  const { error } = await supabase
+    .from("leads")
+    .update(mudancas)
+    .eq("id", leadId);
+  if (error) {
+    // Banco ainda sem a 0038 (motivos): perde do jeito antigo.
+    if (error.code === "42703" || error.code === "PGRST204") {
+      const { error: erroSimples } = await supabase
+        .from("leads")
+        .update({
+          status: "perdido",
+          ...(etapaFinal?.id ? { stage_id: etapaFinal.id } : {}),
+        })
+        .eq("id", leadId);
+      if (erroSimples) return { erro: "Não foi possível marcar como perdido." };
+    } else if (error.code === "23514") {
+      // Constraint da 0038 sem o motivo novo: aponta a migração certa.
+      return { erro: "Rode a migração 0061 para este motivo existir." };
+    } else {
+      return { erro: error.message };
+    }
+  }
+
+  revalidatePath("/chat");
+  revalidatePath("/atendimento");
+  revalidatePath("/hoje");
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/**
+ * Reabrir um lead perdido a partir do chat: volta para "em atendimento",
+ * limpa o motivo (o gatilho t01 cuida do carimbo) e devolve o card à
+ * primeira etapa — quando o lead responder, o espelho o move sozinho.
+ */
+export async function reabrirLeadChat(leadId: string): Promise<ResultadoEnvio> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!leadId) return { erro: "Lead não informado." };
+
+  const supabase = await createClient();
+
+  // O destino segue o contrato do espelho (0040): lead comum volta para a
+  // primeira etapa; CLIENTE não é lead frio — sem giro vive em Ativação,
+  // girando vive fora do quadro (stage nulo).
+  const { data: leadAtual } = await supabase
+    .from("leads")
+    .select("customer_id")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  let novaEtapa: string | null | undefined;
+  if (leadAtual?.customer_id) {
+    const { data: giro } = await supabase
+      .from("v_customer_giro")
+      .select("lotes_30d")
+      .eq("customer_id", leadAtual.customer_id)
+      .maybeSingle();
+    if ((giro?.lotes_30d ?? 0) > 0) {
+      novaEtapa = null; // girando: fora do quadro
+    } else {
+      const { data: ativacao } = await supabase
+        .from("pipeline_stages")
+        .select("id, pipeline:pipelines!inner(padrao)")
+        .eq("pipeline.padrao", true)
+        .ilike("nome", "ativa%")
+        .limit(1)
+        .maybeSingle();
+      novaEtapa = ativacao?.id; // sem a coluna, não mexe na etapa
+    }
+  } else {
+    const { data: primeira } = await supabase
+      .from("pipeline_stages")
+      .select("id, pipeline:pipelines!inner(padrao)")
+      .eq("pipeline.padrao", true)
+      .order("ordem")
+      .limit(1)
+      .maybeSingle();
+    novaEtapa = primeira?.id;
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      status: "em_atendimento",
+      perda_motivo: null,
+      perda_detalhe: null,
+      ...(novaEtapa !== undefined ? { stage_id: novaEtapa } : {}),
+    })
+    .eq("id", leadId);
+  if (error) {
+    if (error.code === "42703" || error.code === "PGRST204") {
+      const { error: erroSimples } = await supabase
+        .from("leads")
+        .update({
+          status: "em_atendimento",
+          ...(novaEtapa !== undefined ? { stage_id: novaEtapa } : {}),
+        })
+        .eq("id", leadId);
+      if (erroSimples) return { erro: "Não foi possível reabrir." };
+    } else {
+      return { erro: error.message };
+    }
+  }
+
+  revalidatePath("/chat");
+  revalidatePath("/atendimento");
+  revalidatePath("/hoje");
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/**
+ * Stand-by (do diálogo de perda do chat): o "vou pensar" NÃO é perda. O
+ * lead ganha a etiqueta Stand-by (para o bolsão ficar visível nas listas) e
+ * a conversa é adiada por 1 semana — se ele responder antes, o espelho traz
+ * de volta à caixa sozinho.
+ */
+export async function marcarStandBy(leadId: string): Promise<ResultadoEnvio> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!leadId) return { erro: "Lead não informado." };
+
+  const supabase = await createClient();
+
+  // Etiqueta Stand-by: acha ou cria. A CRIAÇÃO vai pelo service role — o RLS
+  // de tags é só de gestor, e o vendedor é justamente quem mais usa este
+  // botão (a sessão já foi validada acima). Erro inesperado NÃO é engolido:
+  // adiar sem a etiqueta enterraria o lead sem o bolsão prometido.
+  let { data: tag } = await supabase
+    .from("tags")
+    .select("id")
+    .eq("nome", "Stand-by")
+    .maybeSingle();
+  if (!tag) {
+    const service = createServiceClient();
+    const criada = await service
+      .from("tags")
+      .insert({ nome: "Stand-by", cor: "ambar" })
+      .select("id")
+      .maybeSingle();
+    if (criada.error?.code === "42703" || criada.error?.code === "PGRST204") {
+      // Sem a 0016 a cor não existe: cria sem.
+      const semCor = await service
+        .from("tags")
+        .insert({ nome: "Stand-by" })
+        .select("id")
+        .maybeSingle();
+      if (semCor.error) {
+        return { erro: `Não deu para criar a etiqueta: ${semCor.error.message}` };
+      }
+      tag = semCor.data;
+    } else if (criada.error?.code === "23505") {
+      // Corrida: outra aba criou primeiro — relê.
+      const releitura = await service
+        .from("tags")
+        .select("id")
+        .eq("nome", "Stand-by")
+        .maybeSingle();
+      tag = releitura.data;
+    } else if (criada.error) {
+      return { erro: `Não deu para criar a etiqueta: ${criada.error.message}` };
+    } else {
+      tag = criada.data;
+    }
+  }
+  if (!tag) return { erro: "Não deu para preparar a etiqueta Stand-by." };
+
+  const { error: erroVinculo } = await supabase
+    .from("lead_tags")
+    .insert({ lead_id: leadId, tag_id: tag.id });
+  // 23505 = já etiquetado — exatamente o que queríamos.
+  if (erroVinculo && erroVinculo.code !== "23505") {
+    return { erro: `Não deu para etiquetar: ${erroVinculo.message}` };
+  }
+
+  return adiarConversa(leadId, "1semana");
 }
 
 export type Pendencias = { naoLidas: number; tarefasVencidas: number };

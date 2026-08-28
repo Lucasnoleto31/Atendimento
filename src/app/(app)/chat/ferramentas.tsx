@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Ban,
   Check,
   ChevronDown,
   Clock,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { estiloEtiqueta } from "@/lib/etiquetas";
+import { MOTIVOS_PERDA, type MotivoPerda } from "@/lib/perda";
 import {
   adiarConversa,
   alterarEtapaChat,
@@ -21,6 +23,9 @@ import {
   alternarEtiquetaChat,
   definirResponsavelChat,
   marcarChatNaoLido,
+  marcarPerdidoChat,
+  marcarStandBy,
+  reabrirLeadChat,
   reativarConversa,
   type PrazoAdiar,
 } from "./actions";
@@ -60,6 +65,7 @@ export function FerramentasConversa({
   adiada,
   adiadaAte,
   resolvida,
+  leadPerdido,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -73,6 +79,8 @@ export function FerramentasConversa({
   /** Até quando está adiada, já formatado — null sem prazo (pré-0042). */
   adiadaAte: string | null;
   resolvida: boolean;
+  /** O lead está com status "perdido" — muda o menu para Reabrir. */
+  leadPerdido: boolean;
 }) {
   const [pendente, iniciar] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
@@ -80,7 +88,28 @@ export function FerramentasConversa({
     null,
   );
   const [expandidoMobile, setExpandidoMobile] = useState(false);
+  // Diálogo de perda (o kanban ninguém usa — o gesto mora aqui agora).
+  const [perdaAberta, setPerdaAberta] = useState(false);
+  const [motivoPerda, setMotivoPerda] = useState<MotivoPerda | "">("");
+  const [detalhePerda, setDetalhePerda] = useState("");
+  // O erro do diálogo mora NO diálogo — o alerta da barra fica atrás do
+  // overlay e o clique pareceria não ter feito nada.
+  const [erroPerda, setErroPerda] = useState<string | null>(null);
+  const dialogoRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  // Diálogo de perda: Esc fecha e o foco entra nele ao abrir (o item de
+  // menu que o abriu é desmontado junto com o menu — sem isto, o foco caía
+  // no body e o Tab navegava a tela por trás do overlay).
+  useEffect(() => {
+    if (!perdaAberta) return;
+    dialogoRef.current?.focus();
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPerdaAberta(false);
+    };
+    document.addEventListener("keydown", aoTeclar);
+    return () => document.removeEventListener("keydown", aoTeclar);
+  }, [perdaAberta]);
 
   // Esc fecha o que estiver aberto.
   useEffect(() => {
@@ -469,6 +498,45 @@ export function FerramentasConversa({
                     />
                     Marcar como não lida
                   </button>
+                  {leadPerdido ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={pendente}
+                      onClick={() => executar(() => reabrirLeadChat(leadId))}
+                      className={ITEM_MENU}
+                    >
+                      <RotateCcw
+                        size={16}
+                        strokeWidth={1.5}
+                        aria-hidden
+                        className="text-neutral-400"
+                      />
+                      Reabrir atendimento
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={pendente}
+                      onClick={() => {
+                        setAberto(null);
+                        setMotivoPerda("");
+                        setDetalhePerda("");
+                        setErroPerda(null);
+                        setPerdaAberta(true);
+                      }}
+                      className={cn(ITEM_MENU, "text-danger hover:bg-danger-bg")}
+                    >
+                      <Ban
+                        size={16}
+                        strokeWidth={1.5}
+                        aria-hidden
+                        className="text-danger"
+                      />
+                      Marcar como perdido…
+                    </button>
+                  )}
                 </div>
               </>
             ) : null}
@@ -480,6 +548,119 @@ export function FerramentasConversa({
         <p role="alert" className="mt-0.5 text-xs text-danger">
           {erro}
         </p>
+      ) : null}
+
+      {perdaAberta ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Por que perdemos este lead?"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/40 p-2"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPerdaAberta(false);
+          }}
+        >
+          <div
+            ref={dialogoRef}
+            tabIndex={-1}
+            className="w-full max-w-[440px] rounded-[10px] border border-neutral-200 bg-neutral-0 p-3 shadow-lg outline-none"
+          >
+            <h2 className="text-h3 text-neutral-900">Por que perdemos?</h2>
+            <p className="mt-0.5 text-sm text-neutral-600">
+              O motivo alimenta o relatório de perdas — é o mesmo gesto do
+              kanban, sem sair do chat.
+            </p>
+            <div className="mt-2 flex flex-col gap-0.5">
+              {(
+                Object.entries(MOTIVOS_PERDA) as [MotivoPerda, string][]
+              ).map(([chave, rotulo]) => (
+                <label
+                  key={chave}
+                  className="flex h-[40px] cursor-pointer items-center gap-1 rounded-md px-1 text-sm text-neutral-800 hover:bg-neutral-50"
+                >
+                  <input
+                    type="radio"
+                    name="motivo-perda-chat"
+                    value={chave}
+                    checked={motivoPerda === chave}
+                    onChange={() => setMotivoPerda(chave)}
+                    className="h-2 w-2 accent-primary-600"
+                  />
+                  {rotulo}
+                </label>
+              ))}
+            </div>
+            {/* "Vou pensar" não é perda: stand-by etiqueta e adia 1 semana —
+                se o lead responder antes, a conversa volta sozinha. */}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-1 rounded-md bg-accent-100 px-1.5 py-1">
+              <span className="text-sm text-accent-700">
+                Vai pensar? Não é perda:
+              </span>
+              <button
+                type="button"
+                disabled={pendente}
+                onClick={() => {
+                  setErroPerda(null);
+                  iniciar(async () => {
+                    const r = await marcarStandBy(leadId);
+                    if (r.erro) setErroPerda(r.erro);
+                    else setPerdaAberta(false);
+                  });
+                }}
+                className="inline-flex h-[32px] items-center rounded-md border border-accent-300 bg-neutral-0 px-1.5 text-sm font-medium text-accent-700 transition-colors duration-[120ms] hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Stand-by — volta em 1 semana
+              </button>
+            </div>
+
+            <label
+              htmlFor="detalhe-perda-chat"
+              className="mt-2 block text-sm font-medium text-neutral-800"
+            >
+              Detalhe (opcional)
+            </label>
+            <input
+              id="detalhe-perda-chat"
+              value={detalhePerda}
+              maxLength={280}
+              onChange={(e) => setDetalhePerda(e.target.value)}
+              className="mt-0.5 h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            />
+            {erroPerda ? (
+              <p role="alert" className="mt-1 text-sm text-danger">
+                {erroPerda}
+              </p>
+            ) : null}
+            <div className="mt-2 flex justify-end gap-1">
+              <button
+                type="button"
+                onClick={() => setPerdaAberta(false)}
+                className="inline-flex h-[40px] items-center rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={pendente || motivoPerda === ""}
+                onClick={() => {
+                  setErroPerda(null);
+                  iniciar(async () => {
+                    const r = await marcarPerdidoChat(
+                      leadId,
+                      motivoPerda,
+                      detalhePerda,
+                    );
+                    if (r.erro) setErroPerda(r.erro);
+                    else setPerdaAberta(false);
+                  });
+                }}
+                className="inline-flex h-[40px] items-center rounded-md bg-danger px-1.5 text-sm font-medium text-neutral-0 transition-colors duration-[120ms] hover:brightness-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Marcar perdido
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

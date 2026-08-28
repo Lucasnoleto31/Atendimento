@@ -54,6 +54,7 @@ type ConversaLinha = {
   customer_id: string | null;
   responsavel_id: string | null;
   stage_id: string | null;
+  status: string;
   ultima_interacao_em: string | null;
   chat_lido_em: string | null;
   chat_adiado_em?: string | null;
@@ -63,7 +64,7 @@ type ConversaLinha = {
 };
 
 const CAMPOS_BASE =
-  "id, nome, telefone_e164, instagram_id, instagram_usuario, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em";
+  "id, nome, telefone_e164, instagram_id, instagram_usuario, customer_id, responsavel_id, stage_id, status, ultima_interacao_em, chat_lido_em";
 // Sem a migração 0017 a coluna não existe: a consulta cai para os campos base.
 const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em, chat_resolvido_em, marketing_bloqueado_em`;
 // Prazo do adiamento (migração 0042); sem ela, cai para CAMPOS_CONVERSA.
@@ -466,11 +467,21 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         .in("tipo", ["mensagem_recebida", "mensagem_enviada", "nota"])
         .order("criado_em", { ascending: false })
         .limit(limiteMensagens),
+      // Anexos das prontas (0060); sem a migração, cai para o formato antigo.
       supabase
         .from("quick_replies")
-        .select("id, titulo, corpo")
+        .select("id, titulo, corpo, anexos")
         .eq("ativo", true)
-        .order("titulo"),
+        .order("titulo")
+        .then((r) =>
+          r.error
+            ? supabase
+                .from("quick_replies")
+                .select("id, titulo, corpo")
+                .eq("ativo", true)
+                .order("titulo")
+            : r,
+        ),
       supabase
         .from("profiles")
         .select("id, nome")
@@ -918,6 +929,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
                   : null
               }
               resolvida={atual.chat_resolvido_em != null}
+              leadPerdido={atual.status === "perdido"}
             />
 
             <Janela

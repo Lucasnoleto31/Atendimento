@@ -101,7 +101,13 @@ export type Mensagem = {
   metadados?: MetadadosMensagem | null;
 };
 
-export type MensagemPadrao = { id: string; titulo: string; corpo: string };
+export type MensagemPadrao = {
+  id: string;
+  titulo: string;
+  corpo: string;
+  /** Arquivos da mensagem padrão (0060) — entram na fila de anexos ao usar. */
+  anexos?: Anexo[] | null;
+};
 
 const horario = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", {
@@ -524,6 +530,8 @@ export function Janela({
 
   // Mensagens prontas: painel abre pelo botão de raio ou digitando "/".
   const [prontasAbertas, setProntasAbertas] = useState(false);
+  // Anexos de uma pronta ainda baixando — o Enviar espera terminar.
+  const [baixandoPronta, setBaixandoPronta] = useState(false);
   const [busca, setBusca] = useState("");
   const [idxSel, setIdxSel] = useState(0);
   const [barraSuprimida, setBarraSuprimida] = useState(false);
@@ -678,6 +686,61 @@ export function Janela({
     setBusca("");
     setIdxSel(0);
     textareaRef.current?.focus();
+
+    // Anexos da pronta: baixa do bucket e coloca na fila de envio — o mesmo
+    // caminho de um arquivo escolhido à mão, com prévia e revisão antes do
+    // Enviar. As mesmas regras do colar/arrastar valem aqui: nota privada e
+    // janela de 24h fechada não recebem anexo (avisa em vez de anexar).
+    const anexosPronta = pronta.anexos ?? [];
+    if (anexosPronta.length === 0) return;
+    if (modo === "nota") {
+      setAvisoArquivo(
+        "Nota privada não leva anexo — os arquivos desta mensagem pronta ficaram de fora.",
+      );
+      return;
+    }
+    if (restanteJanela === null || restanteJanela <= 0) {
+      setAvisoArquivo(
+        "Janela de 24h fechada — só template chega. Os anexos da mensagem pronta ficaram de fora.",
+      );
+      return;
+    }
+    // Corte com nome e sobrenome: o atendente precisa saber QUAL arquivo da
+    // pronta ficou de fora (o texto pode citar exatamente o PDF descartado).
+    const espaco = MAX_ANEXOS - arquivos.length;
+    const entram = anexosPronta.slice(0, Math.max(espaco, 0));
+    const sobraram = anexosPronta.slice(Math.max(espaco, 0));
+    if (sobraram.length > 0) {
+      setAvisoArquivo(
+        `A fila já tinha ${arquivos.length} arquivo(s) — ficaram de fora: ${sobraram
+          .map((a) => a.nome || "anexo")
+          .join(", ")}.`,
+      );
+    }
+    if (entram.length === 0) return;
+    // Enquanto baixa, o Enviar segura: sem isto, o Enter rápido mandava o
+    // texto sem os arquivos e eles grudavam na mensagem SEGUINTE.
+    setBaixandoPronta(true);
+    void (async () => {
+      try {
+        const dt = new DataTransfer();
+        for (const anexo of entram) {
+          const resposta = await fetch(anexo.url);
+          if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+          const blob = await resposta.blob();
+          dt.items.add(
+            new File([blob], anexo.nome || "anexo", { type: blob.type }),
+          );
+        }
+        adicionarArquivos(dt.files);
+      } catch {
+        setAvisoArquivo(
+          "Não deu para carregar o anexo da mensagem pronta — envie o texto e anexe à mão.",
+        );
+      } finally {
+        setBaixandoPronta(false);
+      }
+    })();
   };
 
   // IA: sugestão lê a conversa e propõe a próxima mensagem; correção arruma a
@@ -829,9 +892,10 @@ export function Janela({
     modo === "responder" && (restanteJanela === null || restanteJanela <= 0);
 
   const podeEnviar =
-    modo === "nota"
+    !baixandoPronta &&
+    (modo === "nota"
       ? texto.trim().length > 0
-      : !janelaFechada && (texto.trim().length > 0 || arquivos.length > 0);
+      : !janelaFechada && (texto.trim().length > 0 || arquivos.length > 0));
 
   const aoRolar = () => {
     const caixa = caixaRef.current;
@@ -850,6 +914,8 @@ export function Janela({
   };
 
   const aoEnviar = async (formData: FormData) => {
+    // Anexos da pronta em voo: enviar agora mandaria o texto sem eles.
+    if (baixandoPronta) return;
     const textoEnvio = String(formData.get("texto") ?? "").trim();
     // O arquivo NÃO viaja no corpo da requisição (a Vercel corta em ~4,5MB e
     // a página quebrava): sobe direto do navegador ao Storage por URL
@@ -1121,8 +1187,14 @@ export function Janela({
                             : "hover:bg-neutral-50",
                         )}
                       >
-                        <span className="block text-sm font-medium text-neutral-800">
-                          {pronta.titulo}
+                        <span className="flex items-center gap-0.5 text-sm font-medium text-neutral-800">
+                          <span className="truncate">{pronta.titulo}</span>
+                          {(pronta.anexos?.length ?? 0) > 0 ? (
+                            <span className="inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-sm bg-neutral-100 px-0.5 font-mono text-xs font-normal text-neutral-600 tabular-nums">
+                              <Paperclip size={11} strokeWidth={1.5} aria-hidden />
+                              {pronta.anexos!.length}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="block truncate text-xs text-neutral-600">
                           {pronta.corpo}

@@ -91,7 +91,9 @@ export async function atualizarLead(formData: FormData) {
     falhar(
       error.code === "23505"
         ? "Já existe outro lead com esse telefone."
-        : `Não deu para salvar: ${error.message}`,
+        : error.code === "23514"
+          ? "Rode a migração 0061 para este motivo de perda existir."
+          : `Não deu para salvar: ${error.message}`,
     );
   }
 

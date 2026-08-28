@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { normalizarNumero, normalizarTelefone } from "@/lib/csv";
 import { criarTemplateResumoMeta } from "@/lib/whatsapp";
@@ -19,8 +19,15 @@ async function exigirGestor() {
 
 function terminar(aviso?: string): never {
   revalidatePath("/configuracoes");
+  // O carimbo t= muda a URL a cada volta: os formulários com estado de
+  // cliente (anexos das mensagens padrão) usam-no como key para resetar —
+  // sem ele, os chips da mensagem recém-criada sobravam no formulário
+  // "nova" e grudavam na próxima.
+  const t = `t=${Date.now()}`;
   redirect(
-    aviso ? `/configuracoes?aviso=${encodeURIComponent(aviso)}` : "/configuracoes",
+    aviso
+      ? `/configuracoes?aviso=${encodeURIComponent(aviso)}&${t}`
+      : `/configuracoes?${t}`,
   );
 }
 
@@ -166,17 +173,106 @@ export async function excluirTag(formData: FormData) {
 // Mensagens padrão
 // ===========================================================================
 
+const MAX_ANEXOS_MENSAGEM = 5;
+
+/**
+ * Os anexos chegam como JSON num campo escondido (o componente cliente sobe
+ * os arquivos por URL assinada e só manda os metadados). Valida forma,
+ * quantidade e — o essencial — que cada URL aponta para o NOSSO bucket:
+ * campo escondido é editável por quem souber, e mensagem padrão vai para
+ * lead; URL alheia aqui viraria vetor de phishing com a nossa cara.
+ */
+function lerAnexosMensagem(
+  bruto: string,
+): { anexos: { tipo: string; url: string; nome: string }[] } | { erro: string } {
+  let lista: unknown;
+  try {
+    lista = JSON.parse(bruto);
+  } catch {
+    return { erro: "Anexos inválidos — recarregue a página e tente de novo." };
+  }
+  if (!Array.isArray(lista)) return { erro: "Anexos inválidos." };
+  if (lista.length > MAX_ANEXOS_MENSAGEM) {
+    return { erro: `No máximo ${MAX_ANEXOS_MENSAGEM} anexos por mensagem.` };
+  }
+  const prefixo = new URL(
+    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/midia-whatsapp/mensagens-padrao/`,
+  );
+  const anexos: { tipo: string; url: string; nome: string }[] = [];
+  for (const item of lista) {
+    const a = item as { tipo?: unknown; url?: unknown; nome?: unknown };
+    // startsWith cru é contornável com ../ (o navegador normaliza os
+    // dot-segments ANTES do fetch): compara origem + caminho JÁ normalizado
+    // pelo parser, e recusa qualquer resquício de escape.
+    let u: URL | null = null;
+    try {
+      u = typeof a.url === "string" ? new URL(a.url) : null;
+    } catch {
+      u = null;
+    }
+    if (
+      !u ||
+      u.origin !== prefixo.origin ||
+      !u.pathname.startsWith(prefixo.pathname) ||
+      (a.url as string).includes("..") ||
+      (a.url as string).includes("\\") ||
+      typeof a.tipo !== "string" ||
+      !["image", "audio", "video", "file"].includes(a.tipo)
+    ) {
+      return { erro: "Anexo fora do padrão — envie os arquivos de novo." };
+    }
+    anexos.push({
+      tipo: a.tipo,
+      // u só existe quando a.url era string — o guard acima garante.
+      url: a.url as string,
+      nome: String(a.nome ?? "anexo").slice(0, 120),
+    });
+  }
+  return { anexos };
+}
+
+/** URL assinada para o navegador subir o anexo da mensagem padrão. */
+export async function prepararUploadMensagemPadrao(
+  nome: string,
+): Promise<{ caminho?: string; token?: string; erro?: string }> {
+  await exigirGestor();
+  const limpo = nome.replace(/[^\w.\-]+/g, "_").slice(-80);
+  const caminho = `mensagens-padrao/${crypto.randomUUID()}-${limpo}`;
+  const service = createServiceClient();
+  const { data, error } = await service.storage
+    .from("midia-whatsapp")
+    .createSignedUploadUrl(caminho);
+  if (error) {
+    return { erro: `Não deu para preparar o upload: ${error.message}` };
+  }
+  return { caminho, token: data.token };
+}
+
 export async function criarMensagem(formData: FormData) {
   await exigirGestor();
   const titulo = String(formData.get("titulo") ?? "").trim();
   const corpo = String(formData.get("corpo") ?? "").trim();
   if (!titulo || !corpo) terminar("Título e mensagem são obrigatórios.");
 
+  // O campo só existe no form quando a coluna existe (0060) — presente,
+  // sempre grava (inclusive [] para limpar).
+  const brutoAnexos = formData.get("anexos");
+  const payload: Record<string, unknown> = { titulo, corpo };
+  if (brutoAnexos !== null) {
+    const lidos = lerAnexosMensagem(String(brutoAnexos));
+    if ("erro" in lidos) terminar(lidos.erro);
+    payload.anexos = lidos.anexos;
+  }
+
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("quick_replies")
-    .insert({ titulo, corpo });
-  if (error) terminar(amigavel(error.code, error.message));
+  const { error } = await supabase.from("quick_replies").insert(payload);
+  if (error) {
+    terminar(
+      error.code === "42703" || error.code === "PGRST204"
+        ? "Rode a migração 0060 para anexos nas mensagens padrão existirem."
+        : amigavel(error.code, error.message),
+    );
+  }
   terminar();
 }
 
@@ -187,12 +283,26 @@ export async function atualizarMensagem(formData: FormData) {
   const corpo = String(formData.get("corpo") ?? "").trim();
   if (!id || !titulo || !corpo) terminar("Título e mensagem são obrigatórios.");
 
+  const brutoAnexos = formData.get("anexos");
+  const payload: Record<string, unknown> = { titulo, corpo };
+  if (brutoAnexos !== null) {
+    const lidos = lerAnexosMensagem(String(brutoAnexos));
+    if ("erro" in lidos) terminar(lidos.erro);
+    payload.anexos = lidos.anexos;
+  }
+
   const supabase = await createClient();
   const { error } = await supabase
     .from("quick_replies")
-    .update({ titulo, corpo })
+    .update(payload)
     .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
+  if (error) {
+    terminar(
+      error.code === "42703" || error.code === "PGRST204"
+        ? "Rode a migração 0060 para anexos nas mensagens padrão existirem."
+        : amigavel(error.code, error.message),
+    );
+  }
   terminar();
 }
 
