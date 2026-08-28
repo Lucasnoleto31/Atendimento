@@ -7,7 +7,7 @@ import {
   type MotivoPerda,
 } from "@/lib/perda";
 import { buscarTudo } from "@/lib/supabase/paginar";
-import { formatarReais } from "@/lib/format";
+import { formatarData, formatarReais } from "@/lib/format";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -69,26 +69,42 @@ export default async function RelatoriosPage({
   const periodo = escolhido ?? PERIODOS[3]; // padrão: tudo
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("relatorio_leads", {
-    p_dias: periodo.dias,
-  });
+  const [{ data, error }, { data: maisAntigo }] = await Promise.all([
+    supabase.rpc("relatorio_leads", { p_dias: periodo.dias }),
+    // Idade da base: com tudo importado há dias, "90 dias" e "Tudo" mostram
+    // os MESMOS números — sem esta nota, o filtro parece quebrado.
+    supabase
+      .from("leads")
+      .select("criado_em")
+      .order("criado_em", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
-  // Motivos de perda do mesmo período. Sem a 0038 a coluna não existe e a
-  // seção simplesmente não aparece.
+  // Motivos de perda, na MESMA coorte do resto da página: leads criados no
+  // período. Filtrar por data da perda enquanto a barra "Perdido" filtra por
+  // criação faria duas seções da mesma tela discordarem.
+  // Em lotes (buscarTudo): .limit acima de 1000 é truncado em silêncio pelo
+  // PostgREST. Sem a 0038 a coluna não existe e a seção não aparece.
   let perdasPorMotivo: { motivo: string; total: number }[] = [];
   {
-    let q = supabase
-      .from("leads")
-      .select("perda_motivo")
-      .eq("status", "perdido")
-      .limit(5000);
-    if (periodo.dias !== null) {
-      q = q.gte("perdido_em", corteDiasAtras(periodo.dias));
-    }
-    const { data: perdidos, error: erroPerda } = await q;
-    if (!erroPerda) {
+    const { dados: perdidos, erro: erroPerda } = await buscarTudo<{
+      perda_motivo: string | null;
+    }>((dei, ate) => {
+      let q = supabase
+        .from("leads")
+        .select("perda_motivo")
+        .eq("status", "perdido")
+        .order("id")
+        .range(dei, ate);
+      if (periodo.dias !== null) {
+        q = q.gte("criado_em", corteDiasAtras(periodo.dias));
+      }
+      return q;
+    });
+    if (erroPerda === null) {
       const soma = new Map<string, number>();
-      for (const l of (perdidos ?? []) as { perda_motivo: string | null }[]) {
+      for (const l of perdidos) {
         const chave = l.perda_motivo ?? "sem_motivo";
         soma.set(chave, (soma.get(chave) ?? 0) + 1);
       }
@@ -132,10 +148,10 @@ export default async function RelatoriosPage({
   const d1 = new Date(agoraMs - 86_400_000).toISOString();
 
   const [
-    { dados: enviadas },
-    { count: resolvidas },
-    { dados: trocas },
-    { dados: conversasAbertas },
+    { dados: enviadas, erro: enviadasErro },
+    { count: resolvidas, error: resolvidasErro },
+    { dados: trocas, erro: trocasErro },
+    { count: aguardandoCount, error: aguardandoErro },
     { data: metasEquipe },
   ] = await Promise.all([
     // Em lotes: acima de 1000 mensagens no período o PostgREST truncava e a
@@ -146,7 +162,10 @@ export default async function RelatoriosPage({
         .select("criado_em, autor_id")
         .eq("tipo", "mensagem_enviada")
         .gte("criado_em", d30)
+        // Desempate por id: criado_em repete em disparo em lote, e a fronteira
+        // entre páginas pulava ou duplicava linhas.
         .order("criado_em")
+        .order("id")
         .range(dei, ate),
     ),
     supabase
@@ -166,18 +185,18 @@ export default async function RelatoriosPage({
           .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
           .gte("criado_em", d30)
           .order("criado_em")
-          .range(dei, ate),
-    ),
-    // Conversa é histórico de mensagem (vale para Meta e Chatwoot), em lotes.
-    buscarTudo<{ ultima_interacao_em: string; chat_lido_em: string | null }>(
-      (dei, ate) =>
-        supabase
-          .from("leads")
-          .select("ultima_interacao_em, chat_lido_em")
-          .not("ultima_interacao_em", "is", null)
           .order("id")
           .range(dei, ate),
     ),
+    // Definição canônica de "aguardando resposta" (view da 0032): o CLIENTE
+    // mandou a última mensagem e a conversa não está resolvida, adiada nem
+    // perdida. A conta antiga usava ultima_interacao_em > chat_lido_em, e o
+    // robô da cadência atualiza ultima_interacao_em sem "ler" — cada disparo
+    // automático virava uma conversa "esperando" (66 no painel, 7 de verdade).
+    supabase
+      .from("v_leads_listas")
+      .select("lead_id", { count: "exact", head: true })
+      .eq("aguardando_resposta", true),
     // Coluna da migração 0013; sem ela, a coluna de meta some da tabela.
     supabase
       .from("profiles")
@@ -239,9 +258,16 @@ export default async function RelatoriosPage({
   const medianaRespostaMin =
     temposMin.length > 0 ? temposMin[Math.floor(temposMin.length / 2)] : null;
 
-  const aguardandoAgora = conversasAbertas.filter(
-    (l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em,
-  ).length;
+  const aguardandoAgora = aguardandoCount ?? 0;
+
+  // ── BUG: erro engolido virava zero "de verdade" na tela ──
+  // Consulta que falha não pode renderizar 0 — zero é um dado, erro é outro.
+  const atividadeErro =
+    enviadasErro ??
+    trocasErro ??
+    aguardandoErro?.message ??
+    resolvidasErro?.message ??
+    null;
 
   const metaPorNome = new Map(
     ((metasEquipe ?? []) as { nome: string; meta_contatos_dia: number }[]).map(
@@ -336,6 +362,12 @@ export default async function RelatoriosPage({
             );
           })}
         </ul>
+        {maisAntigo?.criado_em ? (
+          <p className="mt-1 text-xs text-neutral-400">
+            A base tem leads desde {formatarData(maisAntigo.criado_em)} —
+            períodos maiores que isso mostram os mesmos números.
+          </p>
+        ) : null}
       </nav>
 
       {error || !r ? (
@@ -377,10 +409,19 @@ export default async function RelatoriosPage({
             <h2 id="atividade-titulo" className="text-h3 text-neutral-900">
               Atividade (últimos 30 dias)
             </h2>
+            {atividadeErro !== null ? (
+              <p
+                role="alert"
+                className="mt-2 max-w-[68ch] rounded-md bg-warning-bg px-1.5 py-1 text-sm text-warning"
+              >
+                Não deu para carregar toda a atividade ({atividadeErro}) — os
+                números abaixo podem estar incompletos.
+              </p>
+            ) : null}
             <dl className="mt-2 grid gap-3 border-y border-neutral-200 py-3 sm:grid-cols-2 lg:grid-cols-4">
               <Indicador
                 rotulo="Mensagens enviadas"
-                valor={numero(totalEnviadas30d)}
+                valor={enviadasErro ? "—" : numero(totalEnviadas30d)}
                 detalhe="pela equipe, no CRM e automações"
               />
               <Indicador
@@ -400,13 +441,13 @@ export default async function RelatoriosPage({
               />
               <Indicador
                 rotulo="Conversas resolvidas"
-                valor={numero(resolvidas ?? 0)}
+                valor={resolvidasErro ? "—" : numero(resolvidas ?? 0)}
                 detalhe="marcadas no chat"
               />
               <Indicador
                 rotulo="Aguardando resposta"
-                valor={numero(aguardandoAgora)}
-                detalhe="conversas não lidas agora"
+                valor={aguardandoErro ? "—" : numero(aguardandoAgora)}
+                detalhe="cliente falou por último e ninguém respondeu"
               />
             </dl>
 
@@ -464,12 +505,12 @@ export default async function RelatoriosPage({
                   </tbody>
                 </table>
               </div>
-            ) : (
+            ) : enviadasErro === null ? (
               <p className="mt-2 text-sm text-neutral-600">
                 Nenhuma mensagem enviada nos últimos 30 dias — os números
                 aparecem conforme a equipe usa o chat.
               </p>
-            )}
+            ) : null}
           </section>
 
           {/* Retenção da carteira */}
@@ -713,10 +754,16 @@ export default async function RelatoriosPage({
               disparo.
             </p>
             <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
-              Lead com duas etiquetas conta nas duas linhas, então a soma das
-              linhas pode passar do total de leads. A coluna Canal mostra
-              “vários” quando a etiqueta atravessa mais de um canal de entrada.
+              Lead com duas etiquetas conta nas duas linhas — leads, templates
+              e gasto: somar as colunas passa do total real. A coluna Canal
+              mostra “vários” quando a etiqueta atravessa mais de um canal de
+              entrada.
             </p>
+            {origens.length === 0 ? (
+              <p className="mt-2 max-w-[68ch] rounded-lg border border-dashed border-neutral-300 p-3 text-sm text-neutral-600">
+                Nenhum lead no período escolhido.
+              </p>
+            ) : (
             <div className="mt-2 overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-0 shadow-sm">
               <table className="w-full min-w-[900px] border-collapse text-left">
                 <thead>
@@ -735,7 +782,7 @@ export default async function RelatoriosPage({
                 <tbody className="divide-y divide-neutral-200">
                   {origens.map((origem) => (
                     <tr
-                      key={`${origem.origem}|${origem.canal}`}
+                      key={`${origem.origem}|${origem.canal}|${origem.campanha}|${origem.etiqueta}`}
                       className="h-[48px] hover:bg-neutral-50"
                     >
                       <td className="px-2 text-sm font-medium text-neutral-800">
@@ -771,6 +818,7 @@ export default async function RelatoriosPage({
                 </tbody>
               </table>
             </div>
+            )}
           </section>
 
           {/* Vendedores */}
@@ -877,7 +925,10 @@ function Barra({
     // No celular o rótulo ocupa a linha inteira e a barra desce — lado a
     // lado, sobravam ~13px para a barra em 375px.
     <li className="flex flex-wrap items-center gap-1">
-      <span className="w-full truncate text-sm text-neutral-800 sm:w-[152px] sm:shrink-0">
+      <span
+        title={rotulo}
+        className="w-full truncate text-sm text-neutral-800 sm:w-[180px] sm:shrink-0"
+      >
         {rotulo}
       </span>
       <span
