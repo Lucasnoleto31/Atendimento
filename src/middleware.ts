@@ -83,6 +83,8 @@ export async function middleware(request: NextRequest) {
   const rotaPublica =
     pathname === "/" ||
     pathname.startsWith("/entrar") ||
+    // Formulário público de captura (7.1): a action valida tudo no servidor.
+    pathname.startsWith("/captura") ||
     pathname.startsWith("/api/webhooks") ||
     // Cron autentica por CRON_SECRET na própria rota, não por sessão.
     pathname.startsWith("/api/cron");
