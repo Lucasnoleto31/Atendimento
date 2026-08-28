@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { listarTemplatesCanal } from "@/lib/canal";
 import { inicioDoDiaSaoPaulo } from "@/lib/campanhas";
-import { formatarDataCurta } from "@/lib/format";
+import { formatarDataCurta, formatarDataHora } from "@/lib/format";
 import { NovaCampanha, type TemplateOpcao } from "./nova-campanha";
 import {
   alterarStatusCampanha,
@@ -42,6 +42,34 @@ const COR_STATUS: Record<Campanha["status"], string> = {
   concluida: "bg-primary-50 text-primary-900",
 };
 
+/** Estado gravado pelo webhook da Meta em settings.numero_qualidade. */
+type QualidadeNumero = {
+  rating?: string | null;
+  limite?: string | null;
+  em?: string | null;
+};
+
+// Cor + rótulo textual, nunca só cor: é o que a gestão olha antes de subir
+// o ritmo de qualquer campanha.
+const QUALIDADE: Record<string, { rotulo: string; classe: string }> = {
+  GREEN: { rotulo: "verde — saudável", classe: "bg-success-bg text-success" },
+  YELLOW: {
+    rotulo: "amarela — reduza o ritmo",
+    classe: "bg-warning-bg text-warning",
+  },
+  RED: {
+    rotulo: "vermelha — risco de bloqueio",
+    classe: "bg-danger-bg text-danger",
+  },
+};
+
+const TETO_PADRAO = 100;
+
+/** Janela da rotina de erros: 7 dias para trás, em ISO. */
+function seteDiasAtrasIso() {
+  return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+}
+
 /** Dias úteis a partir de hoje para escoar o que falta no ritmo atual. */
 function previsaoTermino(faltam: number, porDia: number, diasUteis: boolean) {
   if (faltam <= 0 || porDia <= 0) return null;
@@ -68,18 +96,47 @@ export default async function CampanhasPage({
   const { aviso } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: linhas, error }, templates, { data: tags }] = await Promise.all(
-    [
-      supabase
-        .from("campanhas")
-        .select(
-          "id, nome, template_nome, template_idioma, etiqueta_id, por_dia, dias_uteis, hora_inicio, hora_fim, status, criado_em, concluida_em",
-        )
-        .order("criado_em", { ascending: false }),
-      listarTemplatesCanal(),
-      supabase.from("tags").select("id, nome").eq("ativo", true).order("nome"),
-    ],
-  );
+  // Mesmo relógio do motor de envio (Brasília) — e a janela da rotina de erros.
+  const inicioDoDia = inicioDoDiaSaoPaulo();
+  const seteDiasAtras = seteDiasAtrasIso();
+
+  const [
+    { data: linhas, error },
+    templates,
+    { data: tags },
+    { data: configs },
+    { count: enviadosHojeCount },
+    { data: errosLinhas },
+  ] = await Promise.all([
+    supabase
+      .from("campanhas")
+      .select(
+        "id, nome, template_nome, template_idioma, etiqueta_id, por_dia, dias_uteis, hora_inicio, hora_fim, status, criado_em, concluida_em",
+      )
+      .order("criado_em", { ascending: false }),
+    listarTemplatesCanal(),
+    supabase.from("tags").select("id, nome").eq("ativo", true).order("nome"),
+    supabase
+      .from("settings")
+      .select("chave, valor")
+      .in("chave", ["numero_qualidade", "envios_teto_dia"]),
+    // Orçamento do dia: mesma conta de src/lib/envios.ts — tudo que é
+    // automático (cadência + campanha + disparo) debita do mesmo teto.
+    supabase
+      .from("lead_interactions")
+      .select("id", { count: "exact", head: true })
+      .eq("tipo", "mensagem_enviada")
+      .gte("criado_em", inicioDoDia)
+      .in("metadados->>via", ["cadencia", "campanha", "disparo"]),
+    // As 5 recusas mais recentes — o total é contado no banco, por campanha.
+    supabase
+      .from("campanha_envios")
+      .select("campanha_id, erro, enviado_em")
+      .not("erro", "is", null)
+      .gte("enviado_em", seteDiasAtras)
+      .order("enviado_em", { ascending: false })
+      .limit(5),
+  ]);
 
   const semMigracao = Boolean(error);
   const campanhas = (linhas ?? []) as Campanha[];
@@ -97,15 +154,19 @@ export default async function CampanhasPage({
     }),
   );
 
-  const inicioDoDia = inicioDoDiaSaoPaulo();
-
   const progresso = new Map<
     string,
-    { enviados: number; hoje: number; falhas: number; novosDepois: number }
+    {
+      enviados: number;
+      hoje: number;
+      falhas: number;
+      novosDepois: number;
+      erros7d: number;
+    }
   >();
   await Promise.all(
     campanhas.map(async (c) => {
-      const [total, doDia, falhas, novos] = await Promise.all([
+      const [total, doDia, falhas, novos, erros7d] = await Promise.all([
         supabase
           .from("campanha_envios")
           .select("lead_id", { count: "exact", head: true })
@@ -130,15 +191,58 @@ export default async function CampanhasPage({
               .eq("tag_id", c.etiqueta_id)
               .gt("criado_em", c.concluida_em)
           : Promise.resolve({ count: 0 }),
+        // Recusas da semana: contadas no banco (head + exact) — trazer as
+        // linhas esbarraria no teto de 1000 do PostgREST em dia ruim.
+        supabase
+          .from("campanha_envios")
+          .select("lead_id", { count: "exact", head: true })
+          .eq("campanha_id", c.id)
+          .not("erro", "is", null)
+          .gte("enviado_em", seteDiasAtras),
       ]);
       progresso.set(c.id, {
         enviados: total.count ?? 0,
         hoje: doDia.count ?? 0,
         falhas: falhas.count ?? 0,
         novosDepois: novos.count ?? 0,
+        erros7d: erros7d.count ?? 0,
       });
     }),
   );
+
+  // --- Saúde do canal -------------------------------------------------------
+
+  const configuracoes = (configs ?? []) as { chave: string; valor: unknown }[];
+
+  const qualidadeBruta = configuracoes.find(
+    (c) => c.chave === "numero_qualidade",
+  )?.valor;
+  const qualidade =
+    qualidadeBruta && typeof qualidadeBruta === "object"
+      ? (qualidadeBruta as QualidadeNumero)
+      : null;
+  const qualidadeVisual = qualidade?.rating
+    ? QUALIDADE[qualidade.rating.toUpperCase()]
+    : undefined;
+
+  const tetoBruto = configuracoes.find(
+    (c) => c.chave === "envios_teto_dia",
+  )?.valor;
+  const teto = Number(tetoBruto ?? TETO_PADRAO) || TETO_PADRAO;
+  const enviadosHoje = enviadosHojeCount ?? 0;
+  const percentualTeto = Math.min(Math.round((enviadosHoje / teto) * 100), 100);
+  const tetoEmRisco = enviadosHoje >= teto * 0.8;
+
+  const errosPorCampanha = campanhas
+    .map((c) => ({ nome: c.nome, erros: progresso.get(c.id)?.erros7d ?? 0 }))
+    .filter((c) => c.erros > 0)
+    .sort((a, b) => b.erros - a.erros);
+  const totalErros7d = errosPorCampanha.reduce((s, c) => s + c.erros, 0);
+  const errosRecentes = (errosLinhas ?? []) as {
+    campanha_id: string;
+    erro: string;
+    enviado_em: string;
+  }[];
 
   return (
     <div className="p-2 md:p-3">
@@ -169,6 +273,119 @@ export default async function CampanhasPage({
         </p>
       ) : null}
 
+      <section
+        aria-labelledby="saude-titulo"
+        className="mt-3 rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
+      >
+        <h2 id="saude-titulo" className="sr-only">
+          Saúde do canal
+        </h2>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {qualidade ? (
+            <p className="flex flex-wrap items-center gap-1 text-xs text-neutral-600">
+              <span
+                className={`inline-flex h-[24px] items-center rounded-sm px-1 font-medium ${
+                  qualidadeVisual?.classe ?? "bg-neutral-100 text-neutral-600"
+                }`}
+              >
+                Qualidade do número:{" "}
+                {qualidadeVisual?.rotulo ?? qualidade.rating ?? "desconhecida"}
+              </span>
+              {qualidade.limite ? (
+                <span>
+                  limite <span className="font-mono">{qualidade.limite}</span>
+                </span>
+              ) : null}
+              {qualidade.em ? (
+                <span>
+                  desde{" "}
+                  <span className="font-mono tabular-nums">
+                    {formatarDataHora(qualidade.em)}
+                  </span>
+                </span>
+              ) : null}
+            </p>
+          ) : (
+            <p className="flex flex-wrap items-center gap-1 text-xs text-neutral-600">
+              <span className="inline-flex h-[24px] items-center rounded-sm bg-neutral-100 px-1 font-medium">
+                Qualidade do número: sem dado
+              </span>
+              <span>o webhook da Meta ainda não mandou o evento de qualidade</span>
+            </p>
+          )}
+
+          <div className="min-w-[220px] max-w-[360px] flex-1">
+            <p className="text-sm text-neutral-600">
+              Envios automáticos hoje:{" "}
+              <span
+                className={`font-mono tabular-nums ${tetoEmRisco ? "font-medium text-warning" : "text-neutral-800"}`}
+              >
+                {enviadosHoje}
+              </span>{" "}
+              de <span className="font-mono tabular-nums">{teto}</span>
+            </p>
+            <div
+              className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-neutral-100"
+              role="img"
+              aria-label={`${enviadosHoje} de ${teto} envios automáticos usados hoje`}
+            >
+              <div
+                className={`h-full rounded-full ${tetoEmRisco ? "bg-warning" : "bg-primary-600"}`}
+                style={{ width: `${percentualTeto}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {totalErros7d > 0 ? (
+          <div className="mt-2 border-t border-neutral-200 pt-2">
+            <p className="flex items-center gap-0.5 text-sm text-neutral-800">
+              <AlertTriangle
+                size={14}
+                strokeWidth={1.5}
+                aria-hidden
+                className="shrink-0 text-warning"
+              />
+              <span>
+                <span className="font-medium">
+                  <span className="font-mono tabular-nums">{totalErros7d}</span>{" "}
+                  {totalErros7d === 1 ? "erro" : "erros"} de envio
+                </span>{" "}
+                nos últimos 7 dias
+              </span>
+            </p>
+            <p className="mt-0.5 text-xs text-neutral-600">
+              {errosPorCampanha
+                .map((c) => `${c.nome} (${c.erros})`)
+                .join(" · ")}
+            </p>
+            {errosRecentes.length > 0 ? (
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {errosRecentes.map((e) => {
+                  const nome =
+                    campanhas.find((c) => c.id === e.campanha_id)?.nome ??
+                    "campanha excluída";
+                  return (
+                    <li
+                      key={`${e.campanha_id}-${e.enviado_em}`}
+                      className="flex items-baseline gap-1 text-xs text-neutral-600"
+                    >
+                      <span className="shrink-0 font-mono tabular-nums">
+                        {formatarDataHora(e.enviado_em)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate" title={e.erro}>
+                        {nome} — {e.erro}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
       <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_minmax(360px,420px)]">
         <section aria-labelledby="lista-titulo">
           <h2 id="lista-titulo" className="sr-only">
@@ -188,6 +405,7 @@ export default async function CampanhasPage({
                   hoje: 0,
                   falhas: 0,
                   novosDepois: 0,
+                  erros7d: 0,
                 };
                 const publico = c.etiqueta_id
                   ? (publicoPorEtiqueta.get(c.etiqueta_id) ?? 0)

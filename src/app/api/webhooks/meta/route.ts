@@ -114,6 +114,14 @@ type ValorMeta = {
   contacts?: { wa_id?: string; profile?: { name?: string } }[];
   messages?: MensagemMeta[];
   statuses?: StatusMeta[];
+  // field "phone_number_quality_update": a qualidade do número É o canal
+  // inteiro da mesa (incidente de 24/08). O formato varia por versão da API:
+  // às vezes vem event (FLAGGED/UNFLAGGED), às vezes quality_score/rating.
+  display_phone_number?: string;
+  event?: string;
+  current_limit?: string;
+  quality_score?: { score?: string } | string;
+  quality_rating?: string;
 };
 
 const ROTULO_TIPO_META: Record<string, string> = {
@@ -133,7 +141,9 @@ export async function POST(request: NextRequest) {
     return new Response("Invalid signature", { status: 401 });
   }
 
-  let payload: { entry?: { changes?: { value?: ValorMeta }[] }[] };
+  let payload: {
+    entry?: { time?: number; changes?: { field?: string; value?: ValorMeta }[] }[];
+  };
   try {
     payload = JSON.parse(corpo);
   } catch {
@@ -145,6 +155,14 @@ export async function POST(request: NextRequest) {
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
       const valor = change.value;
+
+      // Mudança de qualidade do número: registra e segue — nunca pode
+      // atrapalhar o processamento de mensagens. Qualquer outro field
+      // desconhecido continua caindo no "continue" logo abaixo, sem erro.
+      if (change.field === "phone_number_quality_update") {
+        if (valor) await registrarQualidadeNumero(service, valor, entry.time);
+        continue;
+      }
 
       // Recibos: sent/delivered/read/failed viram os ✓✓ do chat.
       for (const status of valor?.statuses ?? []) {
@@ -241,6 +259,68 @@ export async function POST(request: NextRequest) {
 
   // Sempre 200 rápido: a Meta corta webhooks que falham repetidamente.
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Evento de qualidade do número (phone_number_quality_update): grava o estado
+ * em settings.numero_qualidade para o painel de Campanhas mostrar. No
+ * incidente de 24/08 a qualidade caiu para amarelo e ninguém viu no CRM —
+ * souberam pelo painel da Meta.
+ */
+async function registrarQualidadeNumero(
+  service: ReturnType<typeof createServiceClient>,
+  valor: ValorMeta,
+  entryTime?: number,
+) {
+  // Dedup no padrão da rota: a Meta reenvia em caso de timeout; o timestamp
+  // do entry é estável entre as tentativas.
+  const eventoId = `quality-${entryTime ?? Date.now()}`;
+  const { error: dupErro } = await service.from("webhook_events").insert({
+    origem: "meta",
+    evento_id: eventoId,
+    payload: valor as unknown as Record<string, unknown>,
+  });
+  if (dupErro) return; // já processado
+
+  try {
+    const bruto =
+      typeof valor.quality_score === "string"
+        ? valor.quality_score
+        : (valor.quality_score?.score ?? valor.quality_rating);
+    // Sem score explícito, o event ainda diz a direção: FLAGGED = caiu.
+    const rating =
+      bruto?.trim().toUpperCase() ||
+      (valor.event === "FLAGGED"
+        ? "RED"
+        : valor.event === "UNFLAGGED"
+          ? "GREEN"
+          : null);
+
+    const { error } = await service.from("settings").upsert({
+      chave: "numero_qualidade",
+      valor: {
+        rating,
+        limite: valor.current_limit ?? null,
+        evento: valor.event ?? null,
+        telefone: valor.display_phone_number ?? null,
+        em: new Date().toISOString(),
+      },
+      atualizado_em: new Date().toISOString(),
+    });
+    if (error) throw new Error(error.message);
+
+    await service
+      .from("webhook_events")
+      .update({ processado: true })
+      .eq("origem", "meta")
+      .eq("evento_id", eventoId);
+  } catch (e) {
+    await service
+      .from("webhook_events")
+      .update({ erro: e instanceof Error ? e.message : String(e) })
+      .eq("origem", "meta")
+      .eq("evento_id", eventoId);
+  }
 }
 
 /**
