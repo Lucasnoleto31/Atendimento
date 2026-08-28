@@ -648,9 +648,10 @@ export default async function PagamentosPage({
             ))}
           </div>
           <p className="mt-0.5 text-xs text-neutral-400">
-            Ativação = 1º lote da vida do cliente, pelo dia real da operação.
-            Cada etapa conta quem fez aquilo NO período — a ativação pode ser
-            de conta aberta antes dele.
+            Contas = registros de venda de Abertura da equipe. Ativação = 1º
+            lote da vida do cliente (planilha Genial), pelo dia real da
+            operação. Cada etapa conta quem fez aquilo NO período — a ativação
+            pode ser de conta aberta antes dele.
           </p>
         </section>
       ) : null}
