@@ -19,8 +19,9 @@
 -- Script reexecutável.
 -- =============================================================================
 
-drop materialized view if exists mv_customer_giro;
-create materialized view mv_customer_giro as
+-- IF NOT EXISTS, não drop: depois da primeira rodada a casca v_customer_giro
+-- depende da mv, e um drop aqui derrubaria a cadeia inteira na reexecução.
+create materialized view if not exists mv_customer_giro as
 select
   c.id as customer_id,
   c.nome_completo,
