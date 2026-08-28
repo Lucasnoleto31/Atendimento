@@ -246,23 +246,29 @@ $$;
 -- Perdido — por isso "Perdido" mostrava 34 por etapa e 30 por status na
 -- mesma tela. Ganho com conta que nunca girou vai para Ativação (é fila de
 -- trabalho); quem já girou vai para Conta Aberta.
+--
+-- O destino é decidido numa subconsulta: no update ... from, os joins do
+-- from não podem referenciar a tabela atualizada.
 update leads l
-set stage_id = coalesce(
+set stage_id = d.destino,
+    entrou_na_etapa_em = now()
+from (
+  select
+    l2.id as lead_id,
+    coalesce(
       case when g.ultimo_giro_em is not null then conta.id end,
       ativ.id
-    ),
-    entrou_na_etapa_em = now()
-from pipeline_stages s
-join pipelines p on p.id = s.pipeline_id and p.padrao
-left join pipeline_stages conta
-  on conta.pipeline_id = p.id and conta.nome = 'Conta Aberta'
-left join pipeline_stages ativ
-  on ativ.pipeline_id = p.id and ativ.nome = 'Ativação'
-left join v_customer_giro g on g.customer_id = l.customer_id
-where s.id = l.stage_id
-  and s.is_final
-  and l.status = 'ganho'
-  and coalesce(
-        case when g.ultimo_giro_em is not null then conta.id end,
-        ativ.id
-      ) is not null;
+    ) as destino
+  from leads l2
+  join pipeline_stages s on s.id = l2.stage_id
+  join pipelines p on p.id = s.pipeline_id and p.padrao
+  left join pipeline_stages conta
+    on conta.pipeline_id = p.id and conta.nome = 'Conta Aberta'
+  left join pipeline_stages ativ
+    on ativ.pipeline_id = p.id and ativ.nome = 'Ativação'
+  left join v_customer_giro g on g.customer_id = l2.customer_id
+  where s.is_final
+    and l2.status = 'ganho'
+) d
+where l.id = d.lead_id
+  and d.destino is not null;
