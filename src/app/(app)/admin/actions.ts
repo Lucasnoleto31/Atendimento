@@ -595,6 +595,9 @@ export async function importarLotes(
     });
 
     // Quem caiu de giro volta para a fila.
+    // Lotes novos no banco: a foto do giro (0044) atualiza ANTES do motor de
+    // reativação decidir quem está parado — senão ele olharia o giro de ontem.
+    await service.rpc("atualizar_giro").then(() => {}, () => {});
     const { data: reativados } = await service.rpc("gerar_leads_reativacao");
     const linhasReativacao = (reativados ?? []) as {
       criados: number;

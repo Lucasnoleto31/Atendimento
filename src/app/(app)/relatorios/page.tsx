@@ -85,6 +85,7 @@ export default async function RelatoriosPage({
     { data: maisAntigo },
     { dados: giro, erro: giroErro },
     { count: totalLotesImportados },
+    { data: ultimoImporteLotes },
     { dados: vendasPeriodo, erro: vendasErro },
     contasNovas,
     { dados: ganhosCoorte },
@@ -119,6 +120,14 @@ export default async function RelatoriosPage({
     // Sem lote importado não existe giro para medir — a carteira inteira
     // pareceria parada, o que é falta de dado, não de giro.
     supabase.from("customer_lots").select("id", { count: "exact", head: true }),
+    // Última importação de lotes: o giro inteiro depende dela ser diária.
+    supabase
+      .from("imports")
+      .select("criado_em")
+      .eq("tipo", "lotes")
+      .order("criado_em", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
     // Receita de produtos (indicadores/robôs) no período.
     buscarTudo<{ valor_comissao_centavos: number }>((de, ate) => {
       let q = supabase
@@ -200,6 +209,21 @@ export default async function RelatoriosPage({
 
   // ── O caixa ───────────────────────────────────────────────────────────────
   const semDadoDeGiro = (totalLotesImportados ?? 0) === 0;
+  // Importação parada = giro, resgate e relatório congelados sem aviso.
+  // 1 dia útil de tolerância: sábado e domingo não contam.
+  const importeVelhoDias = (() => {
+    if (!ultimoImporteLotes?.criado_em) return null;
+    const ultimo = new Date(ultimoImporteLotes.criado_em);
+    let uteis = 0;
+    const cursor = new Date(ultimo);
+    const agora = new Date();
+    while (cursor < agora) {
+      cursor.setDate(cursor.getDate() + 1);
+      const dia = cursor.getDay();
+      if (dia !== 0 && dia !== 6 && cursor < agora) uteis++;
+    }
+    return uteis;
+  })();
   const lotes30 = giro.reduce((s, g) => s + (g.lotes_30d ?? 0), 0);
   const lotesAnt = giro.reduce((s, g) => s + (g.lotes_30d_anterior ?? 0), 0);
   const deltaLotes =
@@ -431,6 +455,16 @@ export default async function RelatoriosPage({
               >
                 Nenhum lote importado ainda — os números de giro aparecem
                 depois da primeira importação em Administração.
+              </p>
+            ) : importeVelhoDias !== null && importeVelhoDias > 1 ? (
+              <p
+                role="alert"
+                className="mt-1 max-w-[68ch] rounded-md bg-warning-bg px-1.5 py-1 text-sm text-warning"
+              >
+                A última importação de lotes foi há {importeVelhoDias} dias
+                úteis ({formatarData(ultimoImporteLotes?.criado_em ?? null)}) —
+                giro, resgate e este relatório estão congelados nessa data.
+                Importe em Administração.
               </p>
             ) : null}
             <dl className="mt-1 grid gap-3 border-y border-neutral-200 py-3 sm:grid-cols-2 lg:grid-cols-4">
