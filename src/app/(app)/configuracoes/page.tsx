@@ -72,6 +72,22 @@ const PARAMETROS = [
     ajuda: "Dias sem giro para considerar o cliente perdido (padrão 60).",
   },
   {
+    chave: "envios_teto_dia",
+    rotulo: "Teto de envios automáticos/dia",
+    ajuda:
+      "Orçamento único do número: cadência + campanhas + disparo em massa param quando a soma bate aqui. Suba com a qualidade verde; desça se cair para amarela.",
+  },
+  {
+    chave: "cadencia_por_dia",
+    rotulo: "Cadência: envios/dia",
+    ajuda: "Teto próprio da cadência, dentro do orçamento único acima.",
+  },
+  {
+    chave: "custo_template_centavos",
+    rotulo: "Custo por template (centavos)",
+    ajuda: "Usado no gasto por etiqueta dos Relatórios. Padrão: 25.",
+  },
+  {
     chave: "receita_por_lote",
     rotulo: "Receita por lote (R$)",
     ajuda: "Receita média da assessoria por lote girado; habilita LTV e receita em risco (0 desliga).",

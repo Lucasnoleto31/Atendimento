@@ -241,12 +241,13 @@ export default async function LeadPage({
               nunca respondeu
             </span>
           ) : null}
-          {lead.chatwoot_conversation_id !== null ? (
-            <Button href={`/chat?lead=${lead.id}`} variant="secondary" size="sm">
-              <MessageSquare size={14} strokeWidth={1.5} aria-hidden />
-              Abrir no Chat
-            </Button>
-          ) : null}
+          {/* Sempre visível: a condição antiga (conversa do Chatwoot) nunca é
+              satisfeita no canal Meta direto, e o atalho sumia da maioria das
+              fichas — a conversa em si sempre funcionou pelo Chat. */}
+          <Button href={`/chat?lead=${lead.id}`} variant="secondary" size="sm">
+            <MessageSquare size={14} strokeWidth={1.5} aria-hidden />
+            Abrir no Chat
+          </Button>
           <Button href={`/leads/${lead.id}/editar`} variant="secondary" size="sm">
             <Pencil size={14} strokeWidth={1.5} aria-hidden />
             Editar
