@@ -101,3 +101,41 @@ export async function cancelarVenda(formData: FormData) {
       : "/pagamentos",
   );
 }
+
+/**
+ * Data prevista de confirmação de uma venda pendente (0052). Vendedor mexe
+ * nas próprias; gestão em qualquer uma. Data vazia limpa a previsão.
+ */
+export async function definirPrevista(formData: FormData) {
+  const perfil = await perfilAtual();
+  if (!perfil) redirect("/entrar");
+
+  const id = String(formData.get("id") ?? "");
+  const bruto = String(formData.get("prevista") ?? "").trim();
+
+  function falhar(aviso: string): never {
+    redirect(`/pagamentos?aviso=${encodeURIComponent(aviso)}`);
+  }
+  if (!id) falhar("Venda não informada.");
+
+  const prevista = bruto === "" ? null : bruto;
+  if (prevista !== null && !/^\d{4}-\d{2}-\d{2}$/.test(prevista)) {
+    falhar("Data prevista inválida.");
+  }
+
+  const supabase = await createClient();
+  const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
+  let q = supabase.from("sales").update({ prevista_em: prevista }).eq("id", id);
+  if (!ehGestor) q = q.eq("vendedor_id", perfil.id);
+  const { error } = await q;
+  if (error) {
+    falhar(
+      error.code === "42703"
+        ? "Rode a migração 0052 para a data prevista existir."
+        : `Não deu para salvar: ${error.message}`,
+    );
+  }
+
+  revalidatePath("/pagamentos");
+  redirect("/pagamentos");
+}
