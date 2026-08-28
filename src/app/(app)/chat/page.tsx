@@ -186,10 +186,15 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     return q;
   }
 
-  let { data: brutas } = await montarConsulta("prazo");
-  if (brutas === null) ({ data: brutas } = await montarConsulta("adiado"));
-  if (brutas === null) ({ data: brutas } = await montarConsulta("base"));
-  let conversas = (brutas ?? []) as unknown as ConversaLinha[];
+  // Em promessa, não em await: a lista corre em paralelo com as oito
+  // contagens do cabeçalho — antes eram estágios em cascata e a página
+  // pagava um round-trip inteiro por estágio (auditoria: ~1,8s sem conversa).
+  const listaPromise = (async () => {
+    let { data: brutas } = await montarConsulta("prazo");
+    if (brutas === null) ({ data: brutas } = await montarConsulta("adiado"));
+    if (brutas === null) ({ data: brutas } = await montarConsulta("base"));
+    return (brutas ?? []) as unknown as ConversaLinha[];
+  })();
 
   const naoLida = (c: ConversaLinha) =>
     c.ultima_interacao_em !== null &&
@@ -210,9 +215,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     (c.chat_lido_em === null ||
       Date.parse(c.chat_lido_em) < Date.parse(c.chat_adiado_ate));
 
-  if (filtro === "naolidas") {
-    conversas = conversas.filter(naoLida);
-  }
 
   // Etiquetas (filtro e ferramentas), parâmetro do alerta de espera, equipe
   // para o filtro de atendente e a contagem do atalho "Adiadas".
@@ -269,6 +271,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   };
 
   const [
+    conversasBrutas,
     { data: tagsAtivas },
     { data: alertaCfg },
     { data: pessoasFiltro },
@@ -278,6 +281,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     totalSemDono,
     totalTodas,
   ] = await Promise.all([
+      listaPromise,
       supabase
         .from("tags")
         .select("id, nome, cor")
@@ -300,6 +304,10 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       contarEscopo("sem"),
       contarEscopo(""),
     ]);
+  let conversas = conversasBrutas;
+  if (filtro === "naolidas") {
+    conversas = conversas.filter(naoLida);
+  }
   const etiquetas = (tagsAtivas ?? []) as Etiqueta[];
   const equipeAtendentes = (pessoasFiltro ?? []) as { id: string; nome: string }[];
   const minutosAlerta = Math.max(1, Number(alertaCfg?.valor ?? 15));
@@ -316,56 +324,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       ? Math.floor((agoraMs - new Date(c.ultima_interacao_em).getTime()) / 60_000)
       : 0;
 
-  // Etiquetas das conversas listadas, numa consulta só — a cor aparece na
-  // faixa lateral e nos chips, para reconhecer a conversa de relance.
-  const etiquetasPorLead = new Map<string, Etiqueta[]>();
-  if (conversas.length > 0) {
-    const { data: vinculos } = await supabase
-      .from("lead_tags")
-      .select("lead_id, tag:tags(id, nome, cor)")
-      .in(
-        "lead_id",
-        conversas.map((c) => c.id),
-      );
-
-    for (const vinculo of (vinculos ?? []) as unknown as {
-      lead_id: string;
-      tag: Etiqueta | null;
-    }[]) {
-      if (!vinculo.tag) continue;
-      const atuais = etiquetasPorLead.get(vinculo.lead_id) ?? [];
-      atuais.push(vinculo.tag);
-      etiquetasPorLead.set(vinculo.lead_id, atuais);
-    }
-  }
-
-  // Prévia da última mensagem, numa consulta só.
-  const previas = new Map<string, string>();
-  if (conversas.length > 0) {
-    const { data: ultimas } = await supabase
-      .from("lead_interactions")
-      .select("lead_id, conteudo, criado_em")
-      .in(
-        "lead_id",
-        conversas.map((c) => c.id),
-      )
-      .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
-      .order("criado_em", { ascending: false })
-      .limit(300);
-
-    for (const linha of (ultimas ?? []) as {
-      lead_id: string;
-      conteudo: string | null;
-    }[]) {
-      if (!previas.has(linha.lead_id)) {
-        previas.set(linha.lead_id, linha.conteudo ?? "");
-      }
-    }
-  }
-
-  // Conversa aberta: mensagens + dados do lead; abrir marca como lida.
-  // Conversa aberta: pode estar fora da lista (adiada, outro filtro, busca).
-  // Desce de nível conforme as colunas que o banco tem (0042 → 0017 → base).
   async function buscarConversaAberta(
     id: string,
   ): Promise<ConversaLinha | null> {
@@ -380,9 +338,80 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     return null;
   }
 
+  // Prévia da última mensagem de cada conversa: a RPC da 0045 devolve UMA
+  // linha por lead (distinct on). Sem a migração, cai no caminho antigo —
+  // 300 interações recentes, primeira de cada lead.
+  async function buscarPrevias(ids: string[]) {
+    const { data, error } = await supabase.rpc("previas_conversas", {
+      p_lead_ids: ids,
+    });
+    if (!error) {
+      return (data ?? []) as {
+        lead_id: string;
+        tipo: string;
+        conteudo: string | null;
+      }[];
+    }
+    const { data: ultimas } = await supabase
+      .from("lead_interactions")
+      .select("lead_id, tipo, conteudo, criado_em")
+      .in("lead_id", ids)
+      .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
+      .order("criado_em", { ascending: false })
+      .limit(300);
+    return (ultimas ?? []) as {
+      lead_id: string;
+      tipo: string;
+      conteudo: string | null;
+    }[];
+  }
+
+  // Terceiro estágio único: etiquetas da lista, prévias e a conversa aberta
+  // que está fora da lista viajam juntas — eram três idas em fila.
+  const ids = conversas.map((c) => c.id);
+  const precisaBuscarAberta = Boolean(
+    leadSelecionado && !conversas.some((c) => c.id === leadSelecionado),
+  );
+  const [{ data: vinculos }, linhasPrevia, conversaForaDaLista] =
+    await Promise.all([
+      ids.length > 0
+        ? supabase
+            .from("lead_tags")
+            .select("lead_id, tag:tags(id, nome, cor)")
+            .in("lead_id", ids)
+        : Promise.resolve({ data: [] }),
+      ids.length > 0 ? buscarPrevias(ids) : Promise.resolve([]),
+      precisaBuscarAberta && leadSelecionado
+        ? buscarConversaAberta(leadSelecionado)
+        : Promise.resolve(null),
+    ]);
+
+  const etiquetasPorLead = new Map<string, Etiqueta[]>();
+  for (const vinculo of (vinculos ?? []) as unknown as {
+    lead_id: string;
+    tag: Etiqueta | null;
+  }[]) {
+    if (!vinculo.tag) continue;
+    const atuais = etiquetasPorLead.get(vinculo.lead_id) ?? [];
+    atuais.push(vinculo.tag);
+    etiquetasPorLead.set(vinculo.lead_id, atuais);
+  }
+
+  const previas = new Map<string, { texto: string; tipo: string }>();
+  for (const linha of linhasPrevia) {
+    if (!previas.has(linha.lead_id)) {
+      previas.set(linha.lead_id, {
+        texto: linha.conteudo ?? "",
+        tipo: linha.tipo,
+      });
+    }
+  }
+
+  // Conversa aberta: mensagens + dados do lead; abrir marca como lida.
+  // Conversa aberta: pode estar fora da lista (adiada, outro filtro, busca).
+  // Desce de nível conforme as colunas que o banco tem (0042 → 0017 → base).
   const atual = leadSelecionado
-    ? (conversas.find((c) => c.id === leadSelecionado) ??
-      (await buscarConversaAberta(leadSelecionado)))
+    ? (conversas.find((c) => c.id === leadSelecionado) ?? conversaForaDaLista)
     : null;
 
   let mensagens: Mensagem[] = [];
@@ -595,7 +624,8 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               : "Direct",
           }
         : null,
-      previa: previas.get(conversa.id) ?? "—",
+      previa: previas.get(conversa.id)?.texto ?? "—",
+      previaTipo: previas.get(conversa.id)?.tipo ?? null,
       pendente,
       aberta,
       espera: emAlerta
@@ -626,7 +656,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
 
   return (
     <div className="flex h-[calc(100dvh-64px)] min-h-0 overflow-hidden lg:h-dvh">
-      <AtualizadorTempoReal />
+      <AtualizadorTempoReal leadAbertoId={leadSelecionado} />
       {/* Lista de conversas */}
       <aside
         className={cn(

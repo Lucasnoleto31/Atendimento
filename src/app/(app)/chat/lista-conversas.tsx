@@ -33,6 +33,8 @@ export type ItemConversa = {
   /** Canal de origem, quando não é o WhatsApp padrão da mesa. */
   origem: { canal: "instagram"; identificador: string } | null;
   previa: string;
+  /** Direção da última mensagem — a onda 2 usa para mostrar de quem é a vez. */
+  previaTipo?: string | null;
   pendente: boolean;
   aberta: boolean;
   espera: string | null;

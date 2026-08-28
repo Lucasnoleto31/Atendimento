@@ -2,8 +2,11 @@
 
 import {
   Fragment,
+  memo,
   useActionState,
+  useCallback,
   useEffect,
+  useMemo,
   useOptimistic,
   useRef,
   useState,
@@ -11,6 +14,7 @@ import {
 } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
+import { ignorarEcoRealtime } from "./tempo-real";
 import Link from "next/link";
 import {
   ArrowDown,
@@ -42,7 +46,9 @@ import { corrigirTexto, sugerirResposta } from "./ia";
 const ESTADO: ResultadoEnvio = {};
 // 30s: o tempo real (Supabase) cobre o imediato; o polling é só rede de
 // segurança. Intervalos curtos derrubavam o Safari do iPhone por memória.
-const INTERVALO_ATUALIZACAO = 30_000;
+// Rede de segurança, não motor: o Realtime cobre o ao-vivo; isto pega o
+// que escapar (canal caído, aba dormida).
+const INTERVALO_ATUALIZACAO = 60_000;
 
 function assinarPonteiroGrosso(avisar: () => void) {
   const mq = window.matchMedia("(pointer: coarse)");
@@ -85,6 +91,112 @@ export type Mensagem = {
 };
 
 export type MensagemPadrao = { id: string; titulo: string; corpo: string };
+
+const horario = (iso: string) =>
+  new Date(iso).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+/**
+ * As bolhas da conversa, memoizadas: cada tecla no compositor muda o estado
+ * `texto` do pai, e sem isto as até 200 bolhas eram reconciliadas por tecla
+ * — o lag de digitação medido na auditoria.
+ */
+const Bolhas = memo(function Bolhas({
+  mensagens,
+  hojeChave,
+  ontemChave,
+}: {
+  mensagens: Mensagem[];
+  hojeChave: string;
+  ontemChave: string;
+}) {
+  const rotuloDia = (iso: string) => {
+    const chave = FORMATO_DIA.format(new Date(iso));
+    return chave === hojeChave ? "Hoje" : chave === ontemChave ? "Ontem" : chave;
+  };
+  return (
+    <>
+      {mensagens.map((mensagem, i) => {
+              const enviada = mensagem.tipo === "mensagem_enviada";
+              const nota = mensagem.tipo === "nota";
+              const anexos = mensagem.anexos ?? [];
+              // O placeholder "[imagem]" só faz sentido quando o anexo não é exibido.
+              const soPlaceholder =
+                anexos.length > 0 && /^\[.+\]$/.test(mensagem.conteudo ?? "");
+              const dia = rotuloDia(mensagem.criado_em);
+              const mostraDia =
+                i === 0 || rotuloDia(mensagens[i - 1].criado_em) !== dia;
+              return (
+                <Fragment key={mensagem.id}>
+                  {mostraDia ? (
+                    <span className="self-center rounded-sm bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
+                      {dia}
+                    </span>
+                  ) : null}
+                  <div
+                    className={cn(
+                      "max-w-[75%] rounded-md px-1.5 py-1 shadow-sm",
+                      nota
+                        ? "self-end border border-accent-300 bg-accent-100"
+                        : enviada
+                          ? "self-end border border-primary-100 bg-primary-50"
+                          : "self-start border border-neutral-200 bg-neutral-0",
+                      mensagem.pendente ? "opacity-70" : "",
+                    )}
+                  >
+                    {nota ? (
+                      <p className="text-xs font-medium tracking-[0.06em] text-accent-700 uppercase">
+                        Nota privada
+                      </p>
+                    ) : null}
+                    {anexos.length > 0 ? (
+                      <div className="mb-0.5 flex flex-col gap-0.5">
+                        {anexos.map((anexo, j) => (
+                          <AnexoMensagem key={j} anexo={anexo} />
+                        ))}
+                      </div>
+                    ) : null}
+                    {!soPlaceholder ? (
+                      <p className="text-sm break-words whitespace-pre-wrap text-neutral-800">
+                        {mensagem.conteudo}
+                      </p>
+                    ) : null}
+                    <p className="mt-0.5 flex items-center justify-end gap-0.5 text-right font-mono text-xs text-neutral-400 tabular-nums">
+                      {(enviada || nota) && mensagem.autor
+                        ? `${mensagem.autor} · `
+                        : ""}
+                      {mensagem.pendente ? (
+                        "enviando…"
+                      ) : (
+                        <>
+                          {horario(mensagem.criado_em)}
+                          {enviada ? (
+                            <ReciboEnvio
+                              status={mensagem.statusEnvio}
+                              erro={mensagem.erroEnvio}
+                            />
+                          ) : null}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </Fragment>
+              );
+            })}
+    </>
+  );
+});
+
+type AnexoRemotoEnvio = {
+  caminho: string;
+  nome: string;
+  tipo: string;
+  tamanho: number;
+};
 
 const BOTAO_FERRAMENTA =
   "inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md border border-neutral-300 bg-neutral-0 text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500";
@@ -327,11 +439,23 @@ export function Janela({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
 
+  // Confirmadas locais: sem revalidatePath no envio, a bolha otimista
+  // reverteria quando a action termina — a interação que ela devolve entra
+  // aqui e segura a mensagem na tela até um refresh natural alcançá-la
+  // (aí o filtro por id descarta a cópia local).
+  const [confirmadasLocais, setConfirmadasLocais] = useState<Mensagem[]>([]);
+  const baseMensagens = useMemo(() => {
+    if (confirmadasLocais.length === 0) return mensagens;
+    const noServidor = new Set(mensagens.map((m) => m.id));
+    const locais = confirmadasLocais.filter((m) => !noServidor.has(m.id));
+    return locais.length > 0 ? [...mensagens, ...locais] : mensagens;
+  }, [mensagens, confirmadasLocais]);
+
   // Envio otimista: a mensagem aparece na hora, em cinza, enquanto viaja.
   const [listaMensagens, adicionarOtimista] = useOptimistic<
     Mensagem[],
     Mensagem
-  >(mensagens, (lista, nova) => [...lista, nova]);
+  >(baseMensagens, (lista, nova) => [...lista, nova]);
   const contadorOtimistaRef = useRef(0);
 
   // Mensagens prontas: painel abre pelo botão de raio ou digitando "/".
@@ -381,6 +505,15 @@ export function Janela({
   // Abrir a conversa marca como lida — UMA vez, na montagem. Antes o servidor
   // marcava a cada render: a aba aberta de um colega apagava o "não lida" da
   // equipe a cada 30s e desfazia o "marcar como não lida".
+  // Troca de conversa zera as confirmadas da anterior — ajuste de estado
+  // durante o render (padrão do React para "estado derivado de prop"), sem
+  // efeito e sem render em cascata.
+  const [leadAnterior, setLeadAnterior] = useState(leadId);
+  if (leadId !== leadAnterior) {
+    setLeadAnterior(leadId);
+    setConfirmadasLocais([]);
+  }
+
   useEffect(() => {
     void marcarChatLido(leadId);
   }, [leadId]);
@@ -413,6 +546,22 @@ export function Janela({
     if (estado.ok) {
       setBackupEnvio(null);
       setAvisoArquivo(null);
+      if (estado.interacao) {
+        // O eco do Realtime desta mensagem não custa refresh…
+        ignorarEcoRealtime(estado.interacao.id);
+        // …e ela fica na tela por conta própria, sem re-render da página.
+        const nova: Mensagem = {
+          id: estado.interacao.id,
+          tipo: estado.interacao.tipo,
+          conteudo: estado.interacao.conteudo,
+          criado_em: estado.interacao.criado_em,
+          autor: estado.interacao.autor,
+          anexos: estado.interacao.anexos,
+        };
+        setConfirmadasLocais((atuais) =>
+          atuais.some((m) => m.id === nova.id) ? atuais : [...atuais, nova],
+        );
+      }
     } else if (estado.erro && backupEnvio) {
       setTexto(backupEnvio.texto);
       setArquivos(backupEnvio.arquivos);
@@ -517,7 +666,7 @@ export function Janela({
     area?.focus();
   };
 
-  const adicionarArquivos = (novos: FileList | null) => {
+  const adicionarArquivos = useCallback((novos: FileList | null) => {
     if (!novos || novos.length === 0) return;
     setAvisoArquivo(null);
 
@@ -538,11 +687,14 @@ export function Janela({
       aceitos.push(arquivo);
     }
 
-    if (arquivos.length + aceitos.length > MAX_ANEXOS) {
-      setAvisoArquivo(`No máximo ${MAX_ANEXOS} anexos por mensagem.`);
-    }
-    setArquivos([...arquivos, ...aceitos].slice(0, MAX_ANEXOS));
-  };
+    setArquivos((atuais) => {
+      if (atuais.length + aceitos.length > MAX_ANEXOS) {
+        setAvisoArquivo(`No máximo ${MAX_ANEXOS} anexos por mensagem.`);
+      }
+      return atuais;
+    });
+    setArquivos((atuais) => [...atuais, ...aceitos].slice(0, MAX_ANEXOS));
+  }, []);
 
   const removerArquivo = (indice: number) => {
     setArquivos(arquivos.filter((_, i) => i !== indice));
@@ -574,7 +726,7 @@ export function Janela({
     };
     window.addEventListener("paste", aoColar);
     return () => window.removeEventListener("paste", aoColar);
-  });
+  }, [modo, temConversa, restanteJanela, adicionarArquivos]);
 
   // Janela de 24h do WhatsApp: fora dela (ou se o lead nunca respondeu), a
   // Meta aceita a mensagem livre e DESCARTA depois — enviar é gritar no vazio.
@@ -624,34 +776,43 @@ export function Janela({
     }
 
     if (modo === "responder" && arquivos.length > 0) {
-      const remotos: {
-        caminho: string;
-        nome: string;
-        tipo: string;
-        tamanho: number;
-      }[] = [];
+      const remotos: AnexoRemotoEnvio[] = [];
       const storage = criarClienteNavegador().storage.from("midia-whatsapp");
-      for (const arquivo of arquivos) {
-        const preparo = await prepararUploadAnexo(arquivo.name);
-        if (preparo.erro || !preparo.caminho || !preparo.token) {
-          setAvisoArquivo(preparo.erro ?? "Não deu para preparar o upload.");
+      // Em paralelo: cinco anexos custavam dez idas em série (preparo +
+      // upload de cada um); agora custam o tempo do mais lento.
+      type ResultadoUpload =
+        | { erro: string }
+        | { erro?: undefined; remoto: AnexoRemotoEnvio };
+      const resultados: ResultadoUpload[] = await Promise.all(
+        arquivos.map(async (arquivo): Promise<ResultadoUpload> => {
+          const preparo = await prepararUploadAnexo(arquivo.name);
+          if (preparo.erro || !preparo.caminho || !preparo.token) {
+            return { erro: preparo.erro ?? "Não deu para preparar o upload." };
+          }
+          const { error } = await storage.uploadToSignedUrl(
+            preparo.caminho,
+            preparo.token,
+            arquivo,
+          );
+          if (error) {
+            return { erro: `Falha ao subir "${arquivo.name}": ${error.message}` };
+          }
+          return {
+            remoto: {
+              caminho: preparo.caminho,
+              nome: arquivo.name,
+              tipo: arquivo.type,
+              tamanho: arquivo.size,
+            },
+          };
+        }),
+      );
+      for (const resultado of resultados) {
+        if (resultado.erro !== undefined) {
+          setAvisoArquivo(resultado.erro);
           return;
         }
-        const { error } = await storage.uploadToSignedUrl(
-          preparo.caminho,
-          preparo.token,
-          arquivo,
-        );
-        if (error) {
-          setAvisoArquivo(`Falha ao subir "${arquivo.name}": ${error.message}`);
-          return;
-        }
-        remotos.push({
-          caminho: preparo.caminho,
-          nome: arquivo.name,
-          tipo: arquivo.type,
-          tamanho: arquivo.size,
-        });
+        remotos.push(resultado.remoto);
       }
       formData.set("anexos_remotos", JSON.stringify(remotos));
     }
@@ -664,19 +825,6 @@ export function Janela({
     if (modo !== "nota") setArquivos([]);
     localStorage.removeItem(chaveRascunho);
     formAction(formData);
-  };
-
-  const horario = (iso: string) =>
-    new Date(iso).toLocaleString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-  const rotuloDia = (iso: string) => {
-    const chave = FORMATO_DIA.format(new Date(iso));
-    return chave === hojeChave ? "Hoje" : chave === ontemChave ? "Ontem" : chave;
   };
 
   return (
@@ -702,73 +850,12 @@ export function Janela({
               Nenhuma mensagem no histórico ainda.
             </p>
           ) : (
-            listaMensagens.map((mensagem, i) => {
-              const enviada = mensagem.tipo === "mensagem_enviada";
-              const nota = mensagem.tipo === "nota";
-              const anexos = mensagem.anexos ?? [];
-              // O placeholder "[imagem]" só faz sentido quando o anexo não é exibido.
-              const soPlaceholder =
-                anexos.length > 0 && /^\[.+\]$/.test(mensagem.conteudo ?? "");
-              const dia = rotuloDia(mensagem.criado_em);
-              const mostraDia =
-                i === 0 || rotuloDia(listaMensagens[i - 1].criado_em) !== dia;
-              return (
-                <Fragment key={mensagem.id}>
-                  {mostraDia ? (
-                    <span className="self-center rounded-sm bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
-                      {dia}
-                    </span>
-                  ) : null}
-                  <div
-                    className={cn(
-                      "max-w-[75%] rounded-md px-1.5 py-1 shadow-sm",
-                      nota
-                        ? "self-end border border-accent-300 bg-accent-100"
-                        : enviada
-                          ? "self-end border border-primary-100 bg-primary-50"
-                          : "self-start border border-neutral-200 bg-neutral-0",
-                      mensagem.pendente ? "opacity-70" : "",
-                    )}
-                  >
-                    {nota ? (
-                      <p className="text-xs font-medium tracking-[0.06em] text-accent-700 uppercase">
-                        Nota privada
-                      </p>
-                    ) : null}
-                    {anexos.length > 0 ? (
-                      <div className="mb-0.5 flex flex-col gap-0.5">
-                        {anexos.map((anexo, j) => (
-                          <AnexoMensagem key={j} anexo={anexo} />
-                        ))}
-                      </div>
-                    ) : null}
-                    {!soPlaceholder ? (
-                      <p className="text-sm break-words whitespace-pre-wrap text-neutral-800">
-                        {mensagem.conteudo}
-                      </p>
-                    ) : null}
-                    <p className="mt-0.5 flex items-center justify-end gap-0.5 text-right font-mono text-xs text-neutral-400 tabular-nums">
-                      {(enviada || nota) && mensagem.autor
-                        ? `${mensagem.autor} · `
-                        : ""}
-                      {mensagem.pendente ? (
-                        "enviando…"
-                      ) : (
-                        <>
-                          {horario(mensagem.criado_em)}
-                          {enviada ? (
-                            <ReciboEnvio
-                              status={mensagem.statusEnvio}
-                              erro={mensagem.erroEnvio}
-                            />
-                          ) : null}
-                        </>
-                      )}
-                    </p>
-                  </div>
-                </Fragment>
-              );
-            })
+            <Bolhas
+              mensagens={listaMensagens}
+              hojeChave={hojeChave}
+              ontemChave={ontemChave}
+            />
+          
           )}
         </div>
 

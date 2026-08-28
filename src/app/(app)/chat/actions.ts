@@ -111,7 +111,25 @@ function suportadoWhatsApp(arquivo: File): boolean {
   return EXTS_WHATSAPP.has(ext);
 }
 
-export type ResultadoEnvio = { ok?: boolean; erro?: string };
+/**
+ * A interação recém-criada volta para a Janela reconciliar no estado local —
+ * é o que dispensa o revalidatePath("/chat") no envio (que re-renderizava a
+ * página inteira DUAS vezes: revalidate + eco do realtime).
+ */
+export type InteracaoCriada = {
+  id: string;
+  tipo: "mensagem_enviada" | "nota";
+  conteudo: string | null;
+  criado_em: string;
+  autor: string | null;
+  anexos: { tipo: string; url: string; nome?: string | null }[];
+};
+
+export type ResultadoEnvio = {
+  ok?: boolean;
+  erro?: string;
+  interacao?: InteracaoCriada;
+};
 
 async function leadComConversa(leadId: string) {
   const supabase = await createClient();
@@ -228,20 +246,41 @@ export async function enviarMensagemLead(
     }
 
     const supabase = await createClient();
-    await supabase.from("lead_interactions").insert({
-      lead_id: leadId,
-      tipo: "nota",
-      conteudo: textoBruto,
-      autor_id: perfil.id,
-      metadados: {
-        via: "crm",
-        ...(notaId !== null ? { chatwoot_message_id: notaId } : {}),
-      },
-    });
+    const { data: notaCriada } = await supabase
+      .from("lead_interactions")
+      .insert({
+        lead_id: leadId,
+        tipo: "nota",
+        conteudo: textoBruto,
+        autor_id: perfil.id,
+        metadados: {
+          via: "crm",
+          ...(notaId !== null ? { chatwoot_message_id: notaId } : {}),
+        },
+      })
+      .select("id, criado_em")
+      .maybeSingle();
 
-    revalidatePath("/chat");
+    // Sem revalidatePath("/chat"): a Janela recebe a nota criada e coloca no
+    // histórico local — a página não re-renderiza inteira por causa disso.
+    // Se o insert não devolveu a linha (não deveria), revalida como antes.
+    if (!notaCriada) revalidatePath("/chat");
     revalidatePath(`/leads/${leadId}`);
-    return { ok: true };
+    return {
+      ok: true,
+      ...(notaCriada
+        ? {
+            interacao: {
+              id: notaCriada.id as string,
+              tipo: "nota" as const,
+              conteudo: textoBruto,
+              criado_em: notaCriada.criado_em as string,
+              autor: perfil.nome,
+              anexos: [],
+            },
+          }
+        : {}),
+    };
   }
 
   // A assinatura vai no formato de negrito do WhatsApp.
@@ -429,28 +468,32 @@ export async function enviarMensagemLead(
   const agora = new Date().toISOString();
   const supabase = await createClient();
 
-  await supabase.from("lead_interactions").insert({
-    lead_id: leadId,
-    tipo: "mensagem_enviada",
-    conteudo,
-    autor_id: perfil.id,
-    metadados: {
-      via: "crm",
-      ...(canal === "meta"
-        ? {
-            message_id: mensagemId,
-            // Recibos (✓✓/falhou) casam por qualquer wamid do envio, não só
-            // o do último arquivo.
-            ...(wamids.length > 1 ? { message_ids: wamids } : {}),
-            ...(falhaParcial ? { falha_parcial: falhaParcial } : {}),
-          }
-        : {
-            chatwoot_message_id: mensagemId,
-            chatwoot_conversation_id: lead.chatwoot_conversation_id,
-          }),
-      ...(anexos.length > 0 ? { anexos } : {}),
-    },
-  });
+  const { data: criada } = await supabase
+    .from("lead_interactions")
+    .insert({
+      lead_id: leadId,
+      tipo: "mensagem_enviada",
+      conteudo,
+      autor_id: perfil.id,
+      metadados: {
+        via: "crm",
+        ...(canal === "meta"
+          ? {
+              message_id: mensagemId,
+              // Recibos (✓✓/falhou) casam por qualquer wamid do envio, não só
+              // o do último arquivo.
+              ...(wamids.length > 1 ? { message_ids: wamids } : {}),
+              ...(falhaParcial ? { falha_parcial: falhaParcial } : {}),
+            }
+          : {
+              chatwoot_message_id: mensagemId,
+              chatwoot_conversation_id: lead.chatwoot_conversation_id,
+            }),
+        ...(anexos.length > 0 ? { anexos } : {}),
+      },
+    })
+    .select("id, criado_em")
+    .maybeSingle();
 
   await supabase
     .from("leads")
@@ -462,18 +505,39 @@ export async function enviarMensagemLead(
   await avancarAposDisparo(servico, [leadId]);
   await marcarRoteiroEnviado(servico, [leadId]);
 
-  revalidatePath("/chat");
+  // Sem revalidatePath("/chat") no envio: a Janela recebe a interação criada
+  // e reconcilia no estado local (o eco do realtime é ignorado pelo id). O
+  // render duplo de cada envio — revalidate + eco 3s depois — deixa de
+  // existir. Se o insert não devolveu a linha (não deveria), revalida como
+  // antes para a mensagem não sumir da tela.
+  if (!criada) revalidatePath("/chat");
   // A carteira mostra "último contato": sem isto ela seguia no valor velho.
   revalidatePath("/carteira");
   revalidatePath("/atendimento");
   revalidatePath(`/leads/${leadId}`);
 
+  // A interação volta mesmo com falha parcial: os anexos que chegaram JÁ
+  // estão no histórico — a tela precisa mostrá-los junto do aviso.
+  const interacao = criada
+    ? {
+        interacao: {
+          id: criada.id as string,
+          tipo: "mensagem_enviada" as const,
+          conteudo,
+          criado_em: criada.criado_em as string,
+          autor: perfil.nome,
+          anexos,
+        },
+      }
+    : {};
+
   if (falhaParcial) {
     return {
       erro: `Atenção: ${enviados} de ${arquivos.length} anexos e o texto JÁ chegaram ao lead (registrados no histórico). Falhou ${falhaParcial} — reenvie SÓ esse arquivo.`,
+      ...interacao,
     };
   }
-  return { ok: true };
+  return { ok: true, ...interacao };
 }
 
 /**
