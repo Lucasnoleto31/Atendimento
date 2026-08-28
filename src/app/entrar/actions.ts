@@ -99,7 +99,11 @@ export async function entrar(
 
 export async function sair() {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  // Escopo global explícito: revoga o refresh token NO SERVIDOR, em todos
+  // os aparelhos — sair não é só apagar o cookie deste navegador. O token
+  // de acesso morre em minutos e o getUser() do middleware (que valida no
+  // servidor a cada request) derruba antes disso.
+  await supabase.auth.signOut({ scope: "global" });
   revalidatePath("/", "layout");
   redirect("/entrar");
 }
