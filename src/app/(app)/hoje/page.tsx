@@ -3,7 +3,13 @@ import Link from "next/link";
 import { MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { agoraEmBrasilia, formatarTelefone, horaOuData } from "@/lib/format";
+import {
+  agoraEmBrasilia,
+  formatarData,
+  formatarReais,
+  formatarTelefone,
+  horaOuData,
+} from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { TarefaDoDia, type TarefaDia } from "./tarefa-do-dia";
 
@@ -44,6 +50,25 @@ type LinhaAtivacao = {
 };
 
 const ETIQUETA_ROTEIRO = "Ativação · roteiro enviado";
+
+type LinhaRisco = {
+  customer_id: string;
+  nome_completo: string;
+  lotes_30d: number | null;
+  lotes_30d_anterior: number | null;
+  dias_sem_giro: number | null;
+  receita_30d_centavos: number | null;
+  lead_id: string | null;
+  ultima_interacao_em: string | null;
+};
+
+type LinhaVendaPendente = {
+  id: string;
+  valor_comissao_centavos: number;
+  ocorreu_em: string;
+  produto: { nome: string } | null;
+  lead: { id: string; nome: string } | null;
+};
 
 /** "menos de 1h", "5h", "3 dias" — a idade da espera, sem casas decimais. */
 function tempoEsperando(horas: number | null) {
@@ -136,6 +161,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
     { count: ganhosHoje },
     { count: vendasHoje },
     ativacoesHoje,
+    { data: riscoBruto, error: erroRisco },
+    { data: pendentesData, count: totalPendentes, error: erroPendentes },
     { data: metaPerfil },
   ] = await Promise.all([
     // 1. Tarefas vencidas e as que vencem até o fim de hoje, em Brasília.
@@ -250,6 +277,34 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
       .eq("status", "confirmada")
       .gte("ocorreu_em", hoje.inicioDoDia),
     ativacoesRegistradasHoje(),
+    // 4. Giro em risco: mesmo critério da Carteira (queda de 25%+ ou zerou,
+    // entre quem já girou). A comparação coluna×coluna (atual < 75% do
+    // anterior) não existe no PostgREST: busca o conjunto candidato — quem já
+    // girou nesta carteira, um punhado — e o critério exato fecha aqui.
+    supabase
+      .from("v_carteira")
+      .select(
+        "customer_id, nome_completo, lotes_30d, lotes_30d_anterior, dias_sem_giro, receita_30d_centavos, lead_id, ultima_interacao_em",
+      )
+      .eq("responsavel_id", alvoId)
+      .not("ultimo_giro_em", "is", null)
+      .or("lotes_30d.eq.0,lotes_30d_anterior.gt.0")
+      .limit(1000),
+    // 5. Vendas pendentes há mais de 7 dias.
+    supabase
+      .from("sales")
+      .select(
+        "id, valor_comissao_centavos, ocorreu_em, produto:products(nome), lead:leads(id, nome)",
+        { count: "exact" },
+      )
+      .eq("vendedor_id", alvoId)
+      .eq("status", "pendente")
+      .lte(
+        "ocorreu_em",
+        new Date(agoraMs - 7 * 86_400_000).toISOString(),
+      )
+      .order("ocorreu_em", { ascending: true })
+      .limit(LIMITE),
     supabase
       .from("profiles")
       .select("meta_contatos_dia")
@@ -270,6 +325,21 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   const vencidas = tarefas.filter((t) => t.vencida).length;
 
   const espera = (esperaData ?? []) as unknown as LinhaEspera[];
+
+  // Critério exato do risco + ordenação pelo maior dinheiro em risco.
+  const riscoTodos = ((riscoBruto ?? []) as unknown as LinhaRisco[])
+    .filter((c) => {
+      const atual = c.lotes_30d ?? 0;
+      const anterior = c.lotes_30d_anterior ?? 0;
+      return atual === 0 || (anterior > 0 && atual < anterior * 0.75);
+    })
+    .sort(
+      (a, b) => (b.receita_30d_centavos ?? 0) - (a.receita_30d_centavos ?? 0),
+    );
+  const risco = riscoTodos.slice(0, LIMITE);
+  const totalRisco = riscoTodos.length;
+
+  const pendentes = (pendentesData ?? []) as unknown as LinhaVendaPendente[];
   const ativacao = (ativacaoData ?? []) as unknown as LinhaAtivacao[];
 
   const enviadas = enviadasManuais ?? 0;
@@ -609,6 +679,153 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
               href="/leads?lista=primeiro_giro"
               rotulo="ver a lista em Leads"
               unidade="conta(s)"
+            />
+          </>
+        )}
+      </section>
+
+      {/* ── 4. Giro em risco ── */}
+      <section className="mt-3 max-w-[720px]" aria-labelledby="risco-titulo">
+        <div className="flex flex-wrap items-baseline gap-1">
+          <h2
+            id="risco-titulo"
+            className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase"
+          >
+            4 · Giro em risco
+          </h2>
+          <span className="font-mono text-xs text-neutral-400 tabular-nums">
+            {totalRisco}
+          </span>
+        </div>
+        <p className="mt-0.5 max-w-[68ch] text-sm text-neutral-600">
+          Clientes desta carteira que caíram 25%+ ou zeraram o giro — o maior
+          dinheiro em risco primeiro.
+        </p>
+
+        {erroRisco ? null : risco.length === 0 ? (
+          <p className="mt-1 rounded-lg border border-dashed border-neutral-300 p-2 text-sm text-neutral-600">
+            Tudo em dia — nenhum cliente desta carteira com giro em risco.
+          </p>
+        ) : (
+          <>
+            <ul className="mt-1 flex flex-col gap-1">
+              {risco.map((c) => {
+                const atual = c.lotes_30d ?? 0;
+                const anterior = c.lotes_30d_anterior ?? 0;
+                const variacao =
+                  anterior > 0
+                    ? Math.round(((atual - anterior) / anterior) * 100)
+                    : null;
+                return (
+                  <li key={c.customer_id}>
+                    <Link
+                      href={
+                        c.lead_id
+                          ? `/chat?lead=${c.lead_id}`
+                          : `/carteira/${c.customer_id}`
+                      }
+                      className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-neutral-800">
+                          {c.nome_completo}
+                        </span>
+                        <span className="block font-mono text-xs text-neutral-600 tabular-nums">
+                          {atual} lote(s) 30d
+                          {variacao !== null ? (
+                            <span
+                              className={cn(
+                                "ml-0.5",
+                                variacao < 0 ? "text-danger" : "text-neutral-600",
+                              )}
+                            >
+                              ({variacao > 0 ? "+" : ""}
+                              {variacao}%)
+                            </span>
+                          ) : null}
+                          {c.dias_sem_giro !== null && c.dias_sem_giro > 0
+                            ? ` · sem giro há ${c.dias_sem_giro}d`
+                            : ""}
+                          {c.ultima_interacao_em
+                            ? ` · último contato ${horaOuData(c.ultima_interacao_em)}`
+                            : " · nunca contatado"}
+                        </span>
+                      </span>
+                      <span className="shrink-0 font-mono text-xs font-medium text-neutral-800 tabular-nums">
+                        {formatarReais(c.receita_30d_centavos ?? 0)}
+                      </span>
+                      <MessageSquare
+                        size={16}
+                        strokeWidth={1.5}
+                        aria-hidden
+                        className="shrink-0 text-neutral-400"
+                      />
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+            <MaisNaLista
+              total={totalRisco}
+              href="/leads?lista=giro_em_risco"
+              rotulo="ver a lista em Leads"
+              unidade="cliente(s)"
+            />
+          </>
+        )}
+      </section>
+
+      {/* ── 5. Vendas pendentes ── */}
+      <section className="mt-3 max-w-[720px]" aria-labelledby="pendentes-titulo">
+        <div className="flex flex-wrap items-baseline gap-1">
+          <h2
+            id="pendentes-titulo"
+            className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase"
+          >
+            5 · Vendas pendentes
+          </h2>
+          <span className="font-mono text-xs text-neutral-400 tabular-nums">
+            {totalPendentes ?? 0}
+          </span>
+        </div>
+        <p className="mt-0.5 max-w-[68ch] text-sm text-neutral-600">
+          Vendas suas paradas em “pendente” há mais de 7 dias — confirmar ou
+          cancelar.
+        </p>
+
+        {erroPendentes ? null : pendentes.length === 0 ? (
+          <p className="mt-1 rounded-lg border border-dashed border-neutral-300 p-2 text-sm text-neutral-600">
+            Tudo em dia — nenhuma venda pendente antiga.
+          </p>
+        ) : (
+          <>
+            <ul className="mt-1 flex flex-col gap-1">
+              {pendentes.map((v) => (
+                <li key={v.id}>
+                  <Link
+                    href={v.lead ? `/leads/${v.lead.id}` : "/pagamentos"}
+                    className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-neutral-800">
+                        {v.lead?.nome ?? "Lead removido"}
+                      </span>
+                      <span className="block font-mono text-xs text-neutral-600 tabular-nums">
+                        {v.produto?.nome ?? "produto"} · {formatarData(v.ocorreu_em)}
+                      </span>
+                    </span>
+                    <span className="shrink-0 font-mono text-xs font-medium text-neutral-800 tabular-nums">
+                      {formatarReais(v.valor_comissao_centavos)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <MaisNaLista
+              total={totalPendentes ?? 0}
+              href="/pagamentos"
+              rotulo="ver em Pagamentos"
+              unidade="venda(s)"
             />
           </>
         )}
