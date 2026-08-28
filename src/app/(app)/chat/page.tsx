@@ -57,6 +57,7 @@ type ConversaLinha = {
   chat_lido_em: string | null;
   chatwoot_conversation_id: number | null;
   chat_adiado_em?: string | null;
+  chat_adiado_ate?: string | null;
   chat_resolvido_em?: string | null;
   marketing_bloqueado_em?: string | null;
 };
@@ -65,6 +66,12 @@ const CAMPOS_BASE =
   "id, nome, telefone_e164, instagram_id, instagram_usuario, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em, chatwoot_conversation_id";
 // Sem a migração 0017 a coluna não existe: a consulta cai para os campos base.
 const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em, chat_resolvido_em, marketing_bloqueado_em`;
+// Prazo do adiamento (migração 0042); sem ela, cai para CAMPOS_CONVERSA.
+const CAMPOS_PRAZO = `${CAMPOS_CONVERSA}, chat_adiado_ate`;
+
+// Cada consulta tenta primeiro com o prazo (0042), depois só com as marcas
+// de adiada/resolvida (0017/0018) e por fim com os campos base.
+type NivelConsulta = "prazo" | "adiado" | "base";
 
 function urlChat(
   filtro: ChaveFiltro,
@@ -108,11 +115,46 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
 
   const canal = canalAtivo();
 
-  // A lista da caixa de entrada. `comAdiado` desliga tudo que depende da
-  // coluna chat_adiado_em, para a tela seguir de pé sem a migração 0017.
-  function montarConsulta(comAdiado: boolean) {
-    const campos = comAdiado ? CAMPOS_CONVERSA : CAMPOS_BASE;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder na cadeia condicional
+  // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
+  const agoraMs = Date.now();
+  // O "agora" dos filtros de prazo: adiada de verdade é a que ainda não
+  // venceu; a vencida volta a contar como pendente na caixa de entrada.
+  const agoraIso = new Date(agoraMs).toISOString();
+
+  // Recorte da caixa atual, compartilhado entre a lista e as contagens.
+  // Nível "prazo": adiada = chat_adiado_em preenchido E prazo no futuro
+  // (sem prazo, vale o comportamento antigo: adiada até o lead responder);
+  // a vencida cai de volta na caixa padrão sem apagar o histórico.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder na cadeia condicional
+  function aplicarCaixa(q: any, nivel: NivelConsulta) {
+    if (nivel === "base") return q;
+    if (filtro === "adiadas") {
+      q = q.not("chat_adiado_em", "is", null);
+      if (nivel === "prazo") {
+        q = q.or(`chat_adiado_ate.is.null,chat_adiado_ate.gt."${agoraIso}"`);
+      }
+    } else if (filtro === "resolvidas") {
+      q = q.not("chat_resolvido_em", "is", null);
+    } else {
+      q = q.is("chat_resolvido_em", null);
+      q =
+        nivel === "prazo"
+          ? q.or(`chat_adiado_em.is.null,chat_adiado_ate.lte."${agoraIso}"`)
+          : q.is("chat_adiado_em", null);
+    }
+    return q;
+  }
+
+  // A lista da caixa de entrada. O nível desce conforme as migrações que o
+  // banco tem: "prazo" (0042) → "adiado" (0017/0018) → "base".
+  function montarConsulta(nivel: NivelConsulta) {
+    const campos =
+      nivel === "prazo"
+        ? CAMPOS_PRAZO
+        : nivel === "adiado"
+          ? CAMPOS_CONVERSA
+          : CAMPOS_BASE;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
     let q: any = supabase
       .from("leads")
       .select(etiquetaFiltro ? `${campos}, lead_tags!inner(tag_id)` : campos)
@@ -126,16 +168,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
         ? q.not("ultima_interacao_em", "is", null)
         : q.not("chatwoot_conversation_id", "is", null);
 
-    if (comAdiado) {
-      // A caixa de entrada mostra só o que falta atender: adiadas e
-      // resolvidas saem daqui e vivem nos atalhos próprios.
-      if (filtro === "adiadas") q = q.not("chat_adiado_em", "is", null);
-      else if (filtro === "resolvidas") {
-        q = q.not("chat_resolvido_em", "is", null);
-      } else {
-        q = q.is("chat_adiado_em", null).is("chat_resolvido_em", null);
-      }
-    }
+    // A caixa de entrada mostra só o que falta atender: adiadas (no prazo)
+    // e resolvidas saem daqui e vivem nos atalhos próprios.
+    q = aplicarCaixa(q, nivel);
 
     if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
     else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
@@ -151,13 +186,29 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     return q;
   }
 
-  let { data: brutas } = await montarConsulta(true);
-  if (brutas === null) ({ data: brutas } = await montarConsulta(false));
+  let { data: brutas } = await montarConsulta("prazo");
+  if (brutas === null) ({ data: brutas } = await montarConsulta("adiado"));
+  if (brutas === null) ({ data: brutas } = await montarConsulta("base"));
   let conversas = (brutas ?? []) as unknown as ConversaLinha[];
 
   const naoLida = (c: ConversaLinha) =>
     c.ultima_interacao_em !== null &&
     (c.chat_lido_em === null || c.ultima_interacao_em > c.chat_lido_em);
+
+  // Adiada valendo: o prazo ainda não venceu (sem a coluna do prazo — banco
+  // sem a 0042 — vale o comportamento antigo: adiada até o lead responder).
+  const adiadaNoPrazo = (c: ConversaLinha) =>
+    c.chat_adiado_em != null &&
+    (c.chat_adiado_ate == null || Date.parse(c.chat_adiado_ate) > agoraMs);
+
+  // Prazo de adiamento vencido e ninguém abriu a conversa desde então: ela
+  // voltou à caixa e conta como pendente até alguém olhar (abrir marca lida).
+  const adiadaVencida = (c: ConversaLinha) =>
+    c.chat_adiado_em != null &&
+    c.chat_adiado_ate != null &&
+    Date.parse(c.chat_adiado_ate) <= agoraMs &&
+    (c.chat_lido_em === null ||
+      Date.parse(c.chat_lido_em) < Date.parse(c.chat_adiado_ate));
 
   if (filtro === "naolidas") {
     conversas = conversas.filter(naoLida);
@@ -166,43 +217,54 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   // Etiquetas (filtro e ferramentas), parâmetro do alerta de espera, equipe
   // para o filtro de atendente e a contagem do atalho "Adiadas".
   // Sem a migração 0016 não existe coluna cor — a lista continua, sem cor.
-  // Contagem dos atalhos fora da caixa (adiadas, resolvidas). Sem as
+  // Contagem dos atalhos fora da caixa (adiadas, resolvidas). A de adiadas
+  // só conta as dentro do prazo (0042; sem a coluna cai para todas); sem as
   // migrações 0017/0018 a coluna não existe e o atalho simplesmente some.
-  const contarFora = async (coluna: string): Promise<number> => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
-    let q: any = supabase
-      .from("leads")
-      .select("id", { count: "exact", head: true })
-      .not(coluna, "is", null);
-    q =
-      canal === "meta"
-        ? q.not("ultima_interacao_em", "is", null)
-        : q.not("chatwoot_conversation_id", "is", null);
-    if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
-    else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
-    const { count, error } = await q;
+  const contarFora = async (
+    coluna: "chat_adiado_em" | "chat_resolvido_em",
+  ): Promise<number> => {
+    const montar = (comPrazo: boolean) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
+      let q: any = supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .not(coluna, "is", null);
+      if (comPrazo) {
+        q = q.or(`chat_adiado_ate.is.null,chat_adiado_ate.gt."${agoraIso}"`);
+      }
+      q =
+        canal === "meta"
+          ? q.not("ultima_interacao_em", "is", null)
+          : q.not("chatwoot_conversation_id", "is", null);
+      if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
+      else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
+      return q;
+    };
+    let { count, error } = await montar(coluna === "chat_adiado_em");
+    if (error && coluna === "chat_adiado_em") {
+      ({ count, error } = await montar(false));
+    }
     return error ? 0 : (count ?? 0);
   };
 
   // Contagens do eixo de escopo (Minhas / Sem dono / Todas), na caixa atual.
   const contarEscopo = async (vAlvo: string): Promise<number> => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
-    let q: any = supabase
-      .from("leads")
-      .select("id", { count: "exact", head: true });
-    q =
-      canal === "meta"
-        ? q.not("ultima_interacao_em", "is", null)
-        : q.not("chatwoot_conversation_id", "is", null);
-    if (filtro === "adiadas") q = q.not("chat_adiado_em", "is", null);
-    else if (filtro === "resolvidas") {
-      q = q.not("chat_resolvido_em", "is", null);
-    } else {
-      q = q.is("chat_adiado_em", null).is("chat_resolvido_em", null);
-    }
-    if (vAlvo === "sem") q = q.is("responsavel_id", null);
-    else if (vAlvo) q = q.eq("responsavel_id", vAlvo);
-    const { count, error } = await q;
+    const montar = (nivel: NivelConsulta) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
+      let q: any = supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true });
+      q =
+        canal === "meta"
+          ? q.not("ultima_interacao_em", "is", null)
+          : q.not("chatwoot_conversation_id", "is", null);
+      q = aplicarCaixa(q, nivel);
+      if (vAlvo === "sem") q = q.is("responsavel_id", null);
+      else if (vAlvo) q = q.eq("responsavel_id", vAlvo);
+      return q;
+    };
+    let { count, error } = await montar("prazo");
+    if (error) ({ count, error } = await montar("adiado"));
     return error ? 0 : (count ?? 0);
   };
 
@@ -242,8 +304,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const equipeAtendentes = (pessoasFiltro ?? []) as { id: string; nome: string }[];
   const minutosAlerta = Math.max(1, Number(alertaCfg?.valor ?? 15));
 
-  // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
-  const agoraMs = Date.now();
   // Chaves de dia no fuso da equipe — os separadores do histórico comparam
   // com elas tanto no servidor quanto no cliente, sem depender do fuso local.
   const formatoDia = new Intl.DateTimeFormat("pt-BR", {
@@ -305,24 +365,24 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
 
   // Conversa aberta: mensagens + dados do lead; abrir marca como lida.
   // Conversa aberta: pode estar fora da lista (adiada, outro filtro, busca).
+  // Desce de nível conforme as colunas que o banco tem (0042 → 0017 → base).
+  async function buscarConversaAberta(
+    id: string,
+  ): Promise<ConversaLinha | null> {
+    for (const campos of [CAMPOS_PRAZO, CAMPOS_CONVERSA, CAMPOS_BASE]) {
+      const { data, error } = await supabase
+        .from("leads")
+        .select(campos)
+        .eq("id", id)
+        .maybeSingle();
+      if (!error) return data as unknown as ConversaLinha | null;
+    }
+    return null;
+  }
+
   const atual = leadSelecionado
     ? (conversas.find((c) => c.id === leadSelecionado) ??
-      ((
-        await supabase
-          .from("leads")
-          .select(CAMPOS_CONVERSA)
-          .eq("id", leadSelecionado)
-          .maybeSingle()
-          .then((r) =>
-            r.error
-              ? supabase
-                  .from("leads")
-                  .select(CAMPOS_BASE)
-                  .eq("id", leadSelecionado)
-                  .maybeSingle()
-              : r,
-          )
-      ).data as ConversaLinha | null))
+      (await buscarConversaAberta(leadSelecionado)))
     : null;
 
   let mensagens: Mensagem[] = [];
@@ -511,9 +571,11 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   // cálculo ou classe vai resolvido daqui.
   const itensLista: ItemConversa[] = conversas.map((conversa) => {
     const aberta = conversa.id === atual?.id;
-    const pendente = naoLida(conversa) && !aberta;
-    const espera = pendente ? minutosAguardando(conversa) : 0;
-    const emAlerta = pendente && espera >= minutosAlerta;
+    // A adiada vencida volta como pendente; o alerta de espera continua só
+    // para quem tem mensagem sem resposta (na vencida o lead nem respondeu).
+    const pendente = (naoLida(conversa) || adiadaVencida(conversa)) && !aberta;
+    const espera = naoLida(conversa) && !aberta ? minutosAguardando(conversa) : 0;
+    const emAlerta = espera >= minutosAlerta;
     const etiquetasDaConversa = etiquetasPorLead.get(conversa.id) ?? [];
 
     return {
@@ -541,6 +603,11 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
           ? `${Math.floor(espera / 60)}h`
           : `${espera}min`
         : null,
+      // Na aba Adiadas, até quando cada uma dorme (hora se vence hoje).
+      adiadaAte:
+        filtro === "adiadas" && conversa.chat_adiado_ate
+          ? horaOuData(conversa.chat_adiado_ate)
+          : null,
       // A faixa lateral herda a cor da primeira etiqueta; a conversa aberta
       // continua mandando na cor.
       faixa: aberta
@@ -756,7 +823,12 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               etiquetasLead={etiquetasLead}
               etapas={etapas}
               etapaId={atual.stage_id}
-              adiada={atual.chat_adiado_em != null}
+              adiada={adiadaNoPrazo(atual)}
+              adiadaAte={
+                adiadaNoPrazo(atual) && atual.chat_adiado_ate
+                  ? horaOuData(atual.chat_adiado_ate)
+                  : null
+              }
               resolvida={atual.chat_resolvido_em != null}
             />
 

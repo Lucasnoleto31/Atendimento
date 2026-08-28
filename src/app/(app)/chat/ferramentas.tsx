@@ -23,11 +23,19 @@ import {
   definirResponsavelChat,
   marcarChatNaoLido,
   reativarConversa,
+  type PrazoAdiar,
 } from "./actions";
 
 export type PessoaEquipe = { id: string; nome: string };
 export type Etiqueta = { id: string; nome: string; cor?: string | null };
 export type EtapaFunil = { id: string; nome: string };
+
+/** Opções rápidas de prazo ao adiar — o servidor calcula a data-limite. */
+export const OPCOES_ADIAR: { prazo: PrazoAdiar; rotulo: string }[] = [
+  { prazo: "amanha", rotulo: "Amanhã" },
+  { prazo: "3dias", rotulo: "3 dias" },
+  { prazo: "1semana", rotulo: "1 semana" },
+];
 
 const CAMPO =
   "h-[32px] min-w-0 rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400";
@@ -52,6 +60,7 @@ export function FerramentasConversa({
   etapas,
   etapaId,
   adiada,
+  adiadaAte,
   resolvida,
 }: {
   leadId: string;
@@ -64,6 +73,8 @@ export function FerramentasConversa({
   etapas: EtapaFunil[];
   etapaId: string | null;
   adiada: boolean;
+  /** Até quando está adiada, já formatado — null sem prazo (pré-0042). */
+  adiadaAte: string | null;
   resolvida: boolean;
 }) {
   const [pendente, iniciar] = useTransition();
@@ -104,7 +115,10 @@ export function FerramentasConversa({
   const situacao = estaResolvida
     ? { texto: "Resolvida", classe: "bg-success-bg text-success" }
     : adiada
-      ? { texto: "Adiada", classe: "bg-accent-100 text-accent-700" }
+      ? {
+          texto: adiadaAte ? `Adiada até ${adiadaAte}` : "Adiada",
+          classe: "bg-accent-100 text-accent-700",
+        }
       : null;
 
   return (
@@ -385,23 +399,37 @@ export function FerramentasConversa({
                       Trazer de volta agora
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={pendente}
-                      onClick={() =>
-                        executar(() => adiarConversa(leadId), voltarParaLista)
-                      }
-                      className={ITEM_MENU}
-                    >
-                      <Clock
-                        size={16}
-                        strokeWidth={1.5}
-                        aria-hidden
-                        className="text-neutral-400"
-                      />
-                      Adiar até o lead responder
-                    </button>
+                    <>
+                      {/* Some da caixa e volta quando o prazo vencer — ou
+                          antes, se o lead responder. */}
+                      <p className="px-1.5 pb-0.5 pt-1 text-xs uppercase tracking-[0.06em] text-neutral-600">
+                        Adiar até
+                      </p>
+                      {OPCOES_ADIAR.map((opcao) => (
+                        <button
+                          key={opcao.prazo}
+                          type="button"
+                          role="menuitem"
+                          disabled={pendente}
+                          title="Some da caixa e volta quando o prazo vencer (ou o lead responder)"
+                          onClick={() =>
+                            executar(
+                              () => adiarConversa(leadId, opcao.prazo),
+                              voltarParaLista,
+                            )
+                          }
+                          className={ITEM_MENU}
+                        >
+                          <Clock
+                            size={16}
+                            strokeWidth={1.5}
+                            aria-hidden
+                            className="text-neutral-400"
+                          />
+                          {opcao.rotulo}
+                        </button>
+                      ))}
+                    </>
                   )}
                 </div>
               </>

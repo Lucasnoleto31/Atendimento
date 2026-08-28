@@ -406,17 +406,24 @@ async function processarMensagem(
   }
 
   // Lead respondeu: conversa adiada OU resolvida volta para a caixa de
-  // entrada. Update separado e ignorável — sem as migrações 0017/0018 as
-  // colunas não existem e a mensagem precisa entrar do mesmo jeito.
+  // entrada (o prazo do adiamento também zera). Update separado e ignorável,
+  // descendo um degrau por migração ausente (0042 → 0017/0018) — a mensagem
+  // precisa entrar do mesmo jeito.
   const { error: erroFila } = await service
     .from("leads")
-    .update({ chat_adiado_em: null, chat_resolvido_em: null })
+    .update({ chat_adiado_em: null, chat_adiado_ate: null, chat_resolvido_em: null })
     .eq("id", leadId);
   if (erroFila) {
-    await service
+    const { error: erroSemPrazo } = await service
       .from("leads")
-      .update({ chat_adiado_em: null })
+      .update({ chat_adiado_em: null, chat_resolvido_em: null })
       .eq("id", leadId);
+    if (erroSemPrazo) {
+      await service
+        .from("leads")
+        .update({ chat_adiado_em: null })
+        .eq("id", leadId);
+    }
   }
 
   const { error: erroInteracao } = await service.from("lead_interactions").insert({

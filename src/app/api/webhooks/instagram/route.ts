@@ -168,22 +168,28 @@ async function processarDirect(
 
   if (existente) {
     leadId = existente.id;
-    await service
+    const mudanca = {
+      ultima_interacao_em: agora,
+      // Primeira resposta só é gravada uma vez: é a métrica de ativação.
+      ...(existente.primeira_resposta_em
+        ? {}
+        : { primeira_resposta_em: agora }),
+      // Conversa nova reabre o que estava resolvido ou adiado.
+      chat_resolvido_em: null,
+      chat_adiado_em: null,
+      ...(existente.status === "novo"
+        ? { status: "em_atendimento" as const }
+        : {}),
+    };
+    // O prazo do adiamento (migração 0042) também zera; sem a coluna, o
+    // update repete sem ela para a mensagem entrar do mesmo jeito.
+    const { error } = await service
       .from("leads")
-      .update({
-        ultima_interacao_em: agora,
-        // Primeira resposta só é gravada uma vez: é a métrica de ativação.
-        ...(existente.primeira_resposta_em
-          ? {}
-          : { primeira_resposta_em: agora }),
-        // Conversa nova reabre o que estava resolvido ou adiado.
-        chat_resolvido_em: null,
-        chat_adiado_em: null,
-        ...(existente.status === "novo"
-          ? { status: "em_atendimento" as const }
-          : {}),
-      })
+      .update({ ...mudanca, chat_adiado_ate: null })
       .eq("id", leadId);
+    if (error) {
+      await service.from("leads").update(mudanca).eq("id", leadId);
+    }
   } else {
     // Nome e @ para o lead não nascer como um número opaco.
     const perfil = await perfilInstagram(igsid);

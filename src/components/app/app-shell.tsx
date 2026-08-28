@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Settings,
   ShieldCheck,
+  Sun,
   Users,
   Wallet,
   X,
@@ -24,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { ContadorNaoLidas } from "./nao-lidas";
 
 export const MODULOS = [
+  { href: "/hoje", label: "Hoje", icon: Sun },
   { href: "/atendimento", label: "Atendimento", icon: Columns3 },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/agenda", label: "Agenda", icon: CalendarDays },

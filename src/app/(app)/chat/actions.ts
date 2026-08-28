@@ -5,6 +5,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { avancarAposDisparo } from "@/lib/kanban";
 import { marcarRoteiroEnviado } from "@/lib/ativacao";
 import { perfilAtual } from "@/lib/auth";
+import { formatarData } from "@/lib/format";
 import {
   alterarStatusConversa,
   atribuirConversaPorEmail,
@@ -816,45 +817,71 @@ export async function contarNaoLidas(): Promise<Pendencias> {
 
   const supabase = await createClient();
   const ehMeta = canalAtivo() === "meta";
+  const agoraMs = Date.now();
+  const agoraIso = new Date(agoraMs).toISOString();
+
+  type LinhaFila = {
+    ultima_interacao_em: string;
+    chat_lido_em: string | null;
+    chat_adiado_em?: string | null;
+    chat_adiado_ate?: string | null;
+  };
 
   // Conversa existente: telefone com histórico (Meta) ou vínculo (Chatwoot).
-  // Adiadas não contam — voltam sozinhas quando o lead responder; sem a
-  // migração 0017 a coluna não existe e a contagem segue sem esse filtro.
-  async function buscarFila(ignorandoAdiadas: boolean) {
+  // Adiada dentro do prazo não conta — volta sozinha quando o prazo vence ou
+  // o lead responde. Sem a migração 0042 cai para "adiada não conta nunca"
+  // (0017), e sem a 0017 a contagem segue sem esse filtro.
+  async function buscarFila(nivel: "prazo" | "adiado" | "base") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
     let q: any = supabase
       .from("leads")
-      .select("ultima_interacao_em, chat_lido_em")
+      .select(
+        nivel === "prazo"
+          ? "ultima_interacao_em, chat_lido_em, chat_adiado_em, chat_adiado_ate"
+          : "ultima_interacao_em, chat_lido_em",
+      )
       .not("ultima_interacao_em", "is", null)
       .order("ultima_interacao_em", { ascending: false })
       .limit(500);
     if (!ehMeta) q = q.not("chatwoot_conversation_id", "is", null);
-    // Adiadas e resolvidas saem da conta: o badge tem que zerar.
-    if (ignorandoAdiadas) {
-      q = q.is("chat_adiado_em", null).is("chat_resolvido_em", null);
+    // Adiadas (no prazo) e resolvidas saem da conta: o badge tem que zerar.
+    if (nivel !== "base") {
+      q = q.is("chat_resolvido_em", null);
+      q =
+        nivel === "prazo"
+          ? q.or(`chat_adiado_em.is.null,chat_adiado_ate.lte."${agoraIso}"`)
+          : q.is("chat_adiado_em", null);
     }
 
     const { data, error } = await q;
-    return {
-      data: data as
-        | { ultima_interacao_em: string; chat_lido_em: string | null }[]
-        | null,
-      error,
-    };
+    return { data: data as LinhaFila[] | null, error };
   }
 
   const [fila, { count: vencidas }] = await Promise.all([
-    buscarFila(true).then((r) => (r.error ? buscarFila(false) : r)),
+    buscarFila("prazo")
+      .then((r) => (r.error ? buscarFila("adiado") : r))
+      .then((r) => (r.error ? buscarFila("base") : r)),
     // Tolerante: sem a migração 0013 a tabela não existe e o count vem null.
     supabase
       .from("lead_tasks")
       .select("id", { count: "exact", head: true })
       .is("concluida_em", null)
-      .lt("vence_em", new Date().toISOString()),
+      .lt("vence_em", agoraIso),
   ]);
 
+  // Prazo de adiamento vencido e ninguém abriu desde então: pendente de novo.
+  const adiadaVencida = (l: LinhaFila) =>
+    l.chat_adiado_em != null &&
+    l.chat_adiado_ate != null &&
+    Date.parse(l.chat_adiado_ate) <= agoraMs &&
+    (l.chat_lido_em === null ||
+      Date.parse(l.chat_lido_em) < Date.parse(l.chat_adiado_ate));
+
   const naoLidas = (fila.data ?? []).filter(
-    (l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em,
+    (l) =>
+      l.chat_lido_em === null ||
+      l.ultima_interacao_em > l.chat_lido_em ||
+      adiadaVencida(l),
   ).length;
 
   return { naoLidas, tarefasVencidas: vencidas ?? 0 };
@@ -935,21 +962,53 @@ export async function marcarChatLido(leadId: string) {
     .eq("id", leadId);
 }
 
+/** Opções rápidas de prazo ao adiar — o servidor calcula a data. */
+export type PrazoAdiar = "amanha" | "3dias" | "1semana";
+
+const DIAS_PRAZO: Record<PrazoAdiar, number> = {
+  amanha: 1,
+  "3dias": 3,
+  "1semana": 7,
+};
+
+/** Data-limite do adiamento (ISO) a partir da opção rápida escolhida. */
+function prazoParaIso(prazo: PrazoAdiar, agoraMs: number): string | null {
+  const dias = DIAS_PRAZO[prazo];
+  return dias ? new Date(agoraMs + dias * 86_400_000).toISOString() : null;
+}
+
 /**
- * Adia a conversa: sai da caixa de entrada até o lead responder (o webhook
- * de mensagem recebida limpa a marca), ou até alguém trazer de volta à mão.
+ * Adia a conversa: sai da caixa de entrada até o prazo escolhido. Ela volta
+ * antes se o lead responder (o webhook limpa as marcas) e volta sozinha como
+ * pendente quando o prazo vence — o filtro das consultas compara com now().
+ * Sem a migração 0042 vale o comportamento antigo: adia até o lead responder.
  */
-export async function adiarConversa(leadId: string): Promise<ResultadoEnvio> {
+export async function adiarConversa(
+  leadId: string,
+  prazo: PrazoAdiar,
+): Promise<ResultadoEnvio> {
   const perfil = await perfilAtual();
   if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
   if (!leadId) return { erro: "Lead não informado." };
 
-  const supabase = await createClient();
   const agora = new Date().toISOString();
-  const { error } = await supabase
+  const ate = prazoParaIso(prazo, Date.parse(agora));
+  if (!ate) return { erro: "Escolha até quando adiar." };
+
+  const supabase = await createClient();
+  let comPrazo = true;
+  let { error } = await supabase
     .from("leads")
-    .update({ chat_adiado_em: agora, chat_lido_em: agora })
+    .update({ chat_adiado_em: agora, chat_adiado_ate: ate, chat_lido_em: agora })
     .eq("id", leadId);
+  if (error && error.message.includes("chat_adiado_ate")) {
+    // Sem a coluna da 0042 a conversa ainda adia — só sem prazo de retorno.
+    comPrazo = false;
+    ({ error } = await supabase
+      .from("leads")
+      .update({ chat_adiado_em: agora, chat_lido_em: agora })
+      .eq("id", leadId));
+  }
   if (error) {
     return {
       erro: error.message.includes("chat_adiado_em")
@@ -961,7 +1020,9 @@ export async function adiarConversa(leadId: string): Promise<ResultadoEnvio> {
   await supabase.from("lead_interactions").insert({
     lead_id: leadId,
     tipo: "nota",
-    conteudo: "Conversa adiada até a próxima resposta do lead",
+    conteudo: comPrazo
+      ? `Conversa adiada até ${formatarData(ate)}`
+      : "Conversa adiada até a próxima resposta do lead",
     autor_id: perfil.id,
     metadados: { via: "crm" },
   });
@@ -979,10 +1040,17 @@ export async function reativarConversa(
   if (!leadId) return { erro: "Lead não informado." };
 
   const supabase = await createClient();
-  const { error } = await supabase
+  let { error } = await supabase
     .from("leads")
-    .update({ chat_adiado_em: null })
+    .update({ chat_adiado_em: null, chat_adiado_ate: null })
     .eq("id", leadId);
+  if (error && error.message.includes("chat_adiado_ate")) {
+    // Sem a migração 0042 não existe a coluna do prazo: limpa só a marca.
+    ({ error } = await supabase
+      .from("leads")
+      .update({ chat_adiado_em: null })
+      .eq("id", leadId));
+  }
   if (error) return { erro: error.message };
 
   revalidatePath("/chat");
@@ -1054,13 +1122,28 @@ async function emMassa(
   return { ok: true, total: ids.length };
 }
 
-export async function adiarConversasEmMassa(leadIds: string[]) {
+export async function adiarConversasEmMassa(
+  leadIds: string[],
+  prazo: PrazoAdiar,
+) {
   const agora = new Date().toISOString();
-  return emMassa(
+  const ate = prazoParaIso(prazo, Date.parse(agora));
+  if (!ate) return { erro: "Escolha até quando adiar." };
+
+  const resultado = await emMassa(
     leadIds,
-    { chat_adiado_em: agora, chat_lido_em: agora },
-    "Conversa adiada até a próxima resposta do lead",
+    { chat_adiado_em: agora, chat_adiado_ate: ate, chat_lido_em: agora },
+    `Conversa adiada até ${formatarData(ate)}`,
   );
+  // Sem a migração 0042 não existe a coluna do prazo: adia do jeito antigo.
+  if (resultado.erro?.includes("chat_adiado_ate")) {
+    return emMassa(
+      leadIds,
+      { chat_adiado_em: agora, chat_lido_em: agora },
+      "Conversa adiada até a próxima resposta do lead",
+    );
+  }
+  return resultado;
 }
 
 export async function resolverConversasEmMassa(leadIds: string[]) {

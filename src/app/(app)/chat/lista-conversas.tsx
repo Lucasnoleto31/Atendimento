@@ -19,7 +19,9 @@ import {
   marcarLidasEmMassa,
   marcarNaoLidasEmMassa,
   resolverConversasEmMassa,
+  type PrazoAdiar,
 } from "./actions";
+import { OPCOES_ADIAR } from "./ferramentas";
 
 export type ItemConversa = {
   id: string;
@@ -34,6 +36,8 @@ export type ItemConversa = {
   pendente: boolean;
   aberta: boolean;
   espera: string | null;
+  /** Na aba Adiadas: até quando está adiada, já formatado. */
+  adiadaAte: string | null;
   faixa: string;
   etiquetas: { id: string; nome: string; chip: string }[];
   etiquetasExtras: number;
@@ -107,16 +111,32 @@ export function ListaConversas({
               ·
             </span>
 
-            <button
-              type="button"
+            <label htmlFor="adiar-massa" className="sr-only">
+              Adiar as conversas selecionadas
+            </label>
+            <select
+              id="adiar-massa"
+              defaultValue=""
               disabled={pendente}
-              onClick={() => executar(() => adiarConversasEmMassa(ids))}
-              className={BOTAO_MASSA}
-              title="Somem da caixa e voltam quando o lead responder"
+              title="Somem da caixa e voltam quando o prazo vencer (ou o lead responder)"
+              onChange={(e) => {
+                const valor = e.target.value as PrazoAdiar | "";
+                e.target.value = "";
+                if (valor) {
+                  executar(() => adiarConversasEmMassa(ids, valor));
+                }
+              }}
+              className="h-[32px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
             >
-              <Clock size={14} strokeWidth={1.5} aria-hidden />
-              Adiar
-            </button>
+              <option value="" disabled>
+                Adiar até…
+              </option>
+              {OPCOES_ADIAR.map((opcao) => (
+                <option key={opcao.prazo} value={opcao.prazo}>
+                  {opcao.rotulo}
+                </option>
+              ))}
+            </select>
 
             <button
               type="button"
@@ -309,6 +329,14 @@ export function ListaConversas({
                       {item.espera ? (
                         <span className="inline-flex h-[20px] shrink-0 items-center rounded-sm bg-warning-bg px-0.5 font-mono text-xs font-medium text-warning tabular-nums">
                           {item.espera}
+                        </span>
+                      ) : item.adiadaAte ? (
+                        <span
+                          title="Volta à caixa quando o prazo vencer"
+                          className="inline-flex h-[20px] shrink-0 items-center gap-0.5 rounded-sm bg-neutral-100 px-0.5 font-mono text-xs font-medium text-neutral-600 tabular-nums"
+                        >
+                          <Clock size={12} strokeWidth={1.5} aria-hidden />
+                          até {item.adiadaAte}
                         </span>
                       ) : item.pendente ? (
                         <span
