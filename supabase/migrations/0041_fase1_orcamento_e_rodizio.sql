@@ -24,8 +24,11 @@
 insert into settings (chave, valor) values ('envios_teto_dia', '100'::jsonb)
 on conflict (chave) do nothing;
 
--- 2. Religa a cadência de aquisição -----------------------------------------
-update followup_rules set ativo = true where ancora = 'lead_criado';
+-- 2. Cadência de aquisição: religar SÓ na segunda-feira (decisão de 28/08) --
+-- O comando fica pronto aqui, comentado. Na segunda, rode só esta linha no
+-- SQL Editor — o teto único acima já protege o número:
+--
+--   update followup_rules set ativo = true where ancora = 'lead_criado';
 
 -- 3. Rodízio por pessoa, não por papel ---------------------------------------
 alter table profiles
