@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -20,10 +21,16 @@ export const metadata: Metadata = {
     "Identifique se o lead já é cliente pelo telefone, rastreie a origem do contato, atenda por kanban e calcule a comissão de cada vendedor por produto.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // O cookie é a fonte da verdade do tema: lido aqui no SSR, o <html> já
+  // chega com data-theme certo — sem flash e sem script inline no <head>.
+  // Sem cookie (ou "claro"), nenhum atributo: o tema claro é o padrão.
+  const temaEscuro = (await cookies()).get("tema")?.value === "escuro";
+
   return (
     <html
       lang="pt-BR"
+      data-theme={temaEscuro ? "dark" : undefined}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       {/* suppressHydrationWarning: extensões de navegador injetam atributos

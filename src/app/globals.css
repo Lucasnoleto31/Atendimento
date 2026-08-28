@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Variante dark dirigida pelo atributo data-theme no <html> (não pelo SO). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   /* Fontes */
   --font-sans: var(--font-geist-sans), system-ui, sans-serif;
@@ -78,6 +81,9 @@
   --color-info: #3a6da3;
   --color-info-bg: #eef3f9;
 
+  /* Overlay de modal/diálogo (design system §4) */
+  --color-overlay: rgba(26, 25, 23, 0.4);
+
   /* Raio */
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -87,6 +93,89 @@
   --shadow-sm: 0 1px 2px rgba(26, 25, 23, 0.06);
   --shadow-md: 0 4px 12px rgba(26, 25, 23, 0.08);
   --shadow-lg: 0 12px 32px rgba(26, 25, 23, 0.12);
+}
+
+/*
+ * Tema escuro — ativado por data-theme="dark" no <html> (SSR lê o cookie
+ * `tema`; o AlternadorTema troca atributo + cookie sem reload).
+ *
+ * Os utilitários do Tailwind 4 resolvem para var(--color-*), então basta
+ * REDEFINIR as variáveis aqui: escala neutra invertida com o viés quente
+ * preservado, primária clareada (o fundo de botão vira azul claro com texto
+ * escuro) e semânticas claras sobre fundos -bg escuros. Todos os pares de
+ * texto abaixo foram calculados ≥ 4.5:1 (AA); bordas/ícones funcionais ≥ 3:1.
+ * Este bloco fica fora de @layer de propósito: regra sem camada vence a
+ * emissão de :root que o @theme faz dentro de @layer theme.
+ */
+:root {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  /* Inputs nativos, scrollbars e form controls seguem o tema. */
+  color-scheme: dark;
+
+  /* Neutra invertida (viés quente preservado) */
+  --color-neutral-0: #232120; /* superfície elevada (card, modal) */
+  --color-neutral-50: #1a1917; /* fundo de página */
+  --color-neutral-100: #2e2b29; /* área secundária, hover, zebra */
+  --color-neutral-200: #3b3835; /* bordas e divisores */
+  --color-neutral-300: #4c4844; /* borda de input, desativado */
+  --color-neutral-400: #8a857d; /* placeholder, ícone inativo */
+  --color-neutral-600: #b3ada5; /* texto secundário — 7.2:1 sobre neutral-0 */
+  --color-neutral-800: #e7e5e1; /* texto primário — 12.7:1 sobre neutral-0 */
+  --color-neutral-900: #fafaf9; /* títulos */
+
+  /* Primária clareada */
+  --color-primary-50: #142c44; /* fundo de estado selecionado */
+  --color-primary-100: #1d3c5c; /* hover sutil, ::selection */
+  --color-primary-300: #4f7ca8; /* bordas, ícones — 3.7:1 sobre neutral-0 */
+  --color-primary-500: #7aa7d4; /* marca, links — 7.0:1 sobre neutral-50 */
+  --color-primary-600: #8db8e0; /* botão primário: texto neutral-0 dá 7.7:1 */
+  --color-primary-700: #a3c7e8; /* hover do botão (clareia um passo) */
+  --color-primary-900: #cfe1f2; /* texto sobre primary-50 — 10.7:1 */
+
+  /* Destaque — âmbar ajustado */
+  --color-accent-100: #3a2b12; /* fundo de destaque */
+  --color-accent-300: #c1955a; /* borda de destaque */
+  --color-accent-500: #e59b45; /* indicador de atenção */
+  --color-accent-700: #f2c98d; /* texto sobre accent-100 — 8.8:1 */
+
+  /* Semânticas: texto claro sobre -bg escuro */
+  --color-success: #6ec296; /* 6.6:1 sobre success-bg */
+  --color-success-bg: #17301f;
+  --color-warning: #dfa244; /* 6.4:1 sobre warning-bg */
+  --color-warning-bg: #362808;
+  --color-danger: #ec7d72; /* 6.0:1 sobre danger-bg */
+  --color-danger-bg: #3c1210;
+  --color-info: #7aa7d4; /* 5.6:1 sobre info-bg */
+  --color-info-bg: #142c44;
+
+  /* Overlay mais denso para segurar contraste do fundo escuro */
+  --color-overlay: rgba(0, 0, 0, 0.6);
+
+  /* Sombras mais discretas (referenciadas por CSS custom) */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/*
+ * As utilities shadow-* do Tailwind 4 CONGELAM o valor na compilação
+ * (--tw-shadow: 0 1px 2px var(--tw-shadow-color, #1a19170f)) — redefinir
+ * --shadow-sm acima não as alcança. Sobrescreve-se o --tw-shadow por classe;
+ * fora de @layer, vence a camada utilities. Só sm/md/lg existem no projeto.
+ */
+[data-theme="dark"] .shadow-sm {
+  --tw-shadow: 0 1px 2px var(--tw-shadow-color, rgba(0, 0, 0, 0.3));
+}
+
+[data-theme="dark"] .shadow-md {
+  --tw-shadow: 0 4px 12px var(--tw-shadow-color, rgba(0, 0, 0, 0.35));
+}
+
+[data-theme="dark"] .shadow-lg {
+  --tw-shadow: 0 12px 32px var(--tw-shadow-color, rgba(0, 0, 0, 0.45));
 }
 
 @layer base {

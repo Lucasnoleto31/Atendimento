@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { sair } from "@/app/entrar/actions";
 import { cn } from "@/lib/utils";
+import { AlternadorTema } from "./alternador-tema";
 import { ContadorNaoLidas } from "./nao-lidas";
 
 export const MODULOS = [
@@ -175,7 +176,7 @@ function RodapeUsuario({ perfil }: { perfil: Perfil }) {
         >
           {perfil.nome.slice(0, 2).toUpperCase()}
         </span>
-        <span className="min-w-0">
+        <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-neutral-800">
             {perfil.nome}
           </span>
@@ -183,6 +184,7 @@ function RodapeUsuario({ perfil }: { perfil: Perfil }) {
             {perfil.papel}
           </span>
         </span>
+        <AlternadorTema />
       </div>
       <form action={sair}>
         <button
