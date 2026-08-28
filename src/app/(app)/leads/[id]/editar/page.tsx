@@ -175,13 +175,15 @@ export default async function EditarLeadPage({
             defaultValue={lead.status}
             className={cn(CAMPO, "w-full")}
           >
-            {(Object.entries(ROTULO_STATUS) as [LeadStatus, string][]).map(
-              ([valor, rotulo]) => (
+            {(Object.entries(ROTULO_STATUS) as [LeadStatus, string][])
+              // Ninguém usa mais o status "sem resposta" — sai da escolha,
+              // mas o tipo continua no banco e em lib/types.
+              .filter(([valor]) => valor !== "sem_resposta")
+              .map(([valor, rotulo]) => (
                 <option key={valor} value={valor}>
                   {rotulo}
                 </option>
-              ),
-            )}
+              ))}
           </select>
         </div>
 

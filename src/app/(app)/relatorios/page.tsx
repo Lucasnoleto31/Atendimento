@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
-import { formatarData, formatarReais } from "@/lib/format";
+import { agoraEmBrasilia, formatarData, formatarReais } from "@/lib/format";
 import {
   MOTIVOS_PERDA,
   corteDiasAtras,
@@ -190,7 +190,10 @@ export default async function RelatoriosPage({
       .from("v_leads_listas")
       .select("lead_id", { count: "exact", head: true })
       .eq("aguardando_resposta", true),
-    supabase.from("profiles").select("id, nome").eq("ativo", true),
+    supabase
+      .from("profiles")
+      .select("id, nome, meta_contatos_dia")
+      .eq("ativo", true),
   ]);
 
   const r = (data ?? null) as Relatorio | null;
@@ -285,18 +288,27 @@ export default async function RelatoriosPage({
   const atividadeErro =
     enviadasErro ?? trocasErro ?? aguardandoErro?.message ?? null;
 
-  const nomePorId = new Map(
-    ((equipeAtiva ?? []) as { id: string; nome: string }[]).map((p) => [
-      p.id,
-      p.nome,
-    ]),
+  const equipe = (equipeAtiva ?? []) as {
+    id: string;
+    nome: string;
+    meta_contatos_dia: number | null;
+  }[];
+  const nomePorId = new Map(equipe.map((p) => [p.id, p.nome]));
+  const metaPorNome = new Map(
+    equipe.map((p) => [p.nome, p.meta_contatos_dia ?? 0]),
   );
+  // Meta é por DIA: compara com as mensagens de hoje, no relógio de Brasília.
+  const inicioHoje = agoraEmBrasilia().inicioDoDia;
   const mensagensPorNome = new Map<string, number>();
+  const hojePorNome = new Map<string, number>();
   for (const linha of enviadas) {
     const nome = linha.autor_id
       ? (nomePorId.get(linha.autor_id) ?? "Outro usuário")
       : "Automação";
     mensagensPorNome.set(nome, (mensagensPorNome.get(nome) ?? 0) + 1);
+    if (linha.criado_em >= inicioHoje) {
+      hojePorNome.set(nome, (hojePorNome.get(nome) ?? 0) + 1);
+    }
   }
 
   // Mediana da 1ª resposta (mensagem do cliente → resposta da equipe).
@@ -711,6 +723,7 @@ export default async function RelatoriosPage({
                       <Th alinhar>Leads (período)</Th>
                       <Th alinhar>Ganhos</Th>
                       <Th alinhar>Mensagens (30d)</Th>
+                      <Th alinhar>Hoje / meta</Th>
                       <Th alinhar>Vendas</Th>
                       <Th alinhar>Comissão</Th>
                     </tr>
@@ -727,6 +740,15 @@ export default async function RelatoriosPage({
                         <Td>{v.leads > 0 ? numero(v.leads) : "—"}</Td>
                         <Td>{v.ganhos > 0 ? numero(v.ganhos) : "—"}</Td>
                         <Td>{numero(v.mensagens)}</Td>
+                        <Td>
+                          {v.vendedor === "Automação"
+                            ? "—"
+                            : `${numero(hojePorNome.get(v.vendedor) ?? 0)}${
+                                (metaPorNome.get(v.vendedor) ?? 0) > 0
+                                  ? ` / ${numero(metaPorNome.get(v.vendedor) ?? 0)}`
+                                  : ""
+                              }`}
+                        </Td>
                         <Td>{v.vendas > 0 ? numero(v.vendas) : "—"}</Td>
                         <Td>
                           {v.comissao_centavos > 0

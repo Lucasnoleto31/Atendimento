@@ -10,7 +10,6 @@ import { ehMotivoPerda } from "@/lib/perda";
 const STATUS_VALIDOS = new Set([
   "novo",
   "em_atendimento",
-  "sem_resposta",
   "ganho",
   "perdido",
 ]);

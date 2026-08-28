@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Clock, MessageSquare } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import { formatarHora } from "@/lib/format";
 import { TarefaItem, type ItemAgenda } from "./tarefa-item";
 
 export const metadata: Metadata = { title: "Agenda · Zeve CRM" };
@@ -22,14 +21,6 @@ function chaveDia(data: Date): string {
   }).format(data);
   return partes; // en-CA já devolve YYYY-MM-DD
 }
-
-type MensagemAgendada = {
-  id: string;
-  texto: string;
-  enviar_em: string;
-  leadId: string;
-  leadNome: string;
-};
 
 export default async function AgendaPage({
   searchParams,
@@ -99,17 +90,8 @@ export default async function AgendaPage({
     consultaPendentes = consultaPendentes.eq("responsavel_id", perfil.id);
   }
 
-  const [{ data: doMes, error: erroTarefas }, { data: pendentes }, { data: agendadasBrutas }] =
-    await Promise.all([
-      consultaTarefas,
-      consultaPendentes,
-      supabase
-        .from("scheduled_messages")
-        .select("id, texto, enviar_em, lead:leads(id, nome)")
-        .is("enviado_em", null)
-        .order("enviar_em")
-        .limit(200),
-    ]);
+  const [{ data: doMes, error: erroTarefas }, { data: pendentes }] =
+    await Promise.all([consultaTarefas, consultaPendentes]);
 
   type LinhaTarefa = {
     id: string;
@@ -143,39 +125,16 @@ export default async function AgendaPage({
     }))
     .sort((a, b) => a.quando.localeCompare(b.quando));
 
-  const agendadas: MensagemAgendada[] = (
-    (agendadasBrutas ?? []) as unknown as {
-      id: string;
-      texto: string;
-      enviar_em: string;
-      lead: { id: string; nome: string } | null;
-    }[]
-  )
-    .filter((m) => m.lead)
-    .map((m) => ({
-      id: m.id,
-      texto: m.texto,
-      enviar_em: m.enviar_em,
-      leadId: m.lead!.id,
-      leadNome: m.lead!.nome,
-    }));
-
   // Distribuição por dia, no fuso da mesa.
   const porDia = new Map<string, ItemAgenda[]>();
   for (const item of itens) {
     const chave = chaveDia(new Date(item.quando));
     porDia.set(chave, [...(porDia.get(chave) ?? []), item]);
   }
-  const agendadasPorDia = new Map<string, MensagemAgendada[]>();
-  for (const m of agendadas) {
-    const chave = chaveDia(new Date(m.enviar_em));
-    agendadasPorDia.set(chave, [...(agendadasPorDia.get(chave) ?? []), m]);
-  }
 
   const atrasadas = itens.filter((i) => i.atrasada);
   const deHoje = (porDia.get(hojeChave) ?? []).filter((i) => !i.concluida);
   const doDia = porDia.get(diaSelecionado) ?? [];
-  const agendadasDoDia = agendadasPorDia.get(diaSelecionado) ?? [];
 
   const url = (novos: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -238,14 +197,6 @@ export default async function AgendaPage({
                 </dt>
                 <dd className="font-mono text-h3 text-neutral-800 tabular-nums">
                   {deHoje.length}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase">
-                  Envios agendados
-                </dt>
-                <dd className="font-mono text-h3 text-neutral-800 tabular-nums">
-                  {agendadas.length}
                 </dd>
               </div>
             </dl>
@@ -345,7 +296,6 @@ export default async function AgendaPage({
                   const doDiaCelula = porDia.get(chave) ?? [];
                   const pendentesDia = doDiaCelula.filter((t) => !t.concluida);
                   const atrasadasDia = doDiaCelula.filter((t) => t.atrasada);
-                  const enviosDia = agendadasPorDia.get(chave) ?? [];
                   const ehHoje = chave === hojeChave;
                   const selecionado = chave === diaSelecionado;
                   return (
@@ -383,12 +333,6 @@ export default async function AgendaPage({
                           {pendentesDia.length === 1 ? "tarefa" : "tarefas"}
                         </span>
                       ) : null}
-                      {enviosDia.length > 0 ? (
-                        <span className="inline-flex h-[20px] items-center gap-0.5 rounded-sm bg-accent-100 px-0.5 text-xs font-medium text-accent-700">
-                          <Clock size={10} strokeWidth={1.5} aria-hidden />
-                          {enviosDia.length}
-                        </span>
-                      ) : null}
                     </Link>
                   );
                 })}
@@ -401,65 +345,16 @@ export default async function AgendaPage({
                 {dataLonga}
               </h2>
 
-              {doDia.length === 0 && agendadasDoDia.length === 0 ? (
+              {doDia.length === 0 ? (
                 <p className="mt-1 text-sm text-neutral-600">
                   Nada marcado. As tarefas nascem no chat, no painel do lead.
                 </p>
               ) : (
-                <div className="mt-1 flex flex-col gap-2">
-                  {doDia.length > 0 ? (
-                    <ul className="flex flex-col gap-1">
-                      {doDia.map((item) => (
-                        <TarefaItem key={item.id} item={item} />
-                      ))}
-                    </ul>
-                  ) : null}
-
-                  {agendadasDoDia.length > 0 ? (
-                    <div>
-                      <h3 className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase">
-                        Mensagens que saem sozinhas
-                      </h3>
-                      <ul className="mt-1 flex flex-col gap-1">
-                        {agendadasDoDia.map((m) => (
-                          <li
-                            key={m.id}
-                            className="flex items-start gap-1 rounded-md border border-accent-300 bg-accent-100/40 px-1.5 py-1"
-                          >
-                            <Clock
-                              size={14}
-                              strokeWidth={1.5}
-                              aria-hidden
-                              className="mt-0.5 shrink-0 text-accent-700"
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="font-mono text-xs text-neutral-600 tabular-nums">
-                                {formatarHora(m.enviar_em)}
-                              </span>
-                              <span className="ml-1 text-sm text-neutral-800">
-                                {m.leadNome}
-                              </span>
-                              <span className="mt-0.5 block truncate text-xs text-neutral-600">
-                                {m.texto}
-                              </span>
-                            </span>
-                            <Link
-                              href={`/chat?lead=${m.leadId}`}
-                              aria-label={`Abrir conversa com ${m.leadNome}`}
-                              className="inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-                            >
-                              <MessageSquare
-                                size={18}
-                                strokeWidth={1.5}
-                                aria-hidden
-                              />
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {doDia.map((item) => (
+                    <TarefaItem key={item.id} item={item} />
+                  ))}
+                </ul>
               )}
             </section>
           </div>

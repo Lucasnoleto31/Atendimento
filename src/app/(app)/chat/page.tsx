@@ -16,12 +16,7 @@ import { estiloEtiqueta } from "@/lib/etiquetas";
 import { processarCadencia } from "@/lib/cadencia";
 import { processarAgendadas } from "@/lib/agendadas";
 import { processarCampanhas } from "@/lib/campanhas";
-import {
-  Janela,
-  type Agendada,
-  type Mensagem,
-  type MensagemPadrao,
-} from "./janela";
+import { Janela, type Mensagem, type MensagemPadrao } from "./janela";
 import { AtualizadorTempoReal } from "./tempo-real";
 import {
   FerramentasConversa,
@@ -357,7 +352,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   let urlMaisAntigas: string | null = null;
   let tarefas: TarefaLead[] = [];
   let tarefasDisponiveis = false;
-  let agendadas: Agendada[] = [];
 
   if (atual) {
     // A leitura é marcada pelo CLIENTE ao montar a conversa (Janela), não
@@ -501,30 +495,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     ).map((t) => ({
       ...t,
       vencida: new Date(t.vence_em).getTime() < agoraMs,
-    }));
-
-    // Agendadas pendentes + falhas recentes (migração 0014; tolerante).
-    const { data: agendadasLinhas } = await supabase
-      .from("scheduled_messages")
-      .select("id, texto, enviar_em, enviado_em, erro")
-      .eq("lead_id", atual.id)
-      .or("enviado_em.is.null,erro.not.is.null")
-      .order("enviar_em")
-      .limit(10);
-    agendadas = (
-      (agendadasLinhas ?? []) as {
-        id: string;
-        texto: string;
-        enviar_em: string;
-        enviado_em: string | null;
-        erro: string | null;
-      }[]
-    ).map((a) => ({
-      id: a.id,
-      texto: a.texto,
-      enviar_em: a.enviar_em,
-      erro: a.erro,
-      pendente: a.enviado_em === null,
     }));
   }
 
@@ -817,7 +787,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
               urlMaisAntigas={urlMaisAntigas}
               hojeChave={hojeChave}
               ontemChave={ontemChave}
-              agendadas={agendadas}
             />
           </>
         ) : (

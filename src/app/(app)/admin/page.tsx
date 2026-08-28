@@ -7,8 +7,6 @@ import { ImportForm } from "./import-form";
 import { ExcluirImportacao } from "./excluir-import";
 import { KanbanConfig, type PipelineComEtapas } from "./kanban-config";
 import { Usuarios, type UsuarioLinha } from "./usuarios";
-import { ChatwootImport } from "./chatwoot-import";
-import { HistoricoImport } from "./historico-import";
 import { importarClientes, importarLeads, importarLotes } from "./actions";
 import { EtiquetaLista } from "./etiqueta-lista";
 
@@ -221,56 +219,6 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       ) : null}
 
       <KanbanConfig pipelines={pipelines} />
-
-      {/* Chatwoot */}
-      <section className="mt-3" aria-labelledby="chatwoot-titulo">
-        <h2 id="chatwoot-titulo" className="text-h3 text-neutral-900">
-          Chatwoot
-        </h2>
-        <div className="mt-2 max-w-[68ch] rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm">
-          <p className="text-sm text-neutral-600">
-            Importa as conversas do WhatsApp como leads: telefone cruzado com a
-            base, agente vira responsável (pelo e-mail), labels viram tags e a
-            conversa fica vinculada para o envio de mensagens pelo CRM.
-          </p>
-          <div className="mt-2 flex flex-col gap-1">
-            <ChatwootImport
-              configurado={Boolean(
-                process.env.CHATWOOT_BASE_URL &&
-                  process.env.CHATWOOT_ACCOUNT_ID &&
-                  process.env.CHATWOOT_API_TOKEN,
-              )}
-            />
-            <HistoricoImport />
-            <p className="text-xs text-neutral-600">
-              O histórico traz as mensagens antigas das conversas já vinculadas
-              (com data original e anexos). Rode primeiro a importação de
-              conversas.
-            </p>
-          </div>
-
-          <dl className="mt-2 divide-y divide-neutral-200 border-t border-neutral-200">
-            <div className="flex items-baseline justify-between gap-2 py-1">
-              <dt className="text-sm text-neutral-600">Webhook de entrada</dt>
-              <dd className="font-mono text-sm break-all text-neutral-800">
-                /api/webhooks/chatwoot?token=…
-              </dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-2 py-1">
-              <dt className="text-sm text-neutral-600">Token do webhook</dt>
-              <dd>
-                <StatusEnv definido={Boolean(process.env.CHATWOOT_WEBHOOK_TOKEN)} />
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-1 text-xs text-neutral-600">
-            No Chatwoot: Configurações → Integrações → Webhooks → adicionar a
-            URL pública acima (com o token do .env.local) assinando o evento{" "}
-            <code className="font-mono">message_created</code>. Mensagem recebida
-            vira lead/interação aqui na hora.
-          </p>
-        </div>
-      </section>
 
       {/* Webhook da Meta */}
       <section className="mt-3" aria-labelledby="webhook-titulo">

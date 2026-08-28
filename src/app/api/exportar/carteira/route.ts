@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
+import { createServiceClient } from "@/lib/supabase/server";
 
 /**
  * Exporta a carteira filtrada em CSV — a base inteira, buscada em lotes para
@@ -114,6 +115,12 @@ export async function GET(request: NextRequest) {
     [cabecalho, ...linhas]
       .map((linha) => linha.map(celula).join(";"))
       .join("\r\n");
+
+  await createServiceClient().from("auditoria").insert({
+    quem: perfil.id,
+    acao: "exportar_carteira",
+    detalhes: { papel: perfil.papel },
+  });
 
   return new Response(csv, {
     headers: {

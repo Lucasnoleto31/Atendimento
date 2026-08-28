@@ -8,7 +8,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  useTransition,
 } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -17,7 +16,6 @@ import {
   ArrowDown,
   Check,
   CheckCheck,
-  Clock,
   LoaderCircle,
   Paperclip,
   Send,
@@ -34,22 +32,12 @@ import { BotaoTemplates } from "./templates";
 import { GravadorAudio } from "./gravador-audio";
 import { createClient as criarClienteNavegador } from "@/lib/supabase/client";
 import {
-  agendarMensagemLead,
-  cancelarMensagemAgendada,
   enviarMensagemLead,
   marcarChatLido,
   prepararUploadAnexo,
   type ResultadoEnvio,
 } from "./actions";
 import { corrigirTexto, sugerirResposta } from "./ia";
-
-export type Agendada = {
-  id: string;
-  texto: string;
-  enviar_em: string;
-  erro: string | null;
-  pendente: boolean;
-};
 
 const ESTADO: ResultadoEnvio = {};
 // 30s: o tempo real (Supabase) cobre o imediato; o polling é só rede de
@@ -310,7 +298,6 @@ export function Janela({
   marketingBloqueado,
   hojeChave,
   ontemChave,
-  agendadas,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -322,7 +309,6 @@ export function Janela({
   marketingBloqueado: boolean;
   hojeChave: string;
   ontemChave: string;
-  agendadas: Agendada[];
 }) {
   const [estado, formAction, enviandoAcao] = useActionState(
     enviarMensagemLead,
@@ -355,12 +341,6 @@ export function Janela({
   const [barraSuprimida, setBarraSuprimida] = useState(false);
 
   const [emojiAberto, setEmojiAberto] = useState(false);
-
-  // Agendamento do texto digitado.
-  const [agendarAberto, setAgendarAberto] = useState(false);
-  const [agendarLocal, setAgendarLocal] = useState("");
-  const [agendarErro, setAgendarErro] = useState<string | null>(null);
-  const [agendando, iniciarAgendamento] = useTransition();
 
   // Anexos: o estado espelha o input de arquivo (via DataTransfer), então o
   // form envia exatamente o que os chips mostram.
@@ -527,30 +507,6 @@ export function Janela({
     const dt = new DataTransfer();
     dt.items.add(arquivo);
     adicionarArquivos(dt.files);
-  };
-
-  const confirmarAgendamento = () => {
-    setAgendarErro(null);
-    iniciarAgendamento(async () => {
-      const resultado = await agendarMensagemLead(
-        leadId,
-        texto,
-        new Date(agendarLocal).toISOString(),
-      );
-      if (resultado.erro) {
-        setAgendarErro(resultado.erro);
-      } else {
-        atualizarTexto("");
-        setAgendarAberto(false);
-        setAgendarLocal("");
-      }
-    });
-  };
-
-  const cancelarAgendada = (agendadaId: string) => {
-    iniciarAgendamento(async () => {
-      await cancelarMensagemAgendada(agendadaId, leadId);
-    });
   };
 
   const inserirEmoji = (emoji: string) => {
@@ -904,61 +860,6 @@ export function Janela({
             </p>
           ) : null}
 
-          {agendadas.length > 0 ? (
-            <div className="flex flex-col gap-0.5">
-              {agendadas.map((agendada) => (
-                <div
-                  key={agendada.id}
-                  className={cn(
-                    "flex items-center gap-0.5 rounded-md px-1 py-0.5",
-                    agendada.erro ? "bg-danger-bg" : "bg-neutral-50",
-                  )}
-                >
-                  <Clock
-                    size={12}
-                    strokeWidth={1.5}
-                    aria-hidden
-                    className={cn(
-                      "shrink-0",
-                      agendada.erro ? "text-danger" : "text-neutral-400",
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate text-xs",
-                      agendada.erro ? "text-danger" : "text-neutral-600",
-                    )}
-                  >
-                    <span className="font-mono tabular-nums">
-                      {new Date(agendada.enviar_em).toLocaleString("pt-BR", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                    {" — "}
-                    {agendada.texto}
-                    {agendada.erro ? ` · ${agendada.erro}` : ""}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={
-                      agendada.pendente
-                        ? "Cancelar agendamento"
-                        : "Dispensar aviso de falha"
-                    }
-                    disabled={agendando}
-                    onClick={() => cancelarAgendada(agendada.id)}
-                    className="inline-flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] -m-[6px] hover:bg-neutral-200 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed"
-                  >
-                    <X size={12} strokeWidth={1.5} aria-hidden />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
           {painelAberto ? (
             <div className="absolute bottom-[calc(100%+4px)] left-1.5 z-30 w-[320px] rounded-[10px] border border-neutral-200 bg-neutral-0 shadow-lg">
               {prontasAbertas ? (
@@ -1051,53 +952,6 @@ export function Janela({
                 </ul>
               )}
             </div>
-          ) : null}
-
-          {agendarAberto ? (
-            <>
-              <button
-                type="button"
-                aria-label="Fechar agendamento"
-                tabIndex={-1}
-                onClick={() => setAgendarAberto(false)}
-                className="fixed inset-0 z-20 cursor-default"
-              />
-              <div
-                role="group"
-                aria-label="Agendar envio"
-                className="absolute right-1.5 bottom-[calc(100%+4px)] z-30 flex w-[260px] flex-col gap-1 rounded-[10px] border border-neutral-200 bg-neutral-0 p-1.5 shadow-lg"
-              >
-                <p className="text-sm font-medium text-neutral-800">
-                  Enviar o texto digitado em
-                </p>
-                <label htmlFor="agendar-quando" className="sr-only">
-                  Data e hora do envio
-                </label>
-                <input
-                  id="agendar-quando"
-                  type="datetime-local"
-                  value={agendarLocal}
-                  onChange={(e) => setAgendarLocal(e.target.value)}
-                  className="h-[32px] rounded-md border border-neutral-300 bg-neutral-0 px-1 font-mono text-xs text-neutral-800 tabular-nums focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-                />
-                {agendarErro ? (
-                  <p role="alert" className="text-xs text-danger">
-                    {agendarErro}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  disabled={agendando || !agendarLocal}
-                  onClick={confirmarAgendamento}
-                  className="inline-flex h-[32px] items-center justify-center rounded-md bg-primary-600 px-1.5 text-sm font-medium text-neutral-0 transition-colors duration-[120ms] hover:bg-primary-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {agendando ? "Agendando…" : "Agendar"}
-                </button>
-                <p className="text-xs text-neutral-600">
-                  Só chega se a janela de 24h estiver aberta na hora do envio.
-                </p>
-              </div>
-            </>
           ) : null}
 
           {emojiAberto ? (
@@ -1318,26 +1172,6 @@ export function Janela({
               onGravado={anexarGravacao}
               onErro={setAvisoArquivo}
             />
-
-            <button
-              type="button"
-              aria-label="Agendar o texto digitado"
-              aria-expanded={agendarAberto}
-              title="Agendar envio do texto digitado"
-              disabled={modo === "nota" || texto.trim().length === 0}
-              onClick={() => {
-                setEmojiAberto(false);
-                setProntasAbertas(false);
-                setAgendarErro(null);
-                setAgendarAberto((v) => !v);
-              }}
-              className={cn(
-                BOTAO_FERRAMENTA,
-                "disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
-              )}
-            >
-              <Clock size={16} strokeWidth={1.5} aria-hidden />
-            </button>
 
             <button
               type="button"

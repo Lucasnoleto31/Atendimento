@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
 import { COLUNA_LISTA } from "@/lib/listas-leads";
@@ -53,6 +53,15 @@ type Linha = {
 export async function GET(request: NextRequest) {
   const perfil = await perfilAtual();
   if (!perfil) return new Response("Forbidden", { status: 403 });
+  // A base com telefones é O ativo da mesa: exportação completa é coisa de
+  // gestão, e toda exportação deixa rastro de quem levou o quê.
+  if (perfil.papel !== "admin" && perfil.papel !== "gestor") {
+    return new Response(
+      "Exportação da base é restrita à gestão. Peça a um gestor.",
+      { status: 403 },
+    );
+  }
+  const trilha = createServiceClient();
 
   const params = request.nextUrl.searchParams;
   const lista = params.get("lista") ?? "todos";
@@ -99,6 +108,12 @@ export async function GET(request: NextRequest) {
     l.ultima_interacao_em ?? "nunca",
     l.criado_em,
   ]);
+
+  await trilha.from("auditoria").insert({
+    quem: perfil.id,
+    acao: "exportar_leads",
+    detalhes: { lista, busca, etiqueta, linhas: linhas.length },
+  });
 
   const csv =
     "﻿" +
