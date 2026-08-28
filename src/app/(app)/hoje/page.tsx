@@ -85,11 +85,44 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   // eslint-disable-next-line react-hooks/purity -- Server Component: um render por request
   const agoraMs = Date.now();
 
+  // Ativações de hoje não existem estruturadas: são o cliente da pessoa cujo
+  // PRIMEIRO lote da vida entrou na importação de hoje. Como o arquivo da
+  // Genial chega no dia seguinte, o rótulo da tela diz "registradas hoje".
+  async function ativacoesRegistradasHoje(): Promise<number> {
+    const { data: deHoje } = await supabase
+      .from("customer_lots")
+      .select("customer_id")
+      .gte("criado_em", hoje.inicioDoDia)
+      .limit(1000);
+    const candidatos = [...new Set((deHoje ?? []).map((l) => l.customer_id))];
+    if (candidatos.length === 0) return 0;
+    const { data: antigos } = await supabase
+      .from("customer_lots")
+      .select("customer_id")
+      .in("customer_id", candidatos)
+      .lt("criado_em", hoje.inicioDoDia)
+      .limit(1000);
+    const jaTinham = new Set((antigos ?? []).map((l) => l.customer_id));
+    const novos = candidatos.filter((c) => !jaTinham.has(c));
+    if (novos.length === 0) return 0;
+    const { count } = await supabase
+      .from("customers")
+      .select("id", { count: "exact", head: true })
+      .in("id", novos)
+      .eq("responsavel_id", alvoId);
+    return count ?? 0;
+  }
+
   const [
     { data: tarefasData, count: totalTarefas, error: erroTarefas },
     { data: esperaData, count: totalEspera, error: erroEspera },
     { data: ativacaoData, count: totalAtivacao, error: erroAtivacao },
-    { count: enviadasHoje },
+    { count: enviadasManuais },
+    { count: enviadasDisparo },
+    { count: respostasHoje },
+    { count: ganhosHoje },
+    { count: vendasHoje },
+    ativacoesHoje,
     { data: metaPerfil },
   ] = await Promise.all([
     // 1. Tarefas vencidas e as que vencem até o fim de hoje, em Brasília.
@@ -123,13 +156,49 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
       .eq("responsavel_id", alvoId)
       .order("conta_aberta_em", { ascending: false, nullsFirst: false })
       .limit(LIMITE),
-    // Métrica do dia: mensagens enviadas desde a meia-noite de Brasília.
+    // Placar do dia, tudo desde a meia-noite de Brasília.
+    // Mensagens MANUAIS: digitadas no chat. O disparo em massa grava com o
+    // autor de quem clicou — sem este corte ele inflava a meta de contatos.
     supabase
       .from("lead_interactions")
       .select("id", { count: "exact", head: true })
       .eq("tipo", "mensagem_enviada")
       .eq("autor_id", alvoId)
+      .gte("criado_em", hoje.inicioDoDia)
+      .or("metadados->>via.is.null,metadados->>via.neq.disparo"),
+    supabase
+      .from("lead_interactions")
+      .select("id", { count: "exact", head: true })
+      .eq("tipo", "mensagem_enviada")
+      .eq("autor_id", alvoId)
+      .gte("criado_em", hoje.inicioDoDia)
+      .eq("metadados->>via", "disparo"),
+    // Respostas recebidas hoje nos leads da pessoa.
+    supabase
+      .from("lead_interactions")
+      .select("id, lead:leads!inner(responsavel_id)", {
+        count: "exact",
+        head: true,
+      })
+      .eq("tipo", "mensagem_recebida")
+      .eq("lead.responsavel_id", alvoId)
       .gte("criado_em", hoje.inicioDoDia),
+    // Contas abertas hoje = leads da pessoa marcados como ganho hoje (o
+    // carimbo é na hora do vínculo; a data da Genial só chega amanhã).
+    supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("responsavel_id", alvoId)
+      .eq("status", "ganho")
+      .gte("cliente_confirmado_em", hoje.inicioDoDia),
+    // Vendas confirmadas hoje.
+    supabase
+      .from("sales")
+      .select("id", { count: "exact", head: true })
+      .eq("vendedor_id", alvoId)
+      .eq("status", "confirmada")
+      .gte("ocorreu_em", hoje.inicioDoDia),
+    ativacoesRegistradasHoje(),
     supabase
       .from("profiles")
       .select("meta_contatos_dia")
@@ -152,7 +221,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   const espera = (esperaData ?? []) as unknown as LinhaEspera[];
   const ativacao = (ativacaoData ?? []) as unknown as LinhaAtivacao[];
 
-  const enviadas = enviadasHoje ?? 0;
+  const enviadas = enviadasManuais ?? 0;
+  const disparos = enviadasDisparo ?? 0;
   const meta = metaPerfil?.meta_contatos_dia ?? 0;
   const progresso = meta > 0 ? Math.min(100, (enviadas / meta) * 100) : 0;
 
@@ -197,28 +267,35 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
         ) : null}
       </header>
 
-      {/* ── Métrica do dia ── */}
+      {/* ── Placar do dia ── */}
       <section
-        aria-labelledby="meta-titulo"
+        aria-labelledby="placar-titulo"
         className="mt-2 max-w-[720px] rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
       >
-        <div className="flex flex-wrap items-baseline justify-between gap-1">
-          <h2
-            id="meta-titulo"
-            className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase"
-          >
-            Mensagens enviadas hoje
-          </h2>
+        <h2
+          id="placar-titulo"
+          className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase"
+        >
+          Placar do dia
+        </h2>
+
+        <div className="mt-1 flex flex-wrap items-baseline justify-between gap-1">
+          <p className="text-sm text-neutral-800">Mensagens manuais</p>
           <p className="font-mono text-sm text-neutral-800 tabular-nums">
             {enviadas}
             {meta > 0 ? ` / ${meta}` : ""}
+            {disparos > 0 ? (
+              <span className="ml-1 text-xs text-neutral-400">
+                + {disparos} por disparo
+              </span>
+            ) : null}
           </p>
         </div>
         {meta > 0 ? (
           <>
             <span
               aria-hidden
-              className="mt-1 block h-1 overflow-hidden rounded-sm bg-neutral-100"
+              className="mt-0.5 block h-1 overflow-hidden rounded-sm bg-neutral-100"
             >
               <span
                 className="block h-full rounded-sm bg-primary-600"
@@ -237,6 +314,38 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
             vendedor.
           </p>
         )}
+
+        <dl className="mt-2 grid grid-cols-2 gap-1 border-t border-neutral-200 pt-2 sm:grid-cols-4">
+          <div>
+            <dt className="text-xs text-neutral-600">Respostas recebidas</dt>
+            <dd className="font-mono text-h3 text-neutral-900 tabular-nums">
+              {respostasHoje ?? 0}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-neutral-600">Contas abertas</dt>
+            <dd className="font-mono text-h3 text-neutral-900 tabular-nums">
+              {ganhosHoje ?? 0}
+            </dd>
+          </div>
+          <div>
+            <dt
+              className="text-xs text-neutral-600"
+              title="Cliente seu cujo primeiro lote da vida entrou na importação de hoje — o arquivo da Genial chega no dia seguinte à operação."
+            >
+              Ativações registradas
+            </dt>
+            <dd className="font-mono text-h3 text-neutral-900 tabular-nums">
+              {ativacoesHoje}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-neutral-600">Vendas confirmadas</dt>
+            <dd className="font-mono text-h3 text-neutral-900 tabular-nums">
+              {vendasHoje ?? 0}
+            </dd>
+          </div>
+        </dl>
       </section>
 
       {/* ── 1. Tarefas ── */}
