@@ -41,19 +41,21 @@ export async function escolherVendedor(
   }[];
   if (equipe.length === 0) return null;
 
-  const { data: abertos } = await service
-    .from("leads")
-    .select("responsavel_id")
-    .eq("status", "em_atendimento")
-    .in(
-      "responsavel_id",
-      equipe.map((v) => v.id),
-    );
-
-  const carga = new Map(equipe.map((v) => [v.id, 0]));
-  for (const linha of (abertos ?? []) as { responsavel_id: string }[]) {
-    carga.set(linha.responsavel_id, (carga.get(linha.responsavel_id) ?? 0) + 1);
-  }
+  // Uma CONTAGEM por vendedor (head:true), não as linhas: o select antigo
+  // vinha sem limite e o PostgREST corta em 1000 — acima disso a carga saía
+  // errada e o rodízio escolhia o vendedor errado. A equipe é pequena; N
+  // contagens baratas em paralelo custam menos que trafegar leads.
+  const contagens = await Promise.all(
+    equipe.map(async (v) => {
+      const { count } = await service
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "em_atendimento")
+        .eq("responsavel_id", v.id);
+      return [v.id, count ?? 0] as const;
+    }),
+  );
+  const carga = new Map(contagens);
 
   return equipe.reduce((menor, v) =>
     (carga.get(v.id) ?? 0) < (carga.get(menor.id) ?? 0) ? v : menor,

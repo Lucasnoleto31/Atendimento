@@ -89,11 +89,6 @@ export function formatarDataCurta(valor: string | Date | null | undefined) {
   return valor ? diaCurto.format(instante(valor)) : "—";
 }
 
-/** 14:32 */
-export function formatarHora(valor: string | Date | null | undefined) {
-  return valor ? hora.format(instante(valor)) : "—";
-}
-
 /** 18/08, 14:32 */
 export function formatarDataHora(valor: string | Date | null | undefined) {
   return valor ? diaHora.format(instante(valor)) : "—";

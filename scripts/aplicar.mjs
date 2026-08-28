@@ -1,3 +1,16 @@
+/**
+ * Script one-off de correção de dados, JÁ APLICADO em produção (16/08/2026).
+ * Guardado como referência — não faz parte de nenhum fluxo do CRM.
+ *
+ * O que ele fez: normalizou o campo `documento` de customers e leads
+ * (recolocando zeros à esquerda perdidos em planilhas) e religou leads sem
+ * cliente cujo documento passou a casar após a normalização.
+ *
+ * Rodar de novo é inócuo mas desnecessário; se precisar, é da raiz do
+ * projeto (ele lê .env.local por caminho relativo):
+ *
+ *   node scripts/aplicar.mjs
+ */
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 const env = Object.fromEntries(fs.readFileSync(".env.local","utf8").split("\n").filter(l=>l.includes("=")&&!l.trim().startsWith("#")).map(l=>{const i=l.indexOf("=");return [l.slice(0,i).trim(), l.slice(i+1).trim().replace(/\r$/,"").replace(/^["']|["']$/g,"")];}));

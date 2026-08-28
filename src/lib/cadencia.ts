@@ -66,7 +66,7 @@ export type ResultadoCadencia = {
   regras: number;
 };
 
-/** Versão com throttle, para o heartbeat do chat. */
+/** Versão com throttle, para o batimento do layout. */
 export async function processarCadencia(): Promise<void> {
   if (Date.now() - ultimaExecucao < INTERVALO_HEARTBEAT_MS) return;
   ultimaExecucao = Date.now();

@@ -47,6 +47,10 @@ export async function moverLead(
     .eq("status", "perdido");
 
   revalidatePath("/atendimento");
+  // A etapa aparece também no cabeçalho do chat e na ficha do lead —
+  // espelha o alterarEtapaChat, que revalida os três caminhos.
+  revalidatePath("/chat");
+  revalidatePath(`/leads/${leadId}`);
   return {};
 }
 

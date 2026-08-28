@@ -153,19 +153,22 @@ export default async function PagamentosPage({
   });
 
   const anterior = janelaAnterior(periodo);
+  // buscarTudo: o select cru parava nos 1000 do PostgREST e o "vs anterior"
+  // encolhia em janela cheia — o padrão é o mesmo da confirmadasPromise.
   const comparativoPromise = anterior
-    ? (() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
-        let q: any = supabase
+    ? buscarTudo<{ valor_comissao_centavos: number }>((de2, ate2) => {
+        let q = supabase
           .from("sales")
           .select("valor_comissao_centavos")
           .eq("status", "confirmada")
           .gte("ocorreu_em", anterior.de)
-          .lt("ocorreu_em", anterior.ate);
+          .lt("ocorreu_em", anterior.ate)
+          .order("id")
+          .range(de2, ate2);
         if (fVendedor) q = q.eq("vendedor_id", fVendedor);
         if (fProduto) q = q.eq("product_id", fProduto);
         return q;
-      })()
+      }).then((r) => ({ data: r.dados }))
     : Promise.resolve({ data: null });
 
   // Pendentes: o pipeline inteiro (sem filtro de período — pendente é
@@ -241,11 +244,16 @@ export default async function PagamentosPage({
     comparativoPromise,
     pendentesPromise,
     consultaOperacoes,
-    supabase
-      .from("sales")
-      .select("vendedor_id, valor_comissao_centavos")
-      .eq("status", "confirmada")
-      .gte("ocorreu_em", inicioMes),
+    buscarTudo<{ vendedor_id: string; valor_comissao_centavos: number }>(
+      (de2, ate2) =>
+        supabase
+          .from("sales")
+          .select("vendedor_id, valor_comissao_centavos")
+          .eq("status", "confirmada")
+          .gte("ocorreu_em", inicioMes)
+          .order("id")
+          .range(de2, ate2),
+    ).then((r) => ({ data: r.dados })),
     equipePromise,
     supabase.from("products").select("id, nome").order("nome"),
     resumoPromise,

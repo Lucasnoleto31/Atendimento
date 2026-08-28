@@ -14,7 +14,7 @@ import { avancarAposDisparo } from "@/lib/kanban";
  * (uma etiqueta), o template e a cota diária; este motor manda até
  * `por_dia` por dia útil e encerra sozinho quando a lista acaba.
  *
- * Roda no heartbeat do chat e no cron. Sem a migração 0021 é inerte.
+ * Roda no batimento do layout e no cron. Sem a migração 0021 é inerte.
  */
 
 const INTERVALO_HEARTBEAT_MS = 5 * 60_000;

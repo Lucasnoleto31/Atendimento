@@ -1,5 +1,5 @@
 /**
- * Cria ou promove um usuário da equipe enquanto a tela de Administração não existe.
+ * Cria o primeiro admin / recuperação de acesso (a tela Admin cobre o dia a dia).
  *
  *   node --env-file=.env.local scripts/usuario.mjs <email> "<Nome>" <papel>
  *

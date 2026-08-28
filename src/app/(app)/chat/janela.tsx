@@ -290,7 +290,7 @@ function AnexoMensagem({ anexo }: { anexo: Anexo }) {
   if (anexo.tipo === "image") {
     return (
       <a href={anexo.url} target="_blank" rel="noreferrer">
-        {/* eslint-disable-next-line @next/next/no-img-element -- URL externa do Chatwoot, sem otimização do Next */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- URL externa da mídia, sem otimização do Next */}
         <img
           src={anexo.url}
           alt={anexo.nome ?? "Imagem da conversa"}

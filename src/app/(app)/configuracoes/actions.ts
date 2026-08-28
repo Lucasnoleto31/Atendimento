@@ -353,6 +353,9 @@ export async function salvarMeta(formData: FormData) {
     .update({ meta_mensal_centavos: Math.round(valor * 100) })
     .eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
+  // A meta em R$ aparece na barra de progresso de /pagamentos — revalida lá
+  // também (o terminar genérico só cuida de /configuracoes).
+  revalidatePath("/pagamentos");
   terminar();
 }
 
@@ -385,12 +388,17 @@ export async function salvarMetaTipo(formData: FormData) {
     .update({ [coluna]: valor })
     .eq("id", id);
   if (error) {
+    // UPDATE em coluna ausente volta PGRST204 (schema cache do PostgREST),
+    // não só o 42703 do Postgres — os dois significam "sem a 0050".
     terminar(
-      error.code === "42703"
+      error.code === "42703" || error.code === "PGRST204"
         ? "Rode a migração 0050 para as metas por tipo existirem."
         : amigavel(error.code, error.message),
     );
   }
+  // As metas por tipo aparecem no placar de /pagamentos — revalida lá
+  // também (o terminar genérico só cuida de /configuracoes).
+  revalidatePath("/pagamentos");
   terminar();
 }
 
@@ -594,5 +602,8 @@ export async function salvarMetaContatos(formData: FormData) {
     .update({ meta_contatos_dia: contatos })
     .eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
+  // A meta de contatos alimenta o placar de /hoje — revalida lá também
+  // (o terminar genérico só cuida de /configuracoes).
+  revalidatePath("/hoje");
   terminar();
 }

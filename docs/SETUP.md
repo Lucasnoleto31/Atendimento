@@ -8,12 +8,15 @@
 
 ## 2. Rodar a estrutura do banco
 
-No painel do Supabase, abra **SQL Editor > New query**, cole todo o conteúdo de
-[`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql) e execute.
+Aplique **todas** as migrações de `supabase/migrations/`, **em ordem numérica**
+(0001, 0002, 0003…): no painel do Supabase, abra **SQL Editor > New query**,
+cole o conteúdo de cada arquivo e execute, uma por vez. A lista completa, com o
+que cada migração faz, está em
+[`supabase/migrations/README.md`](../supabase/migrations/README.md).
 
-Isso cria as tabelas, as visões das listas de atendimento, os gatilhos de
-cruzamento por telefone e as políticas de acesso (RLS), além de já inserir as
-etapas do kanban, os canais e os parâmetros padrão.
+A 0001 cria a base (tabelas, visões, gatilhos de cruzamento por telefone, RLS,
+etapas do kanban, canais e parâmetros); as seguintes evoluem o banco — partes
+do CRM ficam inertes ou quebram sem elas.
 
 ## 3. Configurar as variáveis de ambiente
 
@@ -26,35 +29,19 @@ O arquivo `.env.local` não vai para o Git.
 
 ## 4. Criar o primeiro usuário
 
-Ainda não existe tela de cadastro — por decisão de projeto, quem cria usuário é o
-admin. O administrador do sistema é **lucas@zeve.com.br**.
-
-### Opção A — pelo painel
-
-1. Painel do Supabase > **Authentication > Users > Add user**.
-2. Informe e-mail e senha, e marque *Auto Confirm User*.
-3. Em **User Metadata**, adicione:
-
-```json
-{ "nome": "Lucas", "papel": "admin" }
-```
-
-O gatilho `handle_new_user` cria o perfil correspondente automaticamente. Se o
-usuário já existia antes com outro papel, rode
-[`supabase/scripts/promover_admin.sql`](../supabase/scripts/promover_admin.sql)
-no SQL Editor.
-
-### Opção B — pelo script
-
-Exige `SUPABASE_SERVICE_ROLE_KEY` preenchida no `.env.local`:
+No dia a dia, quem cria e gerencia usuários é a **tela Admin** do próprio CRM
+(menu Administração — exige papel admin). Mas ela precisa de um admin logado,
+então o primeiro é criado por fora, via bootstrap:
 
 ```bash
 node --env-file=.env.local scripts/usuario.mjs lucas@zeve.com.br "Lucas" admin
 ```
 
-Cria o usuário com senha aleatória (exibida uma única vez) ou, se ele já existir,
-apenas atualiza o papel. O mesmo comando serve para cadastrar os vendedores até a
-tela de Administração ficar pronta.
+Exige `SUPABASE_SERVICE_ROLE_KEY` preenchida no `.env.local`. O script cria o
+usuário com senha aleatória (exibida uma única vez) ou, se ele já existir,
+apenas atualiza o papel — por isso também serve como recuperação de acesso.
+
+A partir daí, cadastre o resto da equipe pela tela Admin.
 
 ## 5. Subir o projeto
 

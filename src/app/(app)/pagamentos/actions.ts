@@ -131,8 +131,10 @@ export async function definirPrevista(formData: FormData) {
   if (!ehGestor) q = q.eq("vendedor_id", perfil.id);
   const { error } = await q;
   if (error) {
+    // UPDATE em coluna ausente volta PGRST204 (schema cache do PostgREST),
+    // não só o 42703 do Postgres — os dois significam "sem a 0052".
     falhar(
-      error.code === "42703"
+      error.code === "42703" || error.code === "PGRST204"
         ? "Rode a migração 0052 para a data prevista existir."
         : `Não deu para salvar: ${error.message}`,
     );

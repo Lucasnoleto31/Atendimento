@@ -5,7 +5,7 @@ const INTERVALO_MIN_MS = 10_000;
 let ultimaVarredura = 0;
 
 /**
- * Processa as mensagens agendadas vencidas. Roda no heartbeat do chat
+ * Processa as mensagens agendadas vencidas. Roda no batimento do layout
  * (a cada ~10s) e no cron — a consulta é indexada e barata quando não há
  * nada pendente. Cada linha é tentada uma vez: sucesso ou falha, ganha
  * enviado_em (a falha fica registrada em `erro`, visível no compositor).
@@ -36,7 +36,7 @@ export async function processarAgendadas(): Promise<number> {
     texto: string;
     autor_id: string | null;
   }[]) {
-    // Reserva a linha antes de enviar: mesmo com heartbeat e cron juntos,
+    // Reserva a linha antes de enviar: mesmo com batimento e cron juntos,
     // só quem gravar enviado_em primeiro (linha ainda nula) processa.
     const { data: reservada } = await service
       .from("scheduled_messages")

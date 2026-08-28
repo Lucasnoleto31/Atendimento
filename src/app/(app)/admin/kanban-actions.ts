@@ -192,8 +192,10 @@ export async function definirPrazoEtapa(formData: FormData) {
     .update({ prazo_dias: prazo })
     .eq("id", id);
   if (error) {
+    // UPDATE em coluna ausente volta PGRST204 (schema cache do PostgREST),
+    // não só o 42703 do Postgres — os dois significam "sem a 0051".
     return terminar(
-      error.code === "42703"
+      error.code === "42703" || error.code === "PGRST204"
         ? "Rode a migração 0051 para os prazos por etapa existirem."
         : `Não deu para salvar: ${error.message}`,
     );

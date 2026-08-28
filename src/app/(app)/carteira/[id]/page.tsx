@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, MessageSquare, UserRound } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { formatarData, formatarReais, formatarTelefone } from "@/lib/format";
@@ -121,24 +121,10 @@ export default async function ClientePage({
         </div>
 
         <div className="flex items-center gap-1">
-          {giro?.lead_id ? (
-            <>
-              <Link
-                href={`/chat?lead=${giro.lead_id}`}
-                className="inline-flex h-[40px] items-center gap-0.5 rounded-md bg-primary-600 px-2 text-sm font-medium text-neutral-0 transition-colors duration-[120ms] hover:bg-primary-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-              >
-                <MessageSquare size={18} strokeWidth={1.5} aria-hidden />
-                Abrir conversa
-              </Link>
-              <Link
-                href={`/leads/${giro.lead_id}`}
-                className="inline-flex h-[40px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-2 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-              >
-                <UserRound size={18} strokeWidth={1.5} aria-hidden />
-                Ficha do atendimento
-              </Link>
-            </>
-          ) : cliente.telefone_e164 ? (
+          {/* Quem tem lead_id já foi redirecionado acima para a ficha 360 —
+              aqui só chega cliente sem atendimento, então a única ação
+              possível é iniciar a conversa (e só com telefone no cadastro). */}
+          {cliente.telefone_e164 ? (
             <AbrirConversa
               customerId={cliente.id}
               nome={cliente.nome_completo}

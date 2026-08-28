@@ -20,6 +20,8 @@ export async function virarCliente(formData: FormData) {
 
   const resultado = await garantirClienteDoLead(leadId, conta);
   revalidatePath(`/leads/${leadId}`);
+  // O cliente recém-criado precisa aparecer na listagem da carteira.
+  revalidatePath("/carteira");
   redirect(
     `/leads/${leadId}?aba=cliente&aviso=${encodeURIComponent(
       resultado.erro ?? "Lead vinculado à base de clientes.",

@@ -1,36 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Zeve CRM
 
-## Getting Started
+CRM de atendimento e carteira da Zeve: leads chegam pelo WhatsApp (e Instagram),
+passam pelo kanban de atendimento e viram clientes acompanhados por giro,
+receita e cadência de follow-up.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, Server Actions) — aplicação e API em um só deploy.
+- **Supabase** — Postgres com RLS, Auth, Storage e Realtime.
+- **Meta WhatsApp Cloud API** — envio e recebimento direto, sem intermediário.
+
+## Como começar
+
+1. Siga o passo a passo de [`docs/SETUP.md`](docs/SETUP.md) — projeto Supabase,
+   migrações, variáveis de ambiente e primeiro usuário.
+2. Para conectar o número do WhatsApp, veja
+   [`docs/META-WHATSAPP.md`](docs/META-WHATSAPP.md).
+3. As migrações do banco (ordem e estado de cada uma) estão documentadas em
+   [`supabase/migrations/README.md`](supabase/migrations/README.md).
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+A aplicação sobe em [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts úteis
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `scripts/usuario.mjs` — cria o primeiro admin / recuperação de acesso
+  (a tela Admin cobre o dia a dia).

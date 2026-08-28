@@ -4,10 +4,11 @@ import { processarAgendadas } from "@/lib/agendadas";
 import { executarCampanhas } from "@/lib/campanhas";
 
 /**
- * Gatilho da cadência de follow-up. Em produção, o cron da Vercel chama
- * a cada 15 min (vercel.json) com Authorization: Bearer CRON_SECRET.
- * Sem CRON_SECRET configurado, a rota fica fechada — a cadência ainda roda
- * pelo heartbeat do chat.
+ * Gatilho OPCIONAL da cadência de follow-up. O caminho normal é o batimento
+ * do layout, que roda cadência, agendadas e campanhas enquanto alguém usa o
+ * CRM. Esta rota só funciona se um dia configurarem CRON_SECRET (e um cron
+ * externo chamando com Authorization: Bearer CRON_SECRET) — sem a variável,
+ * ela fica fechada e nada depende dela.
  */
 export async function GET(request: NextRequest) {
   const segredo = process.env.CRON_SECRET;

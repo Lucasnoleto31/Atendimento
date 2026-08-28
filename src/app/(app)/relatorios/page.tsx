@@ -90,8 +90,7 @@ export default async function RelatoriosPage({
     contasNovas,
     { dados: ganhosCoorte },
     perdasBrutas,
-    { dados: enviadas, erro: enviadasErro },
-    { dados: trocas, erro: trocasErro },
+    atividade,
     { count: aguardandoCount, error: aguardandoErro },
     { data: equipeAtiva },
     { data: resumoAtivBruto },
@@ -172,28 +171,78 @@ export default async function RelatoriosPage({
       if (corte) q = q.gte("criado_em", corte);
       return q;
     }),
-    // Atividade da equipe é sempre 30 dias: é ritmo, não coorte.
-    buscarTudo<{ criado_em: string; autor_id: string | null }>((de, ate) =>
-      supabase
-        .from("lead_interactions")
-        .select("criado_em, autor_id")
-        .eq("tipo", "mensagem_enviada")
-        .gte("criado_em", corteDiasAtras(30))
-        .order("criado_em")
-        .order("id")
-        .range(de, ate),
-    ),
-    buscarTudo<{ lead_id: string; tipo: string; criado_em: string }>(
-      (de, ate) =>
-        supabase
-          .from("lead_interactions")
-          .select("lead_id, tipo, criado_em")
-          .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
-          .gte("criado_em", corteDiasAtras(30))
-          .order("criado_em")
-          .order("id")
-          .range(de, ate),
-    ),
+    // Atividade da equipe (sempre 30 dias — é ritmo, não coorte): a RPC da
+    // 0059 devolve por-autor, mediana da 1ª resposta e totais num
+    // round-trip. Era o gargalo medido da página: dois buscarTudo SERIAIS
+    // trafegando milhares de interações (~2s) para meia dúzia de números.
+    // Sem a migração, cai no caminho antigo.
+    (async (): Promise<
+      | {
+          via: "rpc";
+          por_autor: { autor_id: string | null; total: number; hoje: number }[];
+          enviadas_total: number;
+          mediana_min: number | null;
+          respostas: number;
+        }
+      | {
+          via: "cru";
+          enviadas: { criado_em: string; autor_id: string | null }[];
+          trocas: { lead_id: string; tipo: string; criado_em: string }[];
+          erro: string | null;
+        }
+    > => {
+      const { data: agregada, error } = await supabase.rpc(
+        "relatorio_equipe_30d",
+        {
+          p_inicio: corteDiasAtras(30),
+          p_inicio_hoje: agoraEmBrasilia().inicioDoDia,
+        },
+      );
+      if (!error && agregada) {
+        return {
+          via: "rpc",
+          ...(agregada as {
+            por_autor: {
+              autor_id: string | null;
+              total: number;
+              hoje: number;
+            }[];
+            enviadas_total: number;
+            mediana_min: number | null;
+            respostas: number;
+          }),
+        };
+      }
+      const [enviadas, trocas] = await Promise.all([
+        buscarTudo<{ criado_em: string; autor_id: string | null }>((de, ate) =>
+          supabase
+            .from("lead_interactions")
+            .select("criado_em, autor_id")
+            .eq("tipo", "mensagem_enviada")
+            .gte("criado_em", corteDiasAtras(30))
+            .order("criado_em")
+            .order("id")
+            .range(de, ate),
+        ),
+        buscarTudo<{ lead_id: string; tipo: string; criado_em: string }>(
+          (de, ate) =>
+            supabase
+              .from("lead_interactions")
+              .select("lead_id, tipo, criado_em")
+              .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
+              .gte("criado_em", corteDiasAtras(30))
+              .order("criado_em")
+              .order("id")
+              .range(de, ate),
+        ),
+      ]);
+      return {
+        via: "cru",
+        enviadas: enviadas.dados,
+        trocas: trocas.dados,
+        erro: enviadas.erro ?? trocas.erro ?? null,
+      };
+    })(),
     // Definição canônica (0032): cliente falou por último, conversa não
     // resolvida nem adiada, lead não perdido.
     supabase
@@ -330,9 +379,6 @@ export default async function RelatoriosPage({
   }));
 
   // ── Equipe ────────────────────────────────────────────────────────────────
-  const atividadeErro =
-    enviadasErro ?? trocasErro ?? aguardandoErro?.message ?? null;
-
   const equipe = (equipeAtiva ?? []) as {
     id: string;
     nome: string;
@@ -342,50 +388,78 @@ export default async function RelatoriosPage({
   const metaPorNome = new Map(
     equipe.map((p) => [p.nome, p.meta_contatos_dia ?? 0]),
   );
-  // Meta é por DIA: compara com as mensagens de hoje, no relógio de Brasília.
-  const inicioHoje = agoraEmBrasilia().inicioDoDia;
+
+  // Atividade normalizada: mesmos números pelos dois caminhos (RPC 0059 ou
+  // o cálculo antigo em memória, quando a migração ainda não rodou).
   const mensagensPorNome = new Map<string, number>();
   const hojePorNome = new Map<string, number>();
-  for (const linha of enviadas) {
-    const nome = linha.autor_id
-      ? (nomePorId.get(linha.autor_id) ?? "Outro usuário")
-      : "Automação";
-    mensagensPorNome.set(nome, (mensagensPorNome.get(nome) ?? 0) + 1);
-    if (linha.criado_em >= inicioHoje) {
-      hojePorNome.set(nome, (hojePorNome.get(nome) ?? 0) + 1);
-    }
-  }
+  let medianaMin: number | null = null;
+  let respostasMedidas = 0;
+  let enviadasTotal: number | null = null;
+  let erroAtividade: string | null = null;
 
-  // Mediana da 1ª resposta (mensagem do cliente → resposta da equipe).
-  const conversasPorLead = new Map<
-    string,
-    { tipo: string; criado_em: string }[]
-  >();
-  for (const msg of trocas) {
-    conversasPorLead.set(msg.lead_id, [
-      ...(conversasPorLead.get(msg.lead_id) ?? []),
-      msg,
-    ]);
-  }
-  const temposMin: number[] = [];
-  for (const msgs of conversasPorLead.values()) {
-    let esperando: string | null = null;
-    for (const msg of msgs) {
-      if (msg.tipo === "mensagem_recebida") {
-        if (esperando === null) esperando = msg.criado_em;
-      } else if (esperando !== null) {
-        const minutos =
-          (Date.parse(msg.criado_em) - Date.parse(esperando)) / 60_000;
-        // Fora do atendimento: negativo (importação) ou além de uma semana
-        // (conversa retomada, não resposta).
-        if (minutos >= 0 && minutos <= 60 * 24 * 7) temposMin.push(minutos);
-        esperando = null;
+  if (atividade.via === "rpc") {
+    for (const a of atividade.por_autor) {
+      const nome = a.autor_id
+        ? (nomePorId.get(a.autor_id) ?? "Outro usuário")
+        : "Automação";
+      mensagensPorNome.set(nome, (mensagensPorNome.get(nome) ?? 0) + a.total);
+      if (a.hoje > 0) {
+        hojePorNome.set(nome, (hojePorNome.get(nome) ?? 0) + a.hoje);
       }
     }
+    medianaMin = atividade.mediana_min;
+    respostasMedidas = atividade.respostas;
+    enviadasTotal = atividade.enviadas_total;
+  } else {
+    // Meta é por DIA: compara com as mensagens de hoje, em Brasília.
+    const inicioHoje = agoraEmBrasilia().inicioDoDia;
+    for (const linha of atividade.enviadas) {
+      const nome = linha.autor_id
+        ? (nomePorId.get(linha.autor_id) ?? "Outro usuário")
+        : "Automação";
+      mensagensPorNome.set(nome, (mensagensPorNome.get(nome) ?? 0) + 1);
+      if (linha.criado_em >= inicioHoje) {
+        hojePorNome.set(nome, (hojePorNome.get(nome) ?? 0) + 1);
+      }
+    }
+
+    // Mediana da 1ª resposta (mensagem do cliente → resposta da equipe).
+    const conversasPorLead = new Map<
+      string,
+      { tipo: string; criado_em: string }[]
+    >();
+    for (const msg of atividade.trocas) {
+      conversasPorLead.set(msg.lead_id, [
+        ...(conversasPorLead.get(msg.lead_id) ?? []),
+        msg,
+      ]);
+    }
+    const temposMin: number[] = [];
+    for (const msgs of conversasPorLead.values()) {
+      let esperando: string | null = null;
+      for (const msg of msgs) {
+        if (msg.tipo === "mensagem_recebida") {
+          if (esperando === null) esperando = msg.criado_em;
+        } else if (esperando !== null) {
+          const minutos =
+            (Date.parse(msg.criado_em) - Date.parse(esperando)) / 60_000;
+          // Fora do atendimento: negativo (importação) ou além de uma semana
+          // (conversa retomada, não resposta).
+          if (minutos >= 0 && minutos <= 60 * 24 * 7) temposMin.push(minutos);
+          esperando = null;
+        }
+      }
+    }
+    temposMin.sort((a, b) => a - b);
+    medianaMin =
+      temposMin.length > 0 ? temposMin[Math.floor(temposMin.length / 2)] : null;
+    respostasMedidas = temposMin.length;
+    enviadasTotal = atividade.erro ? null : atividade.enviadas.length;
+    erroAtividade = atividade.erro;
   }
-  temposMin.sort((a, b) => a - b);
-  const medianaMin =
-    temposMin.length > 0 ? temposMin[Math.floor(temposMin.length / 2)] : null;
+
+  const atividadeErro = erroAtividade ?? aguardandoErro?.message ?? null;
 
   // Uma tabela só: leads e resultado (do período) + ritmo (sempre 30d).
   // Vendedor com venda mas sem lead novo no período também aparece — a
@@ -779,14 +853,14 @@ export default async function RelatoriosPage({
                       : `${(medianaMin / 60).toFixed(1).replace(".", ",")}h`
                 }
                 detalhe={
-                  temposMin.length > 0
-                    ? `mediana de ${numero(temposMin.length)} resposta(s), 30 dias`
+                  respostasMedidas > 0
+                    ? `mediana de ${numero(respostasMedidas)} resposta(s), 30 dias`
                     : "sem respostas medidas em 30 dias"
                 }
               />
               <Indicador
                 rotulo="Mensagens enviadas (30d)"
-                valor={enviadasErro ? "—" : numero(enviadas.length)}
+                valor={enviadasTotal === null ? "—" : numero(enviadasTotal)}
                 detalhe="pela equipe e automações"
               />
               <Indicador

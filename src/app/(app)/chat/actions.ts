@@ -674,6 +674,10 @@ export async function alterarStatusConversaChat(
 
   revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
+  // Resolver/reabrir muda as filas de /hoje e a caixa em /atendimento —
+  // sem revalidar, as duas telas seguiam mostrando a conversa no lugar velho.
+  revalidatePath("/hoje");
+  revalidatePath("/atendimento");
   return { ok: true };
 }
 
@@ -815,6 +819,9 @@ export async function criarTarefaLead(
 
   revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
+  // Tarefa nova entra na agenda do dia — /hoje e /agenda listam lead_tasks.
+  revalidatePath("/hoje");
+  revalidatePath("/agenda");
   return { ok: true };
 }
 
@@ -835,6 +842,9 @@ export async function concluirTarefaLead(
 
   revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
+  // Tarefa concluída sai das pendências de /hoje e /agenda na hora.
+  revalidatePath("/hoje");
+  revalidatePath("/agenda");
   return { ok: true };
 }
 
@@ -920,6 +930,9 @@ export async function adiarConversa(
   });
 
   revalidatePath("/chat");
+  // Adiar tira a conversa das filas de /hoje e /atendimento até o prazo.
+  revalidatePath("/hoje");
+  revalidatePath("/atendimento");
   return { ok: true };
 }
 
@@ -946,6 +959,9 @@ export async function reativarConversa(
   if (error) return { erro: error.message };
 
   revalidatePath("/chat");
+  // Reativar devolve a conversa às filas de /hoje e /atendimento na hora.
+  revalidatePath("/hoje");
+  revalidatePath("/atendimento");
   return { ok: true };
 }
 
