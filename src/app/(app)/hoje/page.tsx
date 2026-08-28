@@ -62,6 +62,18 @@ type LinhaRisco = {
   ultima_interacao_em: string | null;
 };
 
+type LinhaQuadro = {
+  responsavel_id: string;
+  nome: string;
+  meta_contatos_dia: number;
+  mensagens_manuais: number;
+  mensagens_disparo: number;
+  aguardando: number;
+  espera_max_horas: number | null;
+  tarefas_vencidas: number;
+  giro_em_risco: number;
+};
+
 type LinhaVendaPendente = {
   id: string;
   valor_comissao_centavos: number;
@@ -161,6 +173,7 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
     { count: ganhosHoje },
     { count: vendasHoje },
     ativacoesHoje,
+    { data: quadroData },
     { data: riscoBruto, error: erroRisco },
     { data: pendentesData, count: totalPendentes, error: erroPendentes },
     { data: metaPerfil },
@@ -277,6 +290,11 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
       .eq("status", "confirmada")
       .gte("ocorreu_em", hoje.inicioDoDia),
     ativacoesRegistradasHoje(),
+    // Quadro da equipe (só gestor; a RPC devolve vazio para vendedor e erro
+    // sem a migração 0048 — o quadro simplesmente não aparece).
+    ehGestor
+      ? supabase.rpc("quadro_equipe", { p_inicio: hoje.inicioDoDia })
+      : Promise.resolve({ data: null, error: null }),
     // 4. Giro em risco: mesmo critério da Carteira (queda de 25%+ ou zerou,
     // entre quem já girou). A comparação coluna×coluna (atual < 75% do
     // anterior) não existe no PostgREST: busca o conjunto candidato — quem já
@@ -340,6 +358,12 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   const totalRisco = riscoTodos.length;
 
   const pendentes = (pendentesData ?? []) as unknown as LinhaVendaPendente[];
+
+  // Ritmo esperado da meta: fração do expediente (9h–18h de Brasília) já
+  // decorrida. Antes das 9h ninguém está "atrasado"; depois das 18h a meta
+  // cobra inteira.
+  const fracaoExpediente = Math.min(1, Math.max(0, (hoje.hora - 9) / 9));
+  const quadro = (quadroData ?? []) as unknown as LinhaQuadro[];
   const ativacao = (ativacaoData ?? []) as unknown as LinhaAtivacao[];
 
   const enviadas = enviadasManuais ?? 0;
@@ -468,6 +492,130 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
           </div>
         </dl>
       </section>
+
+      {/* ── Quadro da equipe (gestor) ── */}
+      {ehGestor && quadro.length > 0 ? (
+        <section
+          aria-labelledby="quadro-titulo"
+          className="mt-3 max-w-[720px]"
+        >
+          <h2
+            id="quadro-titulo"
+            className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase"
+          >
+            Quadro da equipe
+          </h2>
+          <div className="mt-1 overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-0 shadow-sm">
+            <table className="w-full min-w-[560px] border-collapse text-left">
+              <thead>
+                <tr className="border-b border-neutral-200 bg-neutral-50">
+                  <th className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    Pessoa
+                  </th>
+                  <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    Msgs / meta
+                  </th>
+                  <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    Aguardando
+                  </th>
+                  <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    Vencidas
+                  </th>
+                  <th className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    Giro em risco
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-200">
+                {quadro.map((q) => {
+                  // "Abaixo do ritmo": a meta cobrada proporcional à fração
+                  // do expediente já decorrida (9h–18h de Brasília).
+                  const esperado = Math.ceil(
+                    q.meta_contatos_dia * fracaoExpediente,
+                  );
+                  const metaAtrasada =
+                    q.meta_contatos_dia > 0 &&
+                    esperado > 0 &&
+                    q.mensagens_manuais < esperado;
+                  const esperaEstourada = (q.espera_max_horas ?? 0) >= 24;
+                  return (
+                    <tr key={q.responsavel_id} className="h-[48px]">
+                      <td className="px-2">
+                        <Link
+                          href={`/hoje?de=${q.responsavel_id}`}
+                          className={cn(
+                            "rounded-sm text-sm font-medium underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                            q.responsavel_id === alvoId
+                              ? "text-primary-600"
+                              : "text-neutral-800",
+                          )}
+                        >
+                          {q.nome}
+                        </Link>
+                      </td>
+                      <td
+                        className={cn(
+                          "px-2 text-right font-mono text-sm tabular-nums",
+                          metaAtrasada
+                            ? "font-medium text-danger"
+                            : "text-neutral-800",
+                        )}
+                        title={
+                          metaAtrasada
+                            ? `Abaixo do ritmo: o esperado a esta hora era ${esperado}.`
+                            : undefined
+                        }
+                      >
+                        {q.mensagens_manuais}
+                        {q.meta_contatos_dia > 0
+                          ? ` / ${q.meta_contatos_dia}`
+                          : ""}
+                        {q.mensagens_disparo > 0 ? (
+                          <span className="ml-0.5 text-xs font-normal text-neutral-400">
+                            +{q.mensagens_disparo}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-2 text-right font-mono text-sm tabular-nums",
+                          esperaEstourada
+                            ? "font-medium text-danger"
+                            : "text-neutral-800",
+                        )}
+                        title={
+                          esperaEstourada
+                            ? "Há conversa esperando há mais de 24h nesta fila."
+                            : undefined
+                        }
+                      >
+                        {q.aguardando}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-2 text-right font-mono text-sm tabular-nums",
+                          q.tarefas_vencidas > 0
+                            ? "font-medium text-danger"
+                            : "text-neutral-800",
+                        )}
+                      >
+                        {q.tarefas_vencidas}
+                      </td>
+                      <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
+                        {q.giro_em_risco}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-0.5 text-xs text-neutral-600">
+            Vermelho: tarefa vencida, conversa esperando 24h+ ou meta abaixo
+            do ritmo do expediente. Clique no nome para ver a fila da pessoa.
+          </p>
+        </section>
+      ) : null}
 
       {/* ── 1. Tarefas ── */}
       <section className="mt-3 max-w-[720px]" aria-labelledby="tarefas-titulo">
