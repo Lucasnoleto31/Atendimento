@@ -55,7 +55,7 @@ function iniciarCiclo() {
       for (const avisar of ouvintes) avisar();
 
       // Só as conversas não lidas entram no título da aba — é o alerta de
-      // "mensagem nova". Tarefa vencida é assunto da Agenda, não põe (n) aqui.
+      // "mensagem nova". Tarefa vencida é assunto do Hoje, não põe (n) aqui.
       const base = document.title.replace(/^\(\d+\)\s/, "");
       document.title = novas.naoLidas > 0 ? `(${novas.naoLidas}) ${base}` : base;
     } catch {
@@ -116,7 +116,7 @@ function lerPendencias(): Pendencias {
 /**
  * Badge do menu. `mostrar` decide qual sinal:
  *  - "conversas" (no item Chat): conversas com mensagem não lida.
- *  - "tarefas"   (no item Agenda): tarefas vencidas.
+ *  - "tarefas"   (no item Hoje): tarefas vencidas.
  *
  * Antes os dois apareciam juntos no Chat — as 1.184 tarefas de reativação
  * viravam um "99+" que abafava as conversas não lidas de verdade.

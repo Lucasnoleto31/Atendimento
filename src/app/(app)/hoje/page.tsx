@@ -180,7 +180,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   }
 
   const [
-    { data: tarefasData, count: totalTarefas, error: erroTarefas },
+    { data: vencidasData, count: totalVencidas, error: erroTarefas },
+    { data: deHojeData, count: totalDeHoje },
     { data: esperaData, count: totalEspera, error: erroEspera },
     { data: ativacaoData, count: totalAtivacao, error: erroAtivacao },
     { count: enviadasManuais },
@@ -194,12 +195,25 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
     { data: pendentesData, count: totalPendentes, error: erroPendentes },
     { data: metaPerfil },
   ] = await Promise.all([
-    // 1. Tarefas vencidas e as que vencem até o fim de hoje, em Brasília.
+    // 1a. Vencidas de OUTROS dias. Fatia separada das de hoje (6.3): numa
+    // consulta só, ordenada por vence_em, um monte de vencidas antigas
+    // empurrava a agenda do dia para fora do limite de 25.
     supabase
       .from("lead_tasks")
       .select("id, titulo, vence_em, lead:leads(id, nome)", { count: "exact" })
       .eq("responsavel_id", alvoId)
       .is("concluida_em", null)
+      .lt("vence_em", hoje.inicioDoDia)
+      .order("vence_em", { ascending: true })
+      .limit(LIMITE),
+    // 1b. A agenda de hoje: vence entre a meia-noite e o fim do dia, em
+    // ordem de hora, em Brasília.
+    supabase
+      .from("lead_tasks")
+      .select("id, titulo, vence_em, lead:leads(id, nome)", { count: "exact" })
+      .eq("responsavel_id", alvoId)
+      .is("concluida_em", null)
+      .gte("vence_em", hoje.inicioDoDia)
       .lte("vence_em", fimDeHoje)
       .order("vence_em", { ascending: true })
       .limit(LIMITE),
@@ -355,17 +369,26 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
       .maybeSingle(),
   ]);
 
-  const tarefas: TarefaDia[] = ((tarefasData ?? []) as unknown as LinhaTarefa[])
+  const paraTarefa = (t: LinhaTarefa): TarefaDia => ({
+    id: t.id,
+    titulo: t.titulo,
+    quandoRotulo: horaOuData(t.vence_em) || "—",
+    vencida: new Date(t.vence_em).getTime() < agoraMs,
+    leadId: t.lead!.id,
+    leadNome: t.lead!.nome,
+  });
+  const tarefasVencidas: TarefaDia[] = (
+    (vencidasData ?? []) as unknown as LinhaTarefa[]
+  )
     .filter((t) => t.lead)
-    .map((t) => ({
-      id: t.id,
-      titulo: t.titulo,
-      quandoRotulo: horaOuData(t.vence_em) || "—",
-      vencida: new Date(t.vence_em).getTime() < agoraMs,
-      leadId: t.lead!.id,
-      leadNome: t.lead!.nome,
-    }));
-  const vencidas = tarefas.filter((t) => t.vencida).length;
+    .map(paraTarefa);
+  const tarefasDeHoje: TarefaDia[] = (
+    (deHojeData ?? []) as unknown as LinhaTarefa[]
+  )
+    .filter((t) => t.lead)
+    .map(paraTarefa);
+  const totalTarefas = (totalVencidas ?? 0) + (totalDeHoje ?? 0);
+  const exibidasTarefas = tarefasVencidas.length + tarefasDeHoje.length;
 
   const espera = (esperaData ?? []) as unknown as LinhaEspera[];
 
@@ -653,13 +676,19 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
             1 · Tarefas vencidas e de hoje
           </h2>
           <span className="font-mono text-xs text-neutral-400 tabular-nums">
-            {totalTarefas ?? 0}
+            {totalTarefas}
           </span>
-          {vencidas > 0 ? (
+          {(totalVencidas ?? 0) > 0 ? (
             <span className="inline-flex h-[20px] items-center rounded-sm bg-danger-bg px-1 text-xs font-medium text-danger">
-              {vencidas === 1 ? "1 vencida" : `${vencidas} vencidas`}
+              {totalVencidas === 1 ? "1 vencida" : `${totalVencidas} vencidas`}
             </span>
           ) : null}
+          <Link
+            href="/agenda"
+            className="ml-auto inline-flex h-[32px] items-center rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          >
+            Ver calendário
+          </Link>
         </div>
 
         {erroTarefas ? (
@@ -670,23 +699,51 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
             As tarefas dependem da migração 0013 (lead_tasks) — rode-a no SQL
             Editor do Supabase.
           </p>
-        ) : tarefas.length === 0 ? (
+        ) : exibidasTarefas === 0 ? (
           <p className="mt-1 rounded-lg border border-dashed border-neutral-300 p-2 text-sm text-neutral-600">
             Tudo em dia — nenhuma tarefa vencida nem marcada para hoje.
           </p>
         ) : (
           <>
-            <ul className="mt-1 flex flex-col gap-1">
-              {tarefas.map((t) => (
-                <TarefaDoDia key={t.id} tarefa={t} />
-              ))}
-            </ul>
-            <MaisNaLista
-              total={totalTarefas ?? 0}
-              href="/agenda"
-              rotulo="ver todas na Agenda"
-              unidade="tarefa(s)"
-            />
+            {tarefasVencidas.length > 0 ? (
+              <>
+                <h3 className="mt-1 text-xs font-medium text-danger">
+                  Vencidas de outros dias
+                </h3>
+                <ul className="mt-0.5 flex flex-col gap-1">
+                  {tarefasVencidas.map((t) => (
+                    <TarefaDoDia key={t.id} tarefa={t} />
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {tarefasDeHoje.length > 0 ? (
+              <>
+                <h3 className="mt-1 text-xs font-medium text-neutral-600">
+                  Hoje, em ordem de hora
+                </h3>
+                <ul className="mt-0.5 flex flex-col gap-1">
+                  {tarefasDeHoje.map((t) => (
+                    <TarefaDoDia key={t.id} tarefa={t} />
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {totalTarefas > exibidasTarefas ? (
+              <p className="mt-1 text-xs text-neutral-600">
+                +
+                <span className="font-mono tabular-nums">
+                  {totalTarefas - exibidasTarefas}
+                </span>{" "}
+                tarefa(s) além destas —{" "}
+                <Link
+                  href="/agenda"
+                  className="font-medium text-primary-500 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  ver todas na Agenda
+                </Link>
+              </p>
+            ) : null}
           </>
         )}
       </section>

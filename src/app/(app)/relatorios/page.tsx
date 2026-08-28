@@ -94,6 +94,7 @@ export default async function RelatoriosPage({
     { dados: trocas, erro: trocasErro },
     { count: aguardandoCount, error: aguardandoErro },
     { data: equipeAtiva },
+    { data: resumoAtivBruto },
   ] = await Promise.all([
     supabase.rpc("relatorio_leads", { p_dias: periodo.dias }),
     // Idade da base: com tudo importado há dias, "90 dias" e "Tudo" mostram
@@ -203,6 +204,9 @@ export default async function RelatoriosPage({
       .from("profiles")
       .select("id, nome, meta_contatos_dia")
       .eq("ativo", true),
+    // Velocidade de ativação (0055): janela própria (histórico de lotes,
+    // teto 180d), não segue o período — por isso p_inicio nulo.
+    supabase.rpc("pagamentos_resumo", { p_inicio: null }),
   ]);
 
   const r = (data ?? null) as Relatorio | null;
@@ -283,6 +287,23 @@ export default async function RelatoriosPage({
       (g.lotes_30d ?? 0) > 0 &&
       (g.lotes_30d ?? 0) < (g.lotes_30d_anterior ?? 0) * 0.75,
   ).length;
+
+  // Velocidade de ativação (6.1): a régua canônica vem da pagamentos_resumo
+  // (0055). Sem a migração, tempo_medio_geral não existe e o indicador vira
+  // "—" — a página segue de pé.
+  type ResumoAtivacao = {
+    tempo_medio_geral?: { dias: number | null; n: number } | null;
+    por_pessoa?: {
+      nome: string;
+      tempo_medio_dias: number | null;
+      tempo_medio_n?: number | null;
+    }[];
+  };
+  const resumoAtiv = (resumoAtivBruto ?? null) as ResumoAtivacao | null;
+  const velGeral = resumoAtiv?.tempo_medio_geral ?? null;
+  const velPorVendedor = (resumoAtiv?.por_pessoa ?? []).filter(
+    (p) => p.tempo_medio_dias !== null && (p.tempo_medio_n ?? 0) > 0,
+  );
 
   const perdasPorMotivo = (() => {
     if (perdasBrutas.erro !== null) return [];
@@ -586,7 +607,7 @@ export default async function RelatoriosPage({
               </div>
             </div>
 
-            <dl className="mt-2 grid gap-3 sm:grid-cols-3">
+            <dl className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Indicador
                 rotulo="Pararam de girar"
                 valor={giroErro ? "—" : numero(pararam)}
@@ -602,7 +623,33 @@ export default async function RelatoriosPage({
                 valor={concentracao === null ? "—" : `${concentracao}%`}
                 detalhe="do volume vem dos 10 maiores clientes"
               />
+              <Indicador
+                rotulo="Abre→ativa"
+                valor={
+                  velGeral?.dias === null || velGeral?.dias === undefined
+                    ? "—"
+                    : `${velGeral.dias}d`
+                }
+                detalhe={
+                  velGeral && velGeral.n > 0
+                    ? `média da abertura ao 1º giro (${numero(velGeral.n)} conta(s))`
+                    : "sem conta medível ainda"
+                }
+              />
             </dl>
+            {velPorVendedor.length > 0 ? (
+              <p className="mt-1 max-w-[68ch] text-xs text-neutral-600">
+                Por vendedor:{" "}
+                {velPorVendedor
+                  .map(
+                    (p) =>
+                      `${p.nome} ${p.tempo_medio_dias}d (${p.tempo_medio_n})`,
+                  )
+                  .join(" · ")}
+                . Só contas abertas dentro do histórico de lotes (teto de 180
+                dias) — este número não segue o período escolhido.
+              </p>
+            ) : null}
           </section>
 
           {/* ── 4. Por que perdemos ── */}

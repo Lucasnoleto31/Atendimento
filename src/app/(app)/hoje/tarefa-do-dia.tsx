@@ -2,9 +2,10 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Check } from "lucide-react";
+import { Check, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { concluirTarefaHoje } from "./actions";
+import { ItemConversa } from "./painel-conversa";
 
 export type TarefaDia = {
   id: string;
@@ -80,6 +81,16 @@ export function TarefaDoDia({ tarefa }: { tarefa: TarefaDia }) {
           </span>
         ) : null}
       </span>
+
+      {/* Abre a conversa no painel lateral, sem sair da fila (6.3). */}
+      <ItemConversa
+        leadId={tarefa.leadId}
+        nome={tarefa.leadNome}
+        className="mt-0.5 inline-flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-sm text-neutral-400 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+      >
+        <MessageSquare size={14} strokeWidth={1.5} aria-hidden />
+        <span className="sr-only">Abrir conversa com {tarefa.leadNome}</span>
+      </ItemConversa>
     </li>
   );
 }

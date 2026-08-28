@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   BarChart3,
-  CalendarDays,
   Columns3,
   CreditCard,
   LogOut,
@@ -25,11 +24,12 @@ import { cn } from "@/lib/utils";
 import { AlternadorTema } from "./alternador-tema";
 import { ContadorNaoLidas } from "./nao-lidas";
 
+// Agenda saiu do menu (6.3): a visão-dia mora na /hoje e o calendário abre
+// pelo botão "Ver calendário" — a rota /agenda continua existindo.
 export const MODULOS = [
   { href: "/hoje", label: "Hoje", icon: Sun },
   { href: "/atendimento", label: "Atendimento", icon: Columns3 },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/agenda", label: "Agenda", icon: CalendarDays },
   { href: "/carteira", label: "Carteira", icon: Wallet },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/campanhas", label: "Campanhas", icon: Megaphone, gestor: true },
@@ -154,7 +154,7 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
                 />
                 {item.label}
                 {item.href === "/chat" ? <ContadorNaoLidas /> : null}
-                {item.href === "/agenda" ? (
+                {item.href === "/hoje" ? (
                   <ContadorNaoLidas mostrar="tarefas" />
                 ) : null}
               </Link>
