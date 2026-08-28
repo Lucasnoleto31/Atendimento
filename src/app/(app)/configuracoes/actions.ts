@@ -434,21 +434,23 @@ export async function salvarWhatsapp(formData: FormData) {
  */
 export async function criarTemplateResumo() {
   await exigirGestor();
+  // terminar() NUNCA pode ficar dentro do try: redirect() do Next funciona
+  // LANÇANDO um erro interno (NEXT_REDIRECT) — o catch o engolia e mostrava
+  // o sucesso como "A Meta recusou: NEXT_REDIRECT".
+  let aviso: string;
   try {
     const status = await criarTemplateResumoMeta();
-    terminar(
+    aviso =
       status === "APPROVED"
         ? "Template resumo_diario criado e já aprovado."
-        : `Template resumo_diario criado (status ${status}). A Meta ainda vai aprovar — horas a dias; o resumo passa a sair sozinho depois disso.`,
-    );
+        : `Template resumo_diario criado (status ${status}). A Meta ainda vai aprovar — horas a dias; o resumo passa a sair sozinho depois disso.`;
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    terminar(
-      /already exists|já existe/i.test(m)
-        ? "O template resumo_diario já existe na WABA — se ainda não chegou nada, ele deve estar aguardando a aprovação da Meta."
-        : `A Meta recusou a criação: ${m}`,
-    );
+    aviso = /already exists|já existe/i.test(m)
+      ? "O template resumo_diario já existe na WABA — se ainda não chegou nada, ele deve estar aguardando a aprovação da Meta."
+      : `A Meta recusou a criação: ${m}`;
   }
+  terminar(aviso);
 }
 
 // ===========================================================================
