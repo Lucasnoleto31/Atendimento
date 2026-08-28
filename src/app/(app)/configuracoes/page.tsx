@@ -106,7 +106,7 @@ export default async function ConfiguracoesPage({
 }: PageProps<"/configuracoes">) {
   const perfil = await perfilAtual();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
-    redirect("/atendimento");
+    redirect("/hoje");
   }
 
   const params = await searchParams;

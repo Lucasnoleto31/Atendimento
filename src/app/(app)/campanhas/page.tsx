@@ -90,7 +90,7 @@ export default async function CampanhasPage({
   const perfil = await perfilAtual();
   if (!perfil) redirect("/entrar");
   if (perfil.papel !== "admin" && perfil.papel !== "gestor") {
-    redirect("/atendimento");
+    redirect("/hoje");
   }
 
   const { aviso } = await searchParams;

@@ -13,7 +13,7 @@ import { perfilAtual } from "@/lib/auth";
 async function exigirGestor() {
   const perfil = await perfilAtual();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
-    redirect("/atendimento");
+    redirect("/hoje");
   }
 }
 

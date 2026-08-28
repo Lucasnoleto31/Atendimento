@@ -33,7 +33,7 @@ export async function entrar(
 ): Promise<EstadoLogin> {
   const email = String(formData.get("email") ?? "").trim();
   const senha = String(formData.get("senha") ?? "");
-  const proximo = String(formData.get("proximo") ?? "/atendimento");
+  const proximo = String(formData.get("proximo") ?? "/hoje");
 
   if (!email || !senha) {
     return { erro: "Informe e-mail e senha." };
@@ -94,7 +94,7 @@ export async function entrar(
     .then(() => {}, () => {});
 
   revalidatePath("/", "layout");
-  redirect(proximo.startsWith("/") ? proximo : "/atendimento");
+  redirect(proximo.startsWith("/") ? proximo : "/hoje");
 }
 
 export async function sair() {

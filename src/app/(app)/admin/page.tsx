@@ -49,7 +49,7 @@ function StatusEnv({ definido }: { definido: boolean }) {
 export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   const perfil = await perfilAtual();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
-    redirect("/atendimento");
+    redirect("/hoje");
   }
 
   const params = await searchParams;

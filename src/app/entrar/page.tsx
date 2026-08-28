@@ -13,7 +13,7 @@ export default async function EntrarPage({
   const proximo =
     typeof params.proximo === "string" && params.proximo.startsWith("/")
       ? params.proximo
-      : "/atendimento";
+      : "/hoje";
 
   return (
     <main className="flex flex-1 items-center justify-center px-2 py-8">

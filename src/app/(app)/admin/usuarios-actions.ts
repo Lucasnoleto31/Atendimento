@@ -83,7 +83,7 @@ export async function resetarSenha(
 
 export async function mudarPapel(formData: FormData) {
   const admin = await exigirAdmin();
-  if (!admin) redirect("/atendimento");
+  if (!admin) redirect("/hoje");
 
   const id = String(formData.get("id") ?? "");
   const papel = String(formData.get("papel") ?? "");
@@ -111,7 +111,7 @@ export async function mudarPapel(formData: FormData) {
 /** Entra ou sai do rodízio da distribuição automática (0041). */
 export async function alternarRecebeLeads(formData: FormData) {
   const admin = await exigirAdmin();
-  if (!admin) redirect("/atendimento");
+  if (!admin) redirect("/hoje");
 
   const id = String(formData.get("id") ?? "");
 
@@ -143,7 +143,7 @@ export async function alternarRecebeLeads(formData: FormData) {
 
 export async function alternarUsuarioAtivo(formData: FormData) {
   const admin = await exigirAdmin();
-  if (!admin) redirect("/atendimento");
+  if (!admin) redirect("/hoje");
 
   const id = String(formData.get("id") ?? "");
 

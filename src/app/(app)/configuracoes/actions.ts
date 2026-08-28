@@ -11,7 +11,7 @@ const MAX_INSTANCIAS = 10;
 async function exigirGestor() {
   const perfil = await perfilAtual();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
-    redirect("/atendimento");
+    redirect("/hoje");
   }
   return perfil;
 }

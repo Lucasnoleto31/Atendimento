@@ -96,7 +96,7 @@ export async function middleware(request: NextRequest) {
 
   if (user && pathname.startsWith("/entrar")) {
     const url = request.nextUrl.clone();
-    url.pathname = "/atendimento";
+    url.pathname = "/hoje";
     url.search = "";
     return NextResponse.redirect(url);
   }
