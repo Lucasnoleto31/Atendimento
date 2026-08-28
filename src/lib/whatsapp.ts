@@ -1,5 +1,16 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import type { TemplateWhatsapp } from "@/lib/chatwoot";
+
+/** O contrato de template do app inteiro (veio de lib/chatwoot na Fase 8). */
+export type TemplateWhatsapp = {
+  nome: string;
+  idioma: string;
+  categoria: string;
+  corpo: string;
+  /** Tokens de variável na ordem em que aparecem no corpo ("1", "2"…). */
+  parametros: string[];
+};
+
+export type StatusConversa = "open" | "resolved" | "pending" | "snoozed";
 
 /**
  * Cliente da WhatsApp Cloud API (Meta), usado quando META_WHATSAPP_TOKEN
@@ -157,6 +168,42 @@ export async function enviarMidiaMeta(
     }),
   });
   return r.messages?.[0]?.id ?? null;
+}
+
+/**
+ * Cria o template resumo_diario direto na WABA (Fase 7.2): o gestor não
+ * conseguiu pelo WhatsApp Manager, e o token com whatsapp_business_management
+ * — o mesmo que LISTA os templates — também pode criá-los. Depois de criado,
+ * a Meta ainda precisa APROVAR (o motor só envia template aprovado).
+ * Devolve o status que a Meta respondeu (ex.: PENDING) ou lança com a
+ * mensagem dela (nome duplicado, permissão faltando…).
+ */
+export async function criarTemplateResumoMeta(): Promise<string> {
+  const waba = process.env.META_WABA_ID;
+  if (!waba) throw new Error("META_WABA_ID não configurado.");
+  const corpo =
+    "Resumo Zeve de hoje: {{1}} conta(s) aberta(s), {{2}} ativação(ões) registrada(s), {{3}} venda(s) confirmada(s), {{4}} conversa(s) aguardando 24h+ e {{5}} cliente(s) com giro em risco.";
+  const r = await graph<{ id?: string; status?: string }>(
+    `/${waba}/message_templates`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: "resumo_diario",
+        language: "pt_BR",
+        category: "UTILITY",
+        components: [
+          {
+            type: "BODY",
+            text: corpo,
+            // A Meta exige exemplo para cada variável antes de avaliar.
+            example: { body_text: [["3", "2", "5", "4", "7"]] },
+          },
+        ],
+      }),
+    },
+  );
+  cacheTemplatesMeta = null; // a lista muda; o cache de 5 min não pode esconder
+  return r.status ?? "PENDING";
 }
 
 let cacheTemplatesMeta: {

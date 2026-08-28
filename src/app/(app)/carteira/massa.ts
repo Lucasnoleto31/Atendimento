@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { variantesTelefone } from "@/lib/csv";
-import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+import { listarTemplatesMeta, metaConfigurada } from "@/lib/whatsapp";
 import { dispararTemplate } from "@/lib/cadencia";
 import { avancarAposDisparo } from "@/lib/kanban";
 
@@ -25,8 +25,6 @@ type LeadDoCliente = {
   id: string;
   nome: string | null;
   telefone_e164: string | null;
-  chatwoot_contact_id: number | null;
-  chatwoot_conversation_id: number | null;
   marketing_bloqueado_em: string | null;
   ultima_interacao_em: string | null;
 };
@@ -41,7 +39,7 @@ type ClienteAlvo = {
 type Servico = ReturnType<typeof createServiceClient>;
 
 const CAMPOS_LEAD =
-  "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id, marketing_bloqueado_em, ultima_interacao_em";
+  "id, nome, telefone_e164, marketing_bloqueado_em, ultima_interacao_em";
 
 export type ResultadoMassa = { ok?: boolean; erro?: string; aviso?: string };
 
@@ -380,9 +378,15 @@ export async function dispararTemplateEmMassa(
   }
   if (!templateNome) return { erro: "Escolha um template." };
 
+  // Canal único: sem a Meta configurada o disparo não tem por onde sair —
+  // erro claro aqui, antes de tocar em qualquer lead.
+  if (!metaConfigurada()) {
+    return { erro: "WhatsApp (Meta) não configurado." };
+  }
+
   let template;
   try {
-    const templates = await listarTemplatesCanal();
+    const templates = await listarTemplatesMeta();
     template = templates.find(
       (t) => t.nome === templateNome && t.idioma === templateIdioma,
     );
@@ -400,7 +404,6 @@ export async function dispararTemplateEmMassa(
   }
 
   const service = createServiceClient();
-  const canal = canalAtivo();
   const padroes = await padroesDeLead(service);
 
   const { data: clientes } = await service
@@ -444,13 +447,10 @@ export async function dispararTemplateEmMassa(
     try {
       const idMensagem = await dispararTemplate(
         service,
-        canal,
         {
           leadId: lead.id,
           nome: lead.nome ?? cliente.nome_completo,
           telefone: lead.telefone_e164,
-          chatwootContatoId: lead.chatwoot_contact_id,
-          chatwootConversaId: lead.chatwoot_conversation_id,
         },
         template,
         preenchidos,
@@ -470,9 +470,7 @@ export async function dispararTemplateEmMassa(
         metadados: {
           via: "carteira_massa",
           template: template.nome,
-          ...(canal === "meta"
-            ? { message_id: idMensagem }
-            : { chatwoot_message_id: idMensagem }),
+          message_id: idMensagem,
         },
       });
 

@@ -6,11 +6,10 @@ import { perfilAtual } from "@/lib/auth";
 import { formatarTelefone, horaOuData } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
-  obterStatusConversa,
-  type StatusConversa,
+  listarTemplatesMeta,
+  metaConfigurada,
   type TemplateWhatsapp,
-} from "@/lib/chatwoot";
-import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+} from "@/lib/whatsapp";
 import { estiloEtiqueta } from "@/lib/etiquetas";
 import { Janela, type Mensagem, type MensagemPadrao } from "./janela";
 import { AtualizadorTempoReal } from "./tempo-real";
@@ -57,7 +56,6 @@ type ConversaLinha = {
   stage_id: string | null;
   ultima_interacao_em: string | null;
   chat_lido_em: string | null;
-  chatwoot_conversation_id: number | null;
   chat_adiado_em?: string | null;
   chat_adiado_ate?: string | null;
   chat_resolvido_em?: string | null;
@@ -65,7 +63,7 @@ type ConversaLinha = {
 };
 
 const CAMPOS_BASE =
-  "id, nome, telefone_e164, instagram_id, instagram_usuario, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em, chatwoot_conversation_id";
+  "id, nome, telefone_e164, instagram_id, instagram_usuario, customer_id, responsavel_id, stage_id, ultima_interacao_em, chat_lido_em";
 // Sem a migração 0017 a coluna não existe: a consulta cai para os campos base.
 const CAMPOS_CONVERSA = `${CAMPOS_BASE}, chat_adiado_em, chat_resolvido_em, marketing_bloqueado_em`;
 // Prazo do adiamento (migração 0042); sem ela, cai para CAMPOS_CONVERSA.
@@ -115,8 +113,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   if (params.f === "minhas" && !atendenteFiltro && perfil) {
     atendenteFiltro = perfil.id; // link antigo continua filtrando as minhas
   }
-
-  const canal = canalAtivo();
 
   // eslint-disable-next-line react-hooks/purity -- Server Component: uma renderização por request, o relógio do request é estável.
   const agoraMs = Date.now();
@@ -177,12 +173,9 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
           });
     q = q.limit(100);
 
-    // Na Meta a conversa é o próprio telefone (basta ter havido mensagem);
-    // no Chatwoot, o vínculo com a conversa de lá.
-    q =
-      canal === "meta"
-        ? q.not("ultima_interacao_em", "is", null)
-        : q.not("chatwoot_conversation_id", "is", null);
+    // Na Meta a conversa é o próprio telefone: existir conversa é ter
+    // havido mensagem — não há mais vínculo externo a conferir.
+    q = q.not("ultima_interacao_em", "is", null);
 
     // A caixa de entrada mostra só o que falta atender: adiadas (no prazo)
     // e resolvidas saem daqui e vivem nos atalhos próprios.
@@ -250,10 +243,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       if (comPrazo) {
         q = q.or(`chat_adiado_ate.is.null,chat_adiado_ate.gt."${agoraIso}"`);
       }
-      q =
-        canal === "meta"
-          ? q.not("ultima_interacao_em", "is", null)
-          : q.not("chatwoot_conversation_id", "is", null);
+      q = q.not("ultima_interacao_em", "is", null);
       if (atendenteFiltro === "sem") q = q.is("responsavel_id", null);
       else if (atendenteFiltro) q = q.eq("responsavel_id", atendenteFiltro);
       return q;
@@ -272,10 +262,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       let q: any = supabase
         .from("leads")
         .select("id", { count: "exact", head: true });
-      q =
-        canal === "meta"
-          ? q.not("ultima_interacao_em", "is", null)
-          : q.not("chatwoot_conversation_id", "is", null);
+      q = q.not("ultima_interacao_em", "is", null);
       q = aplicarCaixa(q, nivel);
       if (vAlvo === "sem") q = q.is("responsavel_id", null);
       else if (vAlvo) q = q.eq("responsavel_id", vAlvo);
@@ -446,7 +433,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   let etiquetasLead: string[] = [];
   let etapas: EtapaFunil[] = [];
   let templates: TemplateWhatsapp[] = [];
-  let statusConversa: StatusConversa | null = null;
   let restanteJanela: number | null = null;
   let detalhe: DetalheLead | null = null;
   let giro: GiroCliente | null = null;
@@ -471,7 +457,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       { data: giroCliente },
       { data: receitaCliente },
       templatesInbox,
-      statusAtual,
     ] = await Promise.all([
       // Da mais nova para a mais antiga: o corte fica no passado, não no fim.
       supabase
@@ -519,11 +504,12 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             .eq("customer_id", atual.customer_id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
-      // Canal fora do ar não derruba a página: segue sem template/status.
-      listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[]),
-      canal === "chatwoot" && atual.chatwoot_conversation_id !== null
-        ? obterStatusConversa(atual.chatwoot_conversation_id).catch(() => null)
-        : Promise.resolve(null),
+      // Meta fora do ar (ou não configurada) não derruba a página: o
+      // composer segue funcionando, só sem a lista de templates.
+      (metaConfigurada()
+        ? listarTemplatesMeta()
+        : Promise.resolve([] as TemplateWhatsapp[])
+      ).catch(() => [] as TemplateWhatsapp[]),
     ]);
 
     const linhas = (interacoes ?? []) as unknown as {
@@ -582,7 +568,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       (e) => ({ id: e.id, nome: e.nome }),
     );
     templates = templatesInbox;
-    statusConversa = statusAtual;
     detalhe = (leadDetalhe ?? null) as DetalheLead | null;
     giro = (giroCliente ?? null) as GiroCliente | null;
     receita = (receitaCliente ?? null) as ReceitaCliente | null;
@@ -612,12 +597,8 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     }));
   }
 
-  // Na Meta o "thread" é o telefone; no Chatwoot, a conversa vinculada.
-  const temCanalEnvio = atual
-    ? canal === "meta"
-      ? atual.telefone_e164 !== null
-      : atual.chatwoot_conversation_id !== null
-    : false;
+  // Na Meta o "thread" é o telefone: sem telefone não há para onde enviar.
+  const temCanalEnvio = atual ? atual.telefone_e164 !== null : false;
 
   // Hora no dia de hoje, data nos anteriores — tudo no fuso de Brasília.
   const horaCurta = horaOuData;
@@ -924,7 +905,6 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
             <FerramentasConversa
               leadId={atual.id}
               temConversa={temCanalEnvio}
-              statusConversa={statusConversa}
               responsavelId={atual.responsavel_id}
               equipe={equipe}
               etiquetas={etiquetas}

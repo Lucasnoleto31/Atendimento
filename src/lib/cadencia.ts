@@ -1,11 +1,10 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import {
-  enviarTemplate,
-  iniciarConversaWhatsapp,
+  enviarTemplateMeta,
+  listarTemplatesMeta,
+  metaConfigurada,
   type TemplateWhatsapp,
-} from "@/lib/chatwoot";
-import { enviarTemplateMeta } from "@/lib/whatsapp";
-import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+} from "@/lib/whatsapp";
 import { avancarAposDisparo } from "@/lib/kanban";
 import { agoraEmBrasilia } from "@/lib/format";
 import { orcamentoEnviosRestante } from "@/lib/envios";
@@ -59,8 +58,6 @@ export type Alvo = {
   leadId: string;
   nome: string;
   telefone: string;
-  chatwootContatoId: number | null;
-  chatwootConversaId: number | null;
 };
 
 export type ResultadoCadencia = {
@@ -141,8 +138,11 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
     return { enviados: 0, pulados: 0, regras: regras.length };
   }
 
-  const templates = await listarTemplatesCanal();
-  const canal = canalAtivo();
+  // Canal único é a Meta: sem token configurado a lista vem vazia e o motor
+  // fica inerte nesta rodada — nenhum template casa com as regras.
+  const templates = await (metaConfigurada()
+    ? listarTemplatesMeta()
+    : Promise.resolve([]));
   let enviados = 0;
   let pulados = 0;
 
@@ -210,7 +210,6 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
 
         const idMensagem = await dispararTemplate(
           service,
-          canal,
           alvo,
           template,
           valores,
@@ -227,9 +226,7 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
           tipo: "mensagem_enviada",
           conteudo,
           metadados: {
-            ...(canal === "meta"
-              ? { message_id: idMensagem }
-              : { chatwoot_message_id: idMensagem }),
+            message_id: idMensagem,
             via: "cadencia",
             ancora,
             template: template.nome,
@@ -331,8 +328,6 @@ async function alvosLeadNovo(
     id: string;
     nome: string;
     telefone_e164: string;
-    chatwoot_contact_id: number | null;
-    chatwoot_conversation_id: number | null;
   };
 
   const alvos: Alvo[] = [];
@@ -341,9 +336,7 @@ async function alvosLeadNovo(
     const base = (): any =>
       service
         .from("leads")
-        .select(
-          "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
-        )
+        .select("id, nome, telefone_e164")
         .is("primeira_resposta_em", null)
         .not("status", "in", "(ganho,perdido)")
         .not("telefone_e164", "is", null)
@@ -363,8 +356,6 @@ async function alvosLeadNovo(
         leadId: l.id,
         nome: l.nome,
         telefone: l.telefone_e164,
-        chatwootContatoId: l.chatwoot_contact_id,
-        chatwootConversaId: l.chatwoot_conversation_id,
       });
       if (alvos.length >= VARREDURA_MAXIMA) break;
     }
@@ -466,28 +457,21 @@ async function alvosCliente(
 
   if (linhas.length === 0) return [];
 
-  // Ids do Chatwoot para o canal de reserva + status do lead (perdido sai).
+  // Status do lead (perdido sai) e opt-out de marketing.
   type InfoLead = {
     id: string;
     status: string;
     marketing_bloqueado_em?: string | null;
-    chatwoot_contact_id: number | null;
-    chatwoot_conversation_id: number | null;
   };
 
   const ids = linhas.map((l) => l.lead_id);
   // Sem a migração 0019 a coluna não existe: repete a consulta sem ela.
   const comColuna = await service
     .from("leads")
-    .select(
-      "id, status, marketing_bloqueado_em, chatwoot_contact_id, chatwoot_conversation_id",
-    )
+    .select("id, status, marketing_bloqueado_em")
     .in("id", ids);
   const semColuna = comColuna.error
-    ? await service
-        .from("leads")
-        .select("id, status, chatwoot_contact_id, chatwoot_conversation_id")
-        .in("id", ids)
+    ? await service.from("leads").select("id, status").in("id", ids)
     : null;
   const leadsInfo = ((semColuna?.data ?? comColuna.data ?? []) as unknown) as InfoLead[];
   const porLead = new Map(leadsInfo.map((l) => [l.id, l]));
@@ -502,54 +486,24 @@ async function alvosCliente(
       leadId: l.lead_id,
       nome: l.nome_completo,
       telefone: l.telefone_e164,
-      chatwootContatoId: porLead.get(l.lead_id)?.chatwoot_contact_id ?? null,
-      chatwootConversaId:
-        porLead.get(l.lead_id)?.chatwoot_conversation_id ?? null,
     }));
 }
 
 export async function dispararTemplate(
   service: ReturnType<typeof createServiceClient>,
-  canal: "meta" | "chatwoot",
   alvo: Alvo,
   template: TemplateWhatsapp,
   valores: Record<string, string>,
-): Promise<string | number | null> {
-  if (canal === "meta") {
-    const id = await enviarTemplateMeta(alvo.telefone, template, valores);
-    // Lead na fila de Ativação recebendo template = roteiro enviado.
-    await marcarRoteiroEnviado(service, [alvo.leadId]);
-    return id;
+): Promise<string | null> {
+  // Canal único: sem a Meta configurada não existe por onde enviar. O erro
+  // aqui é a mensagem que chega ao usuário (massa) ou fica na linha (motores),
+  // em vez do estouro críptico do token interno.
+  if (!metaConfigurada()) {
+    throw new Error("WhatsApp (Meta) não configurado.");
   }
 
-  let conversaId = alvo.chatwootConversaId;
-  if (!conversaId) {
-    const inicio = await iniciarConversaWhatsapp({
-      nome: alvo.nome,
-      telefone: alvo.telefone,
-      contatoId: alvo.chatwootContatoId,
-    });
-    conversaId = inicio.conversaId;
-    await service
-      .from("leads")
-      .update({
-        chatwoot_contact_id: inicio.contatoId,
-        chatwoot_conversation_id: conversaId,
-      })
-      .eq("id", alvo.leadId);
-  }
-
-  const resposta = await enviarTemplate(conversaId, template, valores);
-  const idMensagem = resposta?.id ?? null;
-
-  if (typeof idMensagem === "number") {
-    await service.from("webhook_events").insert({
-      origem: "chatwoot",
-      evento_id: `cw-msg-${idMensagem}`,
-      payload: { via: "cadencia", lead_id: alvo.leadId },
-      processado: true,
-    });
-  }
-
-  return idMensagem;
+  const id = await enviarTemplateMeta(alvo.telefone, template, valores);
+  // Lead na fila de Ativação recebendo template = roteiro enviado.
+  await marcarRoteiroEnviado(service, [alvo.leadId]);
+  return id;
 }

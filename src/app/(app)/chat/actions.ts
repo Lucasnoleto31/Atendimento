@@ -7,21 +7,12 @@ import { marcarRoteiroEnviado } from "@/lib/ativacao";
 import { perfilAtual } from "@/lib/auth";
 import { formatarData } from "@/lib/format";
 import {
-  alterarStatusConversa,
-  atribuirConversaPorEmail,
-  definirEtiquetasConversa,
-  enviarMensagem,
-  enviarMensagemComAnexos,
-  enviarNotaPrivada,
-  enviarTemplate,
-  iniciarConversaWhatsapp,
-} from "@/lib/chatwoot";
-import {
   enviarMidiaMeta,
   enviarTemplateMeta,
   enviarTextoMeta,
+  listarTemplatesMeta,
+  metaConfigurada,
 } from "@/lib/whatsapp";
-import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import {
   descreverErroInstagram,
   enviarMidiaInstagram,
@@ -135,9 +126,7 @@ async function leadComConversa(leadId: string) {
   const supabase = await createClient();
   const { data: lead } = await supabase
     .from("leads")
-    .select(
-      "id, nome, telefone_e164, instagram_id, instagram_usuario, chatwoot_contact_id, chatwoot_conversation_id",
-    )
+    .select("id, nome, telefone_e164, instagram_id, instagram_usuario")
     .eq("id", leadId)
     .maybeSingle();
   return lead as {
@@ -146,26 +135,7 @@ async function leadComConversa(leadId: string) {
     telefone_e164: string | null;
     instagram_id: string | null;
     instagram_usuario: string | null;
-    chatwoot_contact_id: number | null;
-    chatwoot_conversation_id: number | null;
   } | null;
-}
-
-/**
- * Registra o eco do webhook como processado ANTES de ele chegar — assim a
- * mensagem que o próprio CRM enviou não entra duas vezes no histórico.
- */
-async function marcarEcoProcessado(
-  mensagemId: number,
-  leadId: string,
-): Promise<void> {
-  const service = createServiceClient();
-  await service.from("webhook_events").insert({
-    origem: "chatwoot",
-    evento_id: `cw-msg-${mensagemId}`,
-    payload: { via: "crm", lead_id: leadId },
-    processado: true,
-  });
 }
 
 export async function enviarMensagemLead(
@@ -227,23 +197,11 @@ export async function enviarMensagemLead(
   }
   if (textoBruto.length > 4096) return { erro: "Mensagem longa demais." };
 
-  // Nota privada: só equipe vê. Fica no histórico e espelha no Chatwoot.
+  // Nota privada: só equipe vê. Vive apenas no histórico do CRM — não há
+  // mais para onde espelhar (a Meta não tem nota privada).
   if (modo === "nota") {
     const lead = await leadComConversa(leadId);
     if (!lead) return { erro: "Lead não encontrado." };
-
-    let notaId: number | null = null;
-    if (canalAtivo() === "chatwoot" && lead.chatwoot_conversation_id) {
-      try {
-        const resposta = await enviarNotaPrivada(
-          lead.chatwoot_conversation_id,
-          textoBruto,
-        );
-        notaId = resposta?.id ?? null;
-      } catch {
-        // sem Chatwoot a nota ainda vale localmente
-      }
-    }
 
     const supabase = await createClient();
     const { data: notaCriada } = await supabase
@@ -253,10 +211,7 @@ export async function enviarMensagemLead(
         tipo: "nota",
         conteudo: textoBruto,
         autor_id: perfil.id,
-        metadados: {
-          via: "crm",
-          ...(notaId !== null ? { chatwoot_message_id: notaId } : {}),
-        },
+        metadados: { via: "crm" },
       })
       .select("id, criado_em")
       .maybeSingle();
@@ -297,8 +252,8 @@ export async function enviarMensagemLead(
   const lead = await leadComConversa(leadId);
   if (!lead) return { erro: "Lead não encontrado." };
 
-  const canal = canalAtivo();
-  let mensagemId: string | number | null = null;
+  // Só wamid da Meta ou id do Direct — o id numérico do Chatwoot acabou.
+  let mensagemId: string | null = null;
   let anexos: { tipo: string; url: string }[] = [];
   const wamids: string[] = [];
   let falhaParcial: string | null = null;
@@ -347,7 +302,12 @@ export async function enviarMensagemLead(
       url: service.storage.from(BUCKET_MIDIA).getPublicUrl(a.caminho).data
         .publicUrl,
     }));
-  } else if (canal === "meta") {
+  } else {
+    // A Meta é o único canal de WhatsApp: sem ela configurada não existe
+    // fallback (o Chatwoot saiu) — erro claro em vez de exceção na tela.
+    if (!metaConfigurada()) {
+      return { erro: "WhatsApp (Meta) não configurado." };
+    }
     if (!lead.telefone_e164) {
       return {
         erro: "Este lead não tem telefone para receber WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
@@ -401,44 +361,11 @@ export async function enviarMensagemLead(
         };
       }
     }
-  } else {
-    if (!lead.chatwoot_conversation_id) {
-      return {
-        erro: "Este lead não tem conversa vinculada no Chatwoot — ele precisa mandar a primeira mensagem no WhatsApp.",
-      };
-    }
-    try {
-      if (arquivos.length > 0) {
-        const resposta = await enviarMensagemComAnexos(
-          lead.chatwoot_conversation_id,
-          texto,
-          arquivos,
-        );
-        mensagemId = resposta?.id ?? null;
-        anexos = (resposta?.attachments ?? []).flatMap((a) =>
-          a.data_url ? [{ tipo: a.file_type ?? "file", url: a.data_url }] : [],
-        );
-      } else {
-        const resposta = await enviarMensagem(
-          lead.chatwoot_conversation_id,
-          texto,
-        );
-        mensagemId = resposta?.id ?? null;
-      }
-    } catch (e) {
-      return {
-        erro: `O Chatwoot recusou o envio: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template aprovado chega — use o botão Template.`,
-      };
-    }
-
-    if (typeof mensagemId === "number") {
-      await marcarEcoProcessado(mensagemId, leadId);
-    }
   }
 
   // No canal Meta os anexos ficam no histórico com a URL pública do Storage
   // (o navegador subiu direto para lá) — antes o envio sumia da conversa.
-  if (!viaInstagram && canal === "meta" && anexosRemotos.length > 0) {
+  if (!viaInstagram && anexosRemotos.length > 0) {
     const service = createServiceClient();
     anexos = anexosRemotos.slice(0, wamids.length).map((a) => ({
       tipo: tipoDoArquivo(a.tipo || ""),
@@ -453,7 +380,7 @@ export async function enviarMensagemLead(
   // id, então descontá-lo evita dizer "2/1 enviados".
   const enviados = viaInstagram
     ? Math.max(wamids.length - (texto ? 1 : 0), 0)
-    : canal === "meta" && arquivos.length > 0
+    : arquivos.length > 0
       ? wamids.length
       : arquivos.length;
   const conteudo =
@@ -477,18 +404,11 @@ export async function enviarMensagemLead(
       autor_id: perfil.id,
       metadados: {
         via: "crm",
-        ...(canal === "meta"
-          ? {
-              message_id: mensagemId,
-              // Recibos (✓✓/falhou) casam por qualquer wamid do envio, não só
-              // o do último arquivo.
-              ...(wamids.length > 1 ? { message_ids: wamids } : {}),
-              ...(falhaParcial ? { falha_parcial: falhaParcial } : {}),
-            }
-          : {
-              chatwoot_message_id: mensagemId,
-              chatwoot_conversation_id: lead.chatwoot_conversation_id,
-            }),
+        message_id: mensagemId,
+        // Recibos (✓✓/falhou) casam por qualquer wamid do envio, não só
+        // o do último arquivo.
+        ...(wamids.length > 1 ? { message_ids: wamids } : {}),
+        ...(falhaParcial ? { falha_parcial: falhaParcial } : {}),
         ...(anexos.length > 0 ? { anexos } : {}),
       },
     })
@@ -556,9 +476,15 @@ export async function enviarTemplateLead(
   const idioma = String(formData.get("template_idioma") ?? "");
   if (!leadId || !nome) return { erro: "Escolha um template." };
 
+  // Guarda antes de listar: sem a Meta a lista viria vazia e o usuário veria
+  // "template não encontrado" — o problema real é outro e merece nome.
+  if (!metaConfigurada()) {
+    return { erro: "WhatsApp (Meta) não configurado." };
+  }
+
   let template;
   try {
-    const templates = await listarTemplatesCanal();
+    const templates = await listarTemplatesMeta();
     template = templates.find((t) => t.nome === nome && t.idioma === idioma);
   } catch (e) {
     return {
@@ -578,70 +504,24 @@ export async function enviarTemplateLead(
   if (!lead) return { erro: "Lead não encontrado." };
 
   const supabase = await createClient();
-  const canal = canalAtivo();
-  let mensagemId: string | number | null = null;
-  let conversaId: number | null = lead.chatwoot_conversation_id;
+  let mensagemId: string | null = null;
 
-  if (canal === "meta") {
-    // Na Meta o template abre conversa direto: só precisa do telefone.
-    if (!lead.telefone_e164) {
-      return {
-        erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
-      };
-    }
-    try {
-      mensagemId = await enviarTemplateMeta(
-        lead.telefone_e164,
-        template,
-        valores,
-      );
-    } catch (e) {
-      return {
-        erro: `A Meta recusou o template: ${e instanceof Error ? e.message : String(e)}`,
-      };
-    }
-  } else {
-    // Sem conversa? Template é justamente o jeito certo de puxar assunto:
-    // cria contato + conversa no Chatwoot e vincula ao lead.
-    if (!conversaId) {
-      if (!lead.telefone_e164) {
-        return {
-          erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
-        };
-      }
-      try {
-        const inicio = await iniciarConversaWhatsapp({
-          nome: lead.nome,
-          telefone: lead.telefone_e164,
-          contatoId: lead.chatwoot_contact_id,
-        });
-        conversaId = inicio.conversaId;
-        await supabase
-          .from("leads")
-          .update({
-            chatwoot_contact_id: inicio.contatoId,
-            chatwoot_conversation_id: conversaId,
-          })
-          .eq("id", leadId);
-      } catch (e) {
-        return {
-          erro: `Não deu para abrir a conversa no Chatwoot: ${e instanceof Error ? e.message : String(e)}`,
-        };
-      }
-    }
-
-    try {
-      const resposta = await enviarTemplate(conversaId, template, valores);
-      mensagemId = resposta?.id ?? null;
-    } catch (e) {
-      return {
-        erro: `O Chatwoot recusou o template: ${e instanceof Error ? e.message : String(e)}`,
-      };
-    }
-
-    if (typeof mensagemId === "number") {
-      await marcarEcoProcessado(mensagemId, leadId);
-    }
+  // Na Meta o template abre conversa direto: só precisa do telefone.
+  if (!lead.telefone_e164) {
+    return {
+      erro: "Este lead não tem telefone — não dá para iniciar conversa no WhatsApp. Se ele é cliente da carteira, preencha o número na ficha dele em Carteira.",
+    };
+  }
+  try {
+    mensagemId = await enviarTemplateMeta(
+      lead.telefone_e164,
+      template,
+      valores,
+    );
+  } catch (e) {
+    return {
+      erro: `A Meta recusou o template: ${e instanceof Error ? e.message : String(e)}`,
+    };
   }
 
   const conteudo = template.corpo.replace(
@@ -658,12 +538,7 @@ export async function enviarTemplateLead(
     metadados: {
       via: "crm",
       template: template.nome,
-      ...(canal === "meta"
-        ? { message_id: mensagemId }
-        : {
-            chatwoot_message_id: mensagemId,
-            chatwoot_conversation_id: conversaId,
-          }),
+      message_id: mensagemId,
     },
   });
 
@@ -679,7 +554,7 @@ export async function enviarTemplateLead(
   return { ok: true };
 }
 
-/** Define (ou remove, com null) o atendente do lead e espelha no Chatwoot. */
+/** Define (ou remove, com null) o atendente do lead. */
 export async function definirResponsavelChat(
   leadId: string,
   responsavelId: string | null,
@@ -690,15 +565,16 @@ export async function definirResponsavelChat(
 
   const supabase = await createClient();
 
-  let responsavel: { nome: string; email: string } | null = null;
+  // O e-mail saiu da consulta: só servia para achar o agente no Chatwoot.
+  let responsavel: { nome: string } | null = null;
   if (responsavelId) {
     const { data } = await supabase
       .from("profiles")
-      .select("nome, email")
+      .select("nome")
       .eq("id", responsavelId)
       .maybeSingle();
     if (!data) return { erro: "Atendente não encontrado." };
-    responsavel = data as { nome: string; email: string };
+    responsavel = data as { nome: string };
   }
 
   const { error } = await supabase
@@ -719,27 +595,12 @@ export async function definirResponsavelChat(
     metadados: { via: "crm", sistema: true },
   });
 
-  // Espelho no Chatwoot é melhor esforço: falha lá não desfaz o CRM.
-  if (canalAtivo() === "chatwoot") {
-    const lead = await leadComConversa(leadId);
-    if (lead?.chatwoot_conversation_id) {
-      try {
-        await atribuirConversaPorEmail(
-          lead.chatwoot_conversation_id,
-          responsavel?.email ?? null,
-        );
-      } catch {
-        // segue o jogo — o CRM é a fonte de verdade
-      }
-    }
-  }
-
   revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true };
 }
 
-/** Marca ou desmarca uma etiqueta do lead e espelha as labels no Chatwoot. */
+/** Marca ou desmarca uma etiqueta do lead. */
 export async function alternarEtiquetaChat(
   leadId: string,
   tagId: string,
@@ -765,30 +626,12 @@ export async function alternarEtiquetaChat(
     if (error) return { erro: error.message };
   }
 
-  if (canalAtivo() === "chatwoot") {
-    const lead = await leadComConversa(leadId);
-    if (lead?.chatwoot_conversation_id) {
-      const { data: linhas } = await supabase
-        .from("lead_tags")
-        .select("tag:tags(nome)")
-        .eq("lead_id", leadId);
-      const nomes = ((linhas ?? []) as unknown as { tag: { nome: string } }[])
-        .map((l) => l.tag?.nome)
-        .filter(Boolean);
-      try {
-        await definirEtiquetasConversa(lead.chatwoot_conversation_id, nomes);
-      } catch {
-        // melhor esforço
-      }
-    }
-  }
-
   revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true };
 }
 
-/** Resolve ou reabre a conversa no Chatwoot e registra no histórico. */
+/** Resolve ou reabre a conversa (marca local) e registra no histórico. */
 export async function alterarStatusConversaChat(
   leadId: string,
   status: "open" | "resolved",
@@ -798,21 +641,6 @@ export async function alterarStatusConversaChat(
 
   const lead = await leadComConversa(leadId);
   if (!lead) return { erro: "Lead não encontrado." };
-
-  // No canal Meta o status é controle interno do CRM (vira nota); no
-  // Chatwoot ele também resolve/reabre a conversa de lá.
-  if (canalAtivo() === "chatwoot") {
-    if (!lead.chatwoot_conversation_id) {
-      return { erro: "Este lead não tem conversa vinculada no Chatwoot." };
-    }
-    try {
-      await alterarStatusConversa(lead.chatwoot_conversation_id, status);
-    } catch (e) {
-      return {
-        erro: `O Chatwoot recusou a mudança de status: ${e instanceof Error ? e.message : String(e)}`,
-      };
-    }
-  }
 
   const supabase = await createClient();
   const agora = new Date().toISOString();
@@ -882,7 +710,6 @@ export async function contarNaoLidas(): Promise<Pendencias> {
   if (!perfil) return { naoLidas: 0, tarefasVencidas: 0 };
 
   const supabase = await createClient();
-  const ehMeta = canalAtivo() === "meta";
   const agoraMs = Date.now();
   const agoraIso = new Date(agoraMs).toISOString();
 
@@ -893,10 +720,10 @@ export async function contarNaoLidas(): Promise<Pendencias> {
     chat_adiado_ate?: string | null;
   };
 
-  // Conversa existente: telefone com histórico (Meta) ou vínculo (Chatwoot).
-  // Adiada dentro do prazo não conta — volta sozinha quando o prazo vence ou
-  // o lead responde. Sem a migração 0042 cai para "adiada não conta nunca"
-  // (0017), e sem a 0017 a contagem segue sem esse filtro.
+  // Conversa existente: houve interação (na Meta o thread é o telefone, então
+  // basta o histórico). Adiada dentro do prazo não conta — volta sozinha
+  // quando o prazo vence ou o lead responde. Sem a migração 0042 cai para
+  // "adiada não conta nunca" (0017), e sem a 0017 segue sem esse filtro.
   async function buscarFila(nivel: "prazo" | "adiado" | "base") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
     let q: any = supabase
@@ -909,7 +736,6 @@ export async function contarNaoLidas(): Promise<Pendencias> {
       .not("ultima_interacao_em", "is", null)
       .order("ultima_interacao_em", { ascending: false })
       .limit(500);
-    if (!ehMeta) q = q.not("chatwoot_conversation_id", "is", null);
     // Adiadas (no prazo) e resolvidas saem da conta: o badge tem que zerar.
     if (nivel !== "base") {
       q = q.is("chat_resolvido_em", null);

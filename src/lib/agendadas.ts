@@ -1,7 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { enviarMensagem } from "@/lib/chatwoot";
-import { enviarTextoMeta } from "@/lib/whatsapp";
-import { canalAtivo } from "@/lib/canal";
+import { enviarTextoMeta, metaConfigurada } from "@/lib/whatsapp";
 
 const INTERVALO_MIN_MS = 10_000;
 let ultimaVarredura = 0;
@@ -49,51 +47,36 @@ export async function processarAgendadas(): Promise<number> {
       .maybeSingle();
     if (!reservada) continue;
 
-    const canal = canalAtivo();
+    // Na Meta o destino é o telefone do lead — o "thread" é o próprio número.
     const { data: lead } = await service
       .from("leads")
-      .select("telefone_e164, chatwoot_conversation_id")
+      .select("telefone_e164")
       .eq("id", agendada.lead_id)
       .maybeSingle();
 
-    const destinoOk =
-      canal === "meta"
-        ? lead?.telefone_e164 != null
-        : lead?.chatwoot_conversation_id != null;
-    if (!lead || !destinoOk) {
+    if (!lead?.telefone_e164) {
       await service
         .from("scheduled_messages")
-        .update({
-          erro:
-            canal === "meta"
-              ? "Lead sem telefone na hora do envio."
-              : "Lead sem conversa vinculada na hora do envio.",
-        })
+        .update({ erro: "Lead sem telefone na hora do envio." })
+        .eq("id", agendada.id);
+      continue;
+    }
+
+    // Canal único: sem a Meta configurada a linha ganha erro claro (visível
+    // no compositor) em vez de estourar com mensagem de ambiente.
+    if (!metaConfigurada()) {
+      await service
+        .from("scheduled_messages")
+        .update({ erro: "WhatsApp (Meta) não configurado." })
         .eq("id", agendada.id);
       continue;
     }
 
     try {
-      let idMensagem: string | number | null = null;
-
-      if (canal === "meta") {
-        idMensagem = await enviarTextoMeta(lead.telefone_e164!, agendada.texto);
-      } else {
-        const resposta = await enviarMensagem(
-          lead.chatwoot_conversation_id!,
-          agendada.texto,
-        );
-        idMensagem = resposta?.id ?? null;
-
-        if (typeof idMensagem === "number") {
-          await service.from("webhook_events").insert({
-            origem: "chatwoot",
-            evento_id: `cw-msg-${idMensagem}`,
-            payload: { via: "agendada", lead_id: agendada.lead_id },
-            processado: true,
-          });
-        }
-      }
+      const idMensagem = await enviarTextoMeta(
+        lead.telefone_e164,
+        agendada.texto,
+      );
 
       await service.from("lead_interactions").insert({
         lead_id: agendada.lead_id,
@@ -101,9 +84,7 @@ export async function processarAgendadas(): Promise<number> {
         conteudo: agendada.texto,
         autor_id: agendada.autor_id,
         metadados: {
-          ...(canal === "meta"
-            ? { message_id: idMensagem }
-            : { chatwoot_message_id: idMensagem }),
+          message_id: idMensagem,
           via: "agendada",
         },
       });
@@ -120,7 +101,7 @@ export async function processarAgendadas(): Promise<number> {
       await service
         .from("scheduled_messages")
         .update({
-          erro: `O Chatwoot recusou: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template chega.`,
+          erro: `A Meta recusou: ${e instanceof Error ? e.message : String(e)}. Fora da janela de 24h só template chega.`,
         })
         .eq("id", agendada.id);
     }

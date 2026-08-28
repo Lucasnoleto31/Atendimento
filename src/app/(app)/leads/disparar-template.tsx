@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { createPortal, useFormStatus } from "react-dom";
 import { Megaphone, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { TemplateWhatsapp } from "@/lib/chatwoot";
+import type { TemplateWhatsapp } from "@/lib/whatsapp";
 import { dispararTemplateLista, type ResultadoDisparo } from "./actions";
 
 const ESTADO: ResultadoDisparo = {};

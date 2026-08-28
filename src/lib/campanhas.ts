@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+import { listarTemplatesMeta, metaConfigurada } from "@/lib/whatsapp";
 import { dispararTemplate, type Alvo } from "@/lib/cadencia";
 import { agoraEmBrasilia } from "@/lib/format";
 import { orcamentoEnviosRestante } from "@/lib/envios";
@@ -76,8 +76,11 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
   if (error || !data || data.length === 0) return vazio;
 
   const relogio = agoraEmBrasilia();
-  const templates = await listarTemplatesCanal();
-  const canal = canalAtivo();
+  // Canal único é a Meta: sem token a lista vem vazia, nenhum template casa
+  // e a campanha fica parada (sem consumir público nem marcar erro).
+  const templates = await (metaConfigurada()
+    ? listarTemplatesMeta()
+    : Promise.resolve([]));
 
   let enviados = 0;
   let falhas = 0;
@@ -154,7 +157,6 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
       try {
         const idMensagem = await dispararTemplate(
           service,
-          canal,
           alvo,
           template,
           valores,
@@ -168,7 +170,7 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
 
         await service
           .from("campanha_envios")
-          .update({ message_id: idMensagem ? String(idMensagem) : null })
+          .update({ message_id: idMensagem })
           .eq("campanha_id", campanha.id)
           .eq("lead_id", alvo.leadId);
 
@@ -177,9 +179,7 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
           tipo: "mensagem_enviada",
           conteudo,
           metadados: {
-            ...(canal === "meta"
-              ? { message_id: idMensagem }
-              : { chatwoot_message_id: idMensagem }),
+            message_id: idMensagem,
             via: "campanha",
             campanha: campanha.nome,
             campanha_id: campanha.id,
@@ -218,8 +218,6 @@ type LinhaPublico = {
     id: string;
     nome: string;
     telefone_e164: string | null;
-    chatwoot_contact_id: number | null;
-    chatwoot_conversation_id: number | null;
   } | null;
 };
 
@@ -249,8 +247,7 @@ async function proximosAlvos(
   const alvos: Alvo[] = [];
   let fim = false;
 
-  const COLUNAS =
-    "lead_id, lead:leads!inner(id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id)";
+  const COLUNAS = "lead_id, lead:leads!inner(id, nome, telefone_e164)";
 
   for (let de = 0; de < VARREDURA_MAXIMA; de += PAGINA) {
     // Sem a migração 0019 a coluna de bloqueio não existe: repete sem ela.
@@ -295,8 +292,6 @@ async function proximosAlvos(
         leadId: linha.lead_id,
         nome: linha.lead.nome,
         telefone: linha.lead.telefone_e164,
-        chatwootContatoId: linha.lead.chatwoot_contact_id,
-        chatwootConversaId: linha.lead.chatwoot_conversation_id,
       });
       if (alvos.length >= quantos) return { alvos, publicoAcabou: false };
     }

@@ -150,10 +150,9 @@ export default async function AtendimentoPage({
   }
 
   // Não lidas por coluna: uma varredura só, contada aqui (o PostgREST não
-  // compara coluna com coluna). Filtra por ultima_interacao_em — o canal
-  // Meta direto nunca preenche chatwoot_conversation_id, então o filtro
-  // antigo cegava justamente as conversas novas. buscarTudo fura o teto de
-  // 1000 linhas do PostgREST (a base já passa disso).
+  // compara coluna com coluna). Filtra por ultima_interacao_em — na Meta o
+  // thread é o telefone, e é essa coluna que diz se há conversa. buscarTudo
+  // fura o teto de 1000 linhas do PostgREST (a base já passa disso).
   const buscarNaoLidas = () =>
     buscarTudo<{
       id: string;

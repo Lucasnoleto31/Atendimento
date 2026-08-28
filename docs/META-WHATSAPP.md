@@ -1,5 +1,13 @@
 # Conexão direta do WhatsApp (Meta Cloud API)
 
+> **Atualização (29/08/2026, Fase 8):** o código legado do Chatwoot foi
+> REMOVIDO do CRM (webhook, cliente de API, fallback de canal). O canal é
+> exclusivamente a Meta Cloud API — sem `META_WHATSAPP_TOKEN` o envio falha
+> com aviso claro, não há mais rollback para o Chatwoot. As colunas
+> `leads.chatwoot_*` e o histórico de conversas foram preservados no banco.
+> Os passos abaixo que citam Chatwoot valem só como registro histórico.
+
+
 Migração do número oficial do Chatwoot (zeveai.duqui.ai) para a conexão
 direta com a Meta. Este guia usa os valores reais do projeto.
 

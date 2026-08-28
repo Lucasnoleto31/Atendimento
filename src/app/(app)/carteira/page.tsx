@@ -6,8 +6,11 @@ import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
 import { formatarReais } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { listarTemplatesCanal } from "@/lib/canal";
-import type { TemplateWhatsapp } from "@/lib/chatwoot";
+import {
+  listarTemplatesMeta,
+  metaConfigurada,
+  type TemplateWhatsapp,
+} from "@/lib/whatsapp";
 import { TabelaCarteira, type LinhaCarteira } from "./tabela";
 
 export const metadata: Metadata = { title: "Carteira · Zeve CRM" };
@@ -103,11 +106,15 @@ export default async function CarteiraPage({
   const linhas = (dadosPagina ?? []) as unknown as LinhaCarteira[];
   const total = count ?? resumo.length;
 
-  // Insumos das ações em massa. Canal fora do ar não derruba a tela: fica só
-  // sem o botão de disparo, e etiquetar continua funcionando.
+  // Insumos das ações em massa. Meta fora do ar ou não configurada não
+  // derruba a tela: fica só sem o botão de disparo, e etiquetar continua
+  // funcionando.
   const [{ data: tags }, templates] = await Promise.all([
     supabase.from("tags").select("id, nome").eq("ativo", true).order("nome"),
-    listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[]),
+    (metaConfigurada()
+      ? listarTemplatesMeta()
+      : Promise.resolve([] as TemplateWhatsapp[])
+    ).catch(() => [] as TemplateWhatsapp[]),
   ]);
   const etiquetas = (tags ?? []) as { id: string; nome: string }[];
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));

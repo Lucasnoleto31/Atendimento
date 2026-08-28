@@ -31,7 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { TemplateWhatsapp } from "@/lib/chatwoot";
+import type { TemplateWhatsapp } from "@/lib/whatsapp";
 import { BotaoTemplates } from "./templates";
 import { GravadorAudio } from "./gravador-audio";
 import { createClient as criarClienteNavegador } from "@/lib/supabase/client";

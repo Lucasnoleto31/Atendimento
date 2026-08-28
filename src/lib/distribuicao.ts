@@ -6,7 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
  * atendimentos em aberto. Papel não decide mais: o rodízio antigo filtrava
  * papel = vendedor, só o Aikon passava, e o "rodízio" era de uma pessoa só
  * (1.022 leads nas costas dele). Quem entra na roda é decisão do gestor, no
- * Admin. Usada pelos webhooks do Chatwoot e da Meta.
+ * Admin. Usada pelo webhook da Meta.
  */
 export async function escolherVendedor(
   service: ReturnType<typeof createServiceClient>,

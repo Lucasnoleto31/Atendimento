@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { normalizarNumero, normalizarTelefone } from "@/lib/csv";
+import { criarTemplateResumoMeta } from "@/lib/whatsapp";
 
 const MAX_INSTANCIAS = 10;
 
@@ -424,6 +425,30 @@ export async function salvarWhatsapp(formData: FormData) {
     );
   }
   terminar();
+}
+
+/**
+ * Cria o template resumo_diario direto na WABA (7.2) — o gestor não
+ * conseguiu pelo WhatsApp Manager; o token do app tem a permissão de
+ * gestão de templates (é a mesma que lista os aprovados nas Campanhas).
+ */
+export async function criarTemplateResumo() {
+  await exigirGestor();
+  try {
+    const status = await criarTemplateResumoMeta();
+    terminar(
+      status === "APPROVED"
+        ? "Template resumo_diario criado e já aprovado."
+        : `Template resumo_diario criado (status ${status}). A Meta ainda vai aprovar — horas a dias; o resumo passa a sair sozinho depois disso.`,
+    );
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    terminar(
+      /already exists|já existe/i.test(m)
+        ? "O template resumo_diario já existe na WABA — se ainda não chegou nada, ele deve estar aguardando a aprovação da Meta."
+        : `A Meta recusou a criação: ${m}`,
+    );
+  }
 }
 
 // ===========================================================================

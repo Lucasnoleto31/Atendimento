@@ -1,7 +1,10 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { agoraEmBrasilia } from "@/lib/format";
-import { canalAtivo } from "@/lib/canal";
-import { listarTemplatesMeta, enviarTemplateMeta } from "@/lib/whatsapp";
+import {
+  listarTemplatesMeta,
+  enviarTemplateMeta,
+  metaConfigurada,
+} from "@/lib/whatsapp";
 import { orcamentoEnviosRestante } from "@/lib/envios";
 
 /**
@@ -36,7 +39,8 @@ export async function processarResumoGestor(): Promise<void> {
   const hoje = agoraEmBrasilia();
   if (hoje.fimDeSemana) return;
   if (hoje.hora < 18 || (hoje.hora === 18 && hoje.minuto < 30)) return;
-  if (canalAtivo() !== "meta") return;
+  // Sem a Meta configurada não há por onde enviar — o motor fica quieto.
+  if (!metaConfigurada()) return;
 
   const service = createServiceClient();
 

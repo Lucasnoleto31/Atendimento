@@ -35,9 +35,12 @@ export async function concluirTarefaHoje(
 // ═══════════════════════ Fase 5: soneca e painel ═══════════════════════
 
 import { adiarConversa } from "@/app/(app)/chat/actions";
-import { listarTemplatesCanal } from "@/lib/canal";
 import { agoraEmBrasilia } from "@/lib/format";
-import type { TemplateWhatsapp } from "@/lib/chatwoot";
+import {
+  listarTemplatesMeta,
+  metaConfigurada,
+  type TemplateWhatsapp,
+} from "@/lib/whatsapp";
 import type { Mensagem, MensagemPadrao } from "@/app/(app)/chat/janela";
 
 /** Amanhã de manhã (7h de Brasília) — quando a soneca devolve o item. */
@@ -128,7 +131,11 @@ export async function carregarConversa(
         .from("quick_replies")
         .select("id, titulo, corpo")
         .order("titulo"),
-      listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[]),
+      // Sem a Meta configurada a janela abre sem templates — enviar avisa lá.
+      (metaConfigurada()
+        ? listarTemplatesMeta()
+        : Promise.resolve([] as TemplateWhatsapp[])
+      ).catch(() => [] as TemplateWhatsapp[]),
     ]);
 
   if (!lead) return { erro: "Lead não encontrado." };

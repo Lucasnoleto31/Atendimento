@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { estiloEtiqueta } from "@/lib/etiquetas";
-import type { StatusConversa } from "@/lib/chatwoot";
 import {
   adiarConversa,
   alterarEtapaChat,
@@ -52,7 +51,6 @@ const ITEM_MENU =
 export function FerramentasConversa({
   leadId,
   temConversa,
-  statusConversa,
   responsavelId,
   equipe,
   etiquetas,
@@ -65,7 +63,6 @@ export function FerramentasConversa({
 }: {
   leadId: string;
   temConversa: boolean;
-  statusConversa: StatusConversa | null;
   responsavelId: string | null;
   equipe: PessoaEquipe[];
   etiquetas: Etiqueta[];
@@ -112,9 +109,10 @@ export function FerramentasConversa({
 
   const marcadas = new Set(etiquetasLead);
   const chips = etiquetas.filter((e) => marcadas.has(e.id));
-  const estaResolvida = resolvida || statusConversa === "resolved";
 
-  const situacao = estaResolvida
+  // "Resolvida" é só a marca local (leads.chat_resolvido_em) — na Meta não
+  // existe status remoto de conversa para combinar com ela.
+  const situacao = resolvida
     ? { texto: "Resolvida", classe: "bg-success-bg text-success" }
     : adiada
       ? {
@@ -413,20 +411,20 @@ export function FerramentasConversa({
                   () =>
                     alterarStatusConversaChat(
                       leadId,
-                      estaResolvida ? "open" : "resolved",
+                      resolvida ? "open" : "resolved",
                     ),
                   // Resolvida sai da caixa: volta para a lista. Reabrir fica.
-                  estaResolvida ? undefined : voltarParaLista,
+                  resolvida ? undefined : voltarParaLista,
                 )
               }
               className="inline-flex h-[32px] items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {estaResolvida ? (
+              {resolvida ? (
                 <RotateCcw size={14} strokeWidth={1.5} aria-hidden />
               ) : (
                 <Check size={14} strokeWidth={1.5} aria-hidden />
               )}
-              {estaResolvida ? "Reabrir" : "Resolver"}
+              {resolvida ? "Reabrir" : "Resolver"}
             </button>
           ) : null}
 

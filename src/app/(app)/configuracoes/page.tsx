@@ -6,8 +6,11 @@ import { perfilAtual } from "@/lib/auth";
 import { formatarReais, formatarTelefone } from "@/lib/format";
 import { CAMPO, BOTAO_ICONE, BOTAO_ICONE_PERIGO } from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
-import { type TemplateWhatsapp } from "@/lib/chatwoot";
-import { listarTemplatesCanal } from "@/lib/canal";
+import {
+  listarTemplatesMeta,
+  metaConfigurada,
+  type TemplateWhatsapp,
+} from "@/lib/whatsapp";
 import { CORES_ETIQUETA, estiloEtiqueta } from "@/lib/etiquetas";
 import { SeletorCorTag } from "./cor-tag";
 import {
@@ -32,6 +35,7 @@ import {
   salvarMetaContatos,
   salvarParametro,
   salvarWhatsapp,
+  criarTemplateResumo,
 } from "./actions";
 
 export const metadata: Metadata = { title: "Configurações · Zeve CRM" };
@@ -190,7 +194,11 @@ export default async function ConfiguracoesPage({
         .select("id, dias, template_nome, template_idioma, ativo, ancora")
         .order("dias"),
       supabase.from("profiles").select("id, meta_contatos_dia"),
-      listarTemplatesCanal().catch(() => [] as TemplateWhatsapp[]),
+      // Sem a Meta configurada a tela abre sem templates (a cadência avisa).
+      (metaConfigurada()
+        ? listarTemplatesMeta()
+        : Promise.resolve([] as TemplateWhatsapp[])
+      ).catch(() => [] as TemplateWhatsapp[]),
     ]);
 
   const cadenciaDisponivel = regrasCadencia !== null;
@@ -1085,6 +1093,32 @@ export default async function ConfiguracoesPage({
               </button>
             </form>
           ))}
+        </div>
+
+        {/* Resumo diário (7.2): o template precisa existir na WABA. O botão
+            cria pela API com o token do app; a lista só mostra APROVADOS,
+            então "não aparece" também pode ser "aguardando aprovação". */}
+        <div className="mt-2 max-w-[68ch] rounded-md border border-neutral-200 bg-neutral-50 px-1.5 py-1">
+          {templatesWhatsapp.some((t) => t.nome === "resumo_diario") ? (
+            <p className="text-sm text-neutral-800">
+              Template <span className="font-mono">resumo_diario</span>{" "}
+              aprovado na Meta — o resumo diário sai sozinho com o parâmetro
+              acima ligado e os WhatsApps preenchidos em Metas do mês.
+            </p>
+          ) : (
+            <form action={criarTemplateResumo} className="flex flex-wrap items-center gap-1">
+              <p className="min-w-[240px] flex-1 text-sm text-neutral-600">
+                O template <span className="font-mono">resumo_diario</span>{" "}
+                ainda não está aprovado na WABA.
+              </p>
+              <button
+                type="submit"
+                className="inline-flex h-[32px] items-center rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              >
+                Criar template na Meta
+              </button>
+            </form>
+          )}
         </div>
       </section>
     </div>

@@ -103,11 +103,10 @@ export async function distribuirLeads() {
 import { createServiceClient } from "@/lib/supabase/server";
 import { avancarAposDisparo } from "@/lib/kanban";
 import {
-  enviarTemplate,
-  iniciarConversaWhatsapp,
-} from "@/lib/chatwoot";
-import { enviarTemplateMeta } from "@/lib/whatsapp";
-import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
+  enviarTemplateMeta,
+  listarTemplatesMeta,
+  metaConfigurada,
+} from "@/lib/whatsapp";
 import { COLUNA_DISPARO, LISTAS_DISPARO } from "@/lib/listas-leads";
 import { orcamentoEnviosRestante } from "@/lib/envios";
 import { marcarRoteiroEnviado } from "@/lib/ativacao";
@@ -152,9 +151,13 @@ export async function dispararTemplateLista(
   if (!LISTAS_DISPARO.has(lista)) return { erro: "Fila inválida para disparo." };
   if (!nome) return { erro: "Escolha um template." };
 
+  // O canal é só a Meta: sem ela configurada, avisa em vez de estourar no
+  // meio do loop de envio.
+  if (!metaConfigurada()) return { erro: "WhatsApp (Meta) não configurado." };
+
   let template;
   try {
-    const templates = await listarTemplatesCanal();
+    const templates = await listarTemplatesMeta();
     template = templates.find((t) => t.nome === nome && t.idioma === idioma);
   } catch (e) {
     return {
@@ -227,31 +230,19 @@ export async function dispararTemplateLista(
     enviados + pulados < maxDestaExecucao &&
     Date.now() - inicio < LIMITE_MS_DISPARO
   ) {
+    // A view já traz tudo que a Meta precisa (o thread é o telefone) —
+    // não há mais ida extra à tabela leads por ids de conversa.
     const { data: lote } = await consultaFila("dados")
       .order("criado_em", { ascending: true })
       .limit(Math.min(10, maxDestaExecucao - enviados - pulados));
 
-    const ids = ((lote ?? []) as { lead_id: string }[]).map((l) => l.lead_id);
-    // A view não carrega os ids do Chatwoot; busca só os do lote (até 10).
-    const { data: detalhes } = ids.length
-      ? await service
-          .from("leads")
-          .select(
-            "id, nome, telefone_e164, chatwoot_contact_id, chatwoot_conversation_id",
-          )
-          .in("id", ids)
-      : { data: [] };
-
-    const leads = (detalhes ?? []) as {
-      id: string;
+    const leads = (lote ?? []) as {
+      lead_id: string;
       nome: string;
       telefone_e164: string;
-      chatwoot_contact_id: number | null;
-      chatwoot_conversation_id: number | null;
     }[];
     if (leads.length === 0) break;
 
-    const canal = canalAtivo();
     for (const lead of leads) {
       const agora = new Date().toISOString();
       try {
@@ -262,44 +253,11 @@ export async function dispararTemplateLista(
           ]),
         );
 
-        let idMensagem: string | number | null = null;
-
-        if (canal === "meta") {
-          idMensagem = await enviarTemplateMeta(
-            lead.telefone_e164,
-            template,
-            valores,
-          );
-        } else {
-          let conversaId = lead.chatwoot_conversation_id;
-          if (!conversaId) {
-            const criada = await iniciarConversaWhatsapp({
-              nome: lead.nome,
-              telefone: lead.telefone_e164,
-              contatoId: lead.chatwoot_contact_id,
-            });
-            conversaId = criada.conversaId;
-            await service
-              .from("leads")
-              .update({
-                chatwoot_contact_id: criada.contatoId,
-                chatwoot_conversation_id: conversaId,
-              })
-              .eq("id", lead.id);
-          }
-
-          const resposta = await enviarTemplate(conversaId, template, valores);
-          idMensagem = resposta?.id ?? null;
-
-          if (typeof idMensagem === "number") {
-            await service.from("webhook_events").insert({
-              origem: "chatwoot",
-              evento_id: `cw-msg-${idMensagem}`,
-              payload: { via: "disparo", lead_id: lead.id },
-              processado: true,
-            });
-          }
-        }
+        const idMensagem = await enviarTemplateMeta(
+          lead.telefone_e164,
+          template,
+          valores,
+        );
 
         const conteudo = template.corpo.replace(
           /\{\{\s*([^{}]+?)\s*\}\}/g,
@@ -307,14 +265,12 @@ export async function dispararTemplateLista(
         );
 
         await service.from("lead_interactions").insert({
-          lead_id: lead.id,
+          lead_id: lead.lead_id,
           tipo: "mensagem_enviada",
           conteudo,
           autor_id: perfil.id,
           metadados: {
-            ...(canal === "meta"
-              ? { message_id: idMensagem }
-              : { chatwoot_message_id: idMensagem }),
+            message_id: idMensagem,
             via: "disparo",
             template: template.nome,
             lista,
@@ -322,7 +278,7 @@ export async function dispararTemplateLista(
         });
 
         enviados++;
-        contatados.push(lead.id);
+        contatados.push(lead.lead_id);
       } catch {
         pulados++;
       }
@@ -330,7 +286,7 @@ export async function dispararTemplateLista(
       await service
         .from("leads")
         .update({ ultima_interacao_em: agora, chat_lido_em: agora })
-        .eq("id", lead.id);
+        .eq("id", lead.lead_id);
     }
   }
 

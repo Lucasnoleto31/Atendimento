@@ -76,7 +76,6 @@ type LeadDetalhe = {
   entrou_na_etapa_em: string;
   primeira_resposta_em: string | null;
   customer_id: string | null;
-  chatwoot_conversation_id: number | null;
   channel: { nome: string } | null;
   stage: { nome: string; pipeline: { nome: string } | null } | null;
   responsavel: { nome: string } | null;
@@ -111,7 +110,6 @@ export default async function LeadPage({
     .select(
       `id, nome, telefone_e164, status, campanha, observacao, entrada_motivo,
        criado_em, entrou_na_etapa_em, primeira_resposta_em, customer_id,
-       chatwoot_conversation_id,
        channel:channels(nome),
        stage:pipeline_stages(nome, pipeline:pipelines(nome)),
        responsavel:profiles(nome),

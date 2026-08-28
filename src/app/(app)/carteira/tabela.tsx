@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CheckSquare, MessageSquare, Square, Tag, UserRound, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatarData, formatarReais, formatarTelefone } from "@/lib/format";
-import type { TemplateWhatsapp } from "@/lib/chatwoot";
+import type { TemplateWhatsapp } from "@/lib/whatsapp";
 import { AbrirConversa } from "./abrir-conversa";
 import {
   dispararTemplateEmMassa,

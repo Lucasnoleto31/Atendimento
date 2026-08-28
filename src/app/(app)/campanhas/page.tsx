@@ -3,7 +3,11 @@ import { redirect } from "next/navigation";
 import { AlertTriangle, Pause, Pencil, Play, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
-import { listarTemplatesCanal } from "@/lib/canal";
+import {
+  listarTemplatesMeta,
+  metaConfigurada,
+  type TemplateWhatsapp,
+} from "@/lib/whatsapp";
 import { inicioDoDiaSaoPaulo } from "@/lib/campanhas";
 import { formatarDataCurta, formatarDataHora } from "@/lib/format";
 import { NovaCampanha, type TemplateOpcao } from "./nova-campanha";
@@ -114,7 +118,13 @@ export default async function CampanhasPage({
         "id, nome, template_nome, template_idioma, etiqueta_id, por_dia, dias_uteis, hora_inicio, hora_fim, status, criado_em, concluida_em",
       )
       .order("criado_em", { ascending: false }),
-    listarTemplatesCanal(),
+    // Antes o erro da API de templates derrubava a página inteira (era a
+    // única chamada sem catch); com a Meta indisponível a lista fica vazia e
+    // o formulário de nova campanha avisa, como nas outras telas.
+    (metaConfigurada()
+      ? listarTemplatesMeta()
+      : Promise.resolve([] as TemplateWhatsapp[])
+    ).catch(() => [] as TemplateWhatsapp[]),
     supabase.from("tags").select("id, nome").eq("ativo", true).order("nome"),
     supabase
       .from("settings")
