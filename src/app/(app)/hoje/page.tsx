@@ -30,6 +30,8 @@ type LinhaEspera = {
   nome: string;
   telefone_e164: string | null;
   horas_esperando: number | null;
+  customer_id: string | null;
+  quente_sem_conta: boolean | null;
 };
 
 type LinhaAtivacao = {
@@ -37,7 +39,11 @@ type LinhaAtivacao = {
   nome: string;
   telefone_e164: string | null;
   dias_conta_aberta: number | null;
+  ultima_interacao_em: string | null;
+  etiquetas: string[] | null;
 };
+
+const ETIQUETA_ROTEIRO = "Ativação · roteiro enviado";
 
 /** "menos de 1h", "5h", "3 dias" — a idade da espera, sem casas decimais. */
 function tempoEsperando(horas: number | null) {
@@ -145,24 +151,62 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
     // tempo vem primeiro (mesma definição canônica da view, migração 0032).
     supabase
       .from("v_leads_listas")
-      .select("lead_id, nome, telefone_e164, horas_esperando", {
-        count: "exact",
-      })
+      .select(
+        "lead_id, nome, telefone_e164, horas_esperando, customer_id, quente_sem_conta",
+        { count: "exact" },
+      )
       .eq("aguardando_resposta", true)
       .eq("responsavel_id", alvoId)
       .order("horas_esperando", { ascending: false, nullsFirst: false })
+      // Empate no tempo: cliente vem primeiro (customer_id nulo por último).
+      .order("customer_id", { ascending: true, nullsFirst: false })
       .limit(LIMITE),
     // 3. Conta aberta sem primeiro giro: recém-abertas ou que já conversaram
     // com a mesa — as duas filas que cabem em telefone, não em campanha.
-    supabase
-      .from("v_leads_listas")
-      .select("lead_id, nome, telefone_e164, dias_conta_aberta", {
-        count: "exact",
-      })
-      .or("primeiro_giro_recente.is.true,sem_giro_ja_conversou.is.true")
-      .eq("responsavel_id", alvoId)
-      .order("conta_aberta_em", { ascending: false, nullsFirst: false })
-      .limit(LIMITE),
+    // Quem nunca recebeu o roteiro vem primeiro; dentro de cada grupo, a
+    // conta mais antiga primeiro (é a que está há mais tempo sem gerar nada).
+    // Duas consultas porque não dá para ordenar por "tem a etiqueta" no
+    // servidor; a segunda só completa o que faltar até o limite.
+    (async () => {
+      const campos =
+        "lead_id, nome, telefone_e164, dias_conta_aberta, ultima_interacao_em, etiquetas";
+      const base = () =>
+        supabase
+          .from("v_leads_listas")
+          .select(campos, { count: "exact" })
+          .or("primeiro_giro_recente.is.true,sem_giro_ja_conversou.is.true")
+          .eq("responsavel_id", alvoId);
+
+      const semRoteiro = await base()
+        .not("etiquetas", "cs", `{"${ETIQUETA_ROTEIRO}"}`)
+        .order("conta_aberta_em", { ascending: true, nullsFirst: false })
+        .limit(LIMITE);
+      // Coluna de etiquetas ausente (0037): cai na consulta única de antes.
+      if (semRoteiro.error) {
+        return supabase
+          .from("v_leads_listas")
+          .select(campos.replace(", etiquetas", ""), { count: "exact" })
+          .or("primeiro_giro_recente.is.true,sem_giro_ja_conversou.is.true")
+          .eq("responsavel_id", alvoId)
+          .order("conta_aberta_em", { ascending: false, nullsFirst: false })
+          .limit(LIMITE);
+      }
+
+      const faltam = LIMITE - (semRoteiro.data?.length ?? 0);
+      const comRoteiro =
+        faltam > 0
+          ? await base()
+              .contains("etiquetas", [ETIQUETA_ROTEIRO])
+              .order("conta_aberta_em", { ascending: true, nullsFirst: false })
+              .limit(faltam)
+          : { data: [], count: 0 };
+
+      return {
+        data: [...(semRoteiro.data ?? []), ...(comRoteiro.data ?? [])],
+        count: (semRoteiro.count ?? 0) + (comRoteiro.count ?? 0),
+        error: null,
+      };
+    })(),
     // Placar do dia, tudo desde a meia-noite de Brasília.
     // Mensagens MANUAIS: digitadas no chat. O disparo em massa grava com o
     // autor de quem clicou — sem este corte ele inflava a meta de contatos.
@@ -435,8 +479,19 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
                     className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-neutral-800">
-                        {l.nome}
+                      <span className="flex items-center gap-1">
+                        <span className="truncate text-sm font-medium text-neutral-800">
+                          {l.nome}
+                        </span>
+                        {l.customer_id ? (
+                          <span className="inline-flex h-[20px] shrink-0 items-center rounded-sm bg-success-bg px-1 text-xs font-medium text-success">
+                            cliente
+                          </span>
+                        ) : l.quente_sem_conta ? (
+                          <span className="inline-flex h-[20px] shrink-0 items-center rounded-sm bg-accent-100 px-1 text-xs font-medium text-accent-700">
+                            quente · sem conta
+                          </span>
+                        ) : null}
                       </span>
                       <span className="block font-mono text-xs text-neutral-600 tabular-nums">
                         {l.telefone_e164
@@ -489,6 +544,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
         </div>
         <p className="mt-0.5 max-w-[68ch] text-sm text-neutral-600">
           Conta aberta, sem 1º giro — o roteiro do Profit Pro é para eles.
+          Quem nunca recebeu o roteiro vem primeiro; depois, a conta mais
+          antiga.
         </p>
 
         {erroAtivacao ? null : ativacao.length === 0 ? (
@@ -505,13 +562,27 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
                     className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-neutral-800">
-                        {l.nome}
+                      <span className="flex items-center gap-1">
+                        <span className="truncate text-sm font-medium text-neutral-800">
+                          {l.nome}
+                        </span>
+                        {l.etiquetas?.includes(ETIQUETA_ROTEIRO) ? (
+                          <span className="inline-flex h-[20px] shrink-0 items-center rounded-sm bg-neutral-100 px-1 text-xs text-neutral-600">
+                            roteiro enviado
+                          </span>
+                        ) : (
+                          <span className="inline-flex h-[20px] shrink-0 items-center rounded-sm bg-accent-100 px-1 text-xs font-medium text-accent-700">
+                            sem roteiro
+                          </span>
+                        )}
                       </span>
                       <span className="block font-mono text-xs text-neutral-600 tabular-nums">
                         {l.telefone_e164
                           ? formatarTelefone(l.telefone_e164)
                           : "sem telefone"}
+                        {l.ultima_interacao_em
+                          ? ` · último contato ${horaOuData(l.ultima_interacao_em)}`
+                          : " · nunca contatado"}
                       </span>
                     </span>
                     <span className="shrink-0 font-mono text-xs text-neutral-600 tabular-nums">
