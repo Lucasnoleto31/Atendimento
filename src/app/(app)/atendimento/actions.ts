@@ -103,3 +103,44 @@ export async function marcarPerdido(
   revalidatePath("/leads");
   return {};
 }
+
+/**
+ * Tarefa rápida a partir do cartão do kanban — sem sair do quadro. O dono é
+ * o responsável do lead (quem vai executá-la), não quem clicou.
+ */
+export async function criarTarefaRapida(
+  leadId: string,
+  titulo: string,
+  venceEmIso: string,
+): Promise<ResultadoMover> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { erro: "Sessão expirada. Entre novamente." };
+
+  const limpo = titulo.trim().slice(0, 120);
+  if (!limpo) return { erro: "Dê um título à tarefa." };
+  const vence = new Date(venceEmIso);
+  if (Number.isNaN(vence.getTime())) return { erro: "Prazo inválido." };
+
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("responsavel_id")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  const { error } = await supabase.from("lead_tasks").insert({
+    lead_id: leadId,
+    titulo: limpo,
+    vence_em: vence.toISOString(),
+    autor_id: user.id,
+    responsavel_id: lead?.responsavel_id ?? user.id,
+  });
+  if (error) return { erro: "Não deu para criar a tarefa." };
+
+  revalidatePath("/atendimento");
+  revalidatePath("/hoje");
+  revalidatePath("/agenda");
+  return {};
+}

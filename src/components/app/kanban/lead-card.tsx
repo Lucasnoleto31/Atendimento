@@ -6,6 +6,9 @@ import type { LeadCard as Lead } from "@/lib/types";
 import { formatarTelefone, tempoDesde } from "@/lib/format";
 import { estiloEtiqueta } from "@/lib/etiquetas";
 import { cn } from "@/lib/utils";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { criarTarefaRapida } from "@/app/(app)/atendimento/actions";
 
 export function LeadCardItem({
   lead,
@@ -105,13 +108,27 @@ export function LeadCardItem({
         </div>
       ) : null}
 
+      <ProximaAcao lead={lead} />
+
       <div className="mt-1 flex items-center justify-between gap-1">
         <span
           className={cn(
             "truncate text-xs",
-            lead.atrasado ? "font-medium text-warning" : "text-neutral-400",
+            lead.semaforo === "vermelho"
+              ? "font-medium text-danger"
+              : lead.semaforo === "laranja"
+                ? "font-medium text-warning"
+                : "text-neutral-400",
           )}
+          title={
+            lead.semaforo === "vermelho"
+              ? "Estourou o dobro do prazo desta etapa"
+              : lead.semaforo === "laranja"
+                ? "Estourou o prazo desta etapa"
+                : undefined
+          }
         >
+          {lead.naoLida ? "● " : ""}
           {naColuna ? `nesta etapa ${naColuna}` : ""}
           {lead.primeira_resposta_em === null ? " · nunca respondeu" : ""}
         </span>
@@ -154,5 +171,144 @@ export function LeadCardItem({
         </span>
       </div>
     </li>
+  );
+}
+
+
+/**
+ * "Próx: amanhã 10h" (ou a falta dela) — e o atalho de criar tarefa sem
+ * sair do kanban: clicar abre título + prazo, salvar recarrega o quadro.
+ */
+function ProximaAcao({ lead }: { lead: Lead }) {
+  const [aberto, setAberto] = useState(false);
+  const [titulo, setTitulo] = useState("");
+  const [prazo, setPrazo] = useState("amanha10");
+  const [erro, setErro] = useState<string | null>(null);
+  const [pendente, iniciar] = useTransition();
+  const router = useRouter();
+
+  const opcoes: { chave: string; rotulo: string; quando: () => Date }[] = [
+    {
+      chave: "hoje18",
+      rotulo: "hoje 18h",
+      quando: () => {
+        const d = new Date();
+        d.setHours(18, 0, 0, 0);
+        return d;
+      },
+    },
+    {
+      chave: "amanha10",
+      rotulo: "amanhã 10h",
+      quando: () => {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        d.setHours(10, 0, 0, 0);
+        return d;
+      },
+    },
+    {
+      chave: "tresdias",
+      rotulo: "em 3 dias",
+      quando: () => {
+        const d = new Date();
+        d.setDate(d.getDate() + 3);
+        d.setHours(10, 0, 0, 0);
+        return d;
+      },
+    },
+  ];
+
+  const salvar = () => {
+    const escolha = opcoes.find((o) => o.chave === prazo) ?? opcoes[1];
+    setErro(null);
+    iniciar(async () => {
+      const r = await criarTarefaRapida(
+        lead.id,
+        titulo,
+        escolha.quando().toISOString(),
+      );
+      if (r.erro) setErro(r.erro);
+      else {
+        setAberto(false);
+        setTitulo("");
+        router.refresh();
+      }
+    });
+  };
+
+  if (!aberto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAberto(true)}
+        className="mt-1 block w-full truncate rounded-sm text-left text-xs underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+        title="Criar tarefa rápida"
+      >
+        {lead.proximaAcao ? (
+          <span
+            className={cn(
+              lead.proximaAcao.vencida
+                ? "font-medium text-danger"
+                : "text-neutral-600",
+            )}
+          >
+            Próx: {lead.proximaAcao.titulo} · {lead.proximaAcao.quando}
+            {lead.proximaAcao.vencida ? " · vencida" : ""}
+          </span>
+        ) : (
+          <span className="text-neutral-400">sem próxima ação — criar</span>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-0.5 rounded-md border border-neutral-200 bg-neutral-50 p-1">
+      <input
+        autoFocus
+        value={titulo}
+        onChange={(e) => setTitulo(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") salvar();
+          if (e.key === "Escape") setAberto(false);
+        }}
+        placeholder="O que fazer? (Enter salva)"
+        className="h-[32px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-xs text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+      />
+      <div className="flex flex-wrap items-center gap-0.5">
+        {opcoes.map((o) => (
+          <button
+            key={o.chave}
+            type="button"
+            onClick={() => setPrazo(o.chave)}
+            className={cn(
+              "inline-flex h-[20px] items-center rounded-sm px-1 text-xs",
+              prazo === o.chave
+                ? "bg-primary-50 font-medium text-primary-900"
+                : "text-neutral-600 hover:bg-neutral-100",
+            )}
+          >
+            {o.rotulo}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={pendente || titulo.trim() === ""}
+          onClick={salvar}
+          className="ml-auto inline-flex h-[20px] items-center rounded-sm bg-primary-600 px-1 text-xs font-medium text-neutral-0 disabled:opacity-50"
+        >
+          {pendente ? "…" : "Criar"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setAberto(false)}
+          className="inline-flex h-[20px] items-center rounded-sm px-1 text-xs text-neutral-600 hover:bg-neutral-100"
+        >
+          Cancelar
+        </button>
+      </div>
+      {erro ? <p className="text-xs text-danger">{erro}</p> : null}
+    </div>
   );
 }

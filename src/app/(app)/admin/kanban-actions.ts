@@ -174,6 +174,33 @@ export async function renomearEtapa(formData: FormData) {
   terminar();
 }
 
+/** Prazo esperado (dias) da etapa — alimenta o semáforo dos cartões (0051). */
+export async function definirPrazoEtapa(formData: FormData) {
+  await exigirGestor();
+  const id = String(formData.get("id") ?? "");
+  const bruto = String(formData.get("prazo") ?? "").trim();
+  const prazo = bruto === "" ? null : Number(bruto);
+
+  if (!id) return terminar("Etapa não informada.");
+  if (prazo !== null && (!Number.isInteger(prazo) || prazo < 1 || prazo > 365)) {
+    return terminar("Prazo inválido — dias inteiros de 1 a 365, ou vazio para o padrão (7).");
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("pipeline_stages")
+    .update({ prazo_dias: prazo })
+    .eq("id", id);
+  if (error) {
+    return terminar(
+      error.code === "42703"
+        ? "Rode a migração 0051 para os prazos por etapa existirem."
+        : `Não deu para salvar: ${error.message}`,
+    );
+  }
+  return terminar();
+}
+
 export async function alternarEtapaFinal(formData: FormData) {
   await exigirGestor();
   const id = String(formData.get("id") ?? "");

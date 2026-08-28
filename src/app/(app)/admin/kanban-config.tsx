@@ -7,6 +7,7 @@ import {
   excluirEtapa,
   excluirKanban,
   moverEtapa,
+  definirPrazoEtapa,
   renomearEtapa,
   renomearKanban,
 } from "./kanban-actions";
@@ -21,6 +22,7 @@ export type PipelineComEtapas = {
     nome: string;
     ordem: number;
     is_final: boolean;
+    prazo_dias?: number | null;
     leads: number;
   }[];
 };
@@ -135,6 +137,35 @@ export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) 
                       className={BOTAO_ICONE}
                     >
                       <Check size={18} strokeWidth={1.5} aria-hidden />
+                    </button>
+                  </form>
+
+                  <form action={definirPrazoEtapa} className="flex items-center gap-0.5">
+                    <input type="hidden" name="id" value={etapa.id} />
+                    <label
+                      htmlFor={`prazo-${etapa.id}`}
+                      className="text-xs text-neutral-600"
+                      title="Prazo esperado nesta etapa. Estourou fica laranja; o dobro, vermelho. Vazio = 7 dias."
+                    >
+                      prazo
+                    </label>
+                    <input
+                      id={`prazo-${etapa.id}`}
+                      name="prazo"
+                      type="number"
+                      min={1}
+                      max={365}
+                      placeholder="7"
+                      defaultValue={etapa.prazo_dias ?? ""}
+                      className="h-[32px] w-[56px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-right font-mono text-xs text-neutral-800 tabular-nums focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                    />
+                    <span className="text-xs text-neutral-400">d</span>
+                    <button
+                      type="submit"
+                      aria-label={`Salvar prazo de ${etapa.nome}`}
+                      className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                    >
+                      <Check size={14} strokeWidth={1.5} aria-hidden />
                     </button>
                   </form>
 

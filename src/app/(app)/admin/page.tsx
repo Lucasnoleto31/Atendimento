@@ -78,7 +78,8 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       .order("criado_em"),
     supabase
       .from("pipeline_stages")
-      .select("id, nome, ordem, is_final, pipeline_id")
+      // "*": prazo_dias (0051) entra quando a migração rodar, sem quebrar antes.
+      .select("*")
       .order("ordem"),
     supabase
       .from("profiles")

@@ -12,6 +12,16 @@ export type Coluna = {
   stage: Stage;
   total: number;
   naoLidas?: number;
+  /** Cartões que estouraram o DOBRO do prazo da etapa — coluna inteira. */
+  vermelhos?: number;
+  /** Sem responsável nesta etapa (some quando o quadro está filtrado por pessoa). */
+  semDono?: number;
+  /** Aguardando resposta há 24h+ nesta etapa. */
+  aguardando24?: number;
+  /** Limite de cartões carregados ("Carregar mais 50" mexe aqui). */
+  limite?: number;
+  /** URL que carrega mais 50 nesta coluna; nulo quando está tudo na tela. */
+  hrefMais?: string | null;
   leads: Lead[];
 };
 
@@ -19,10 +29,8 @@ type Movimento = { leadId: string; stageId: string };
 
 export function KanbanBoard({
   colunas,
-  limitePorColuna,
 }: {
   colunas: Coluna[];
-  limitePorColuna: number;
 }) {
   const [erro, setErro] = useState<string | null>(null);
   const [arrastando, setArrastando] = useState<string | null>(null);
@@ -175,11 +183,35 @@ export function KanbanBoard({
                     {coluna.naoLidas}
                   </span>
                 ) : null}
+                {coluna.vermelhos ? (
+                  <span
+                    title={`${coluna.vermelhos} cartão(ões) estourando o dobro do prazo da etapa`}
+                    className="inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-full bg-danger px-0.5 font-mono text-xs font-medium text-neutral-0 tabular-nums"
+                  >
+                    {coluna.vermelhos}
+                  </span>
+                ) : null}
                 <span className="font-mono text-xs text-neutral-600 tabular-nums">
                   {coluna.total}
                 </span>
               </span>
             </header>
+
+            {(coluna.semDono ?? 0) > 0 || (coluna.aguardando24 ?? 0) > 0 ? (
+              <p className="border-b border-neutral-200 px-1.5 py-0.5 text-xs text-neutral-600">
+                {(coluna.semDono ?? 0) > 0
+                  ? `${coluna.semDono} sem dono`
+                  : ""}
+                {(coluna.semDono ?? 0) > 0 && (coluna.aguardando24 ?? 0) > 0
+                  ? " · "
+                  : ""}
+                {(coluna.aguardando24 ?? 0) > 0 ? (
+                  <span className="font-medium text-warning">
+                    {coluna.aguardando24} aguardando 24h+
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
 
             {coluna.leads.length === 0 ? (
               <p className="px-1.5 py-2 text-sm text-neutral-400">
@@ -203,16 +235,16 @@ export function KanbanBoard({
                     />
                   ))}
                 </ul>
-                {coluna.total > limitePorColuna ? (
+                {coluna.hrefMais ? (
                   <p className="border-t border-neutral-200 px-1.5 py-1 text-xs text-neutral-600">
-                    Mostrando {Math.min(coluna.leads.length, limitePorColuna)} de{" "}
+                    {coluna.leads.length} de{" "}
                     <span className="font-mono tabular-nums">{coluna.total}</span>{" "}
                     —{" "}
                     <Link
-                      href="/leads"
-                      className="text-primary-600 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                      href={coluna.hrefMais}
+                      className="font-medium text-primary-600 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                     >
-                      ver todos em Leads
+                      carregar mais 50
                     </Link>
                   </p>
                 ) : null}
