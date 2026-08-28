@@ -201,6 +201,30 @@ export default async function PagamentosPage({
     return r;
   })();
 
+  // Funil + contas/ativações por pessoa + histórico de 3 meses, num único
+  // round-trip (migração 0053). Sem a função no banco, os blocos novos somem
+  // e a página segue de pé.
+  const resumoPromise = supabase.rpc("pagamentos_resumo", {
+    p_inicio: inicio,
+  });
+
+  // Metas por tipo (0050): tenta com as colunas novas e cai sem elas.
+  const equipePromise = (async () => {
+    const r = await supabase
+      .from("profiles")
+      .select("id, nome, meta_mensal_centavos, meta_contas_mes, meta_ativacoes_mes")
+      .eq("ativo", true)
+      .order("nome");
+    if (r.error?.code === "42703") {
+      return supabase
+        .from("profiles")
+        .select("id, nome, meta_mensal_centavos")
+        .eq("ativo", true)
+        .order("nome");
+    }
+    return r;
+  })();
+
   const [
     tabela,
     { dados: confirmadas },
@@ -210,6 +234,7 @@ export default async function PagamentosPage({
     { data: vendasMes },
     { data: equipe },
     { data: produtosLista },
+    { data: resumoBruto },
   ] = await Promise.all([
     tabelaPromise,
     confirmadasPromise,
@@ -221,12 +246,9 @@ export default async function PagamentosPage({
       .select("vendedor_id, valor_comissao_centavos")
       .eq("status", "confirmada")
       .gte("ocorreu_em", inicioMes),
-    supabase
-      .from("profiles")
-      .select("id, nome, meta_mensal_centavos")
-      .eq("ativo", true)
-      .order("nome"),
+    equipePromise,
     supabase.from("products").select("id, nome").order("nome"),
+    resumoPromise,
   ]);
 
   const { data: vendas, count } = tabela as {
@@ -342,15 +364,105 @@ export default async function PagamentosPage({
     );
   }
 
-  const metas = (
-    (equipe ?? []) as { id: string; nome: string; meta_mensal_centavos: number }[]
-  )
-    .map((v) => ({
-      ...v,
-      realizado: doMes.get(v.id) ?? 0,
-    }))
-    .filter((v) => v.meta_mensal_centavos > 0 || v.realizado > 0)
+  // ----- Resumo agregado (0053): funil, por pessoa e histórico ---------------
+  type ResumoRpc = {
+    funil: { contas: number; ativadas: number; compraram: number };
+    por_pessoa: {
+      id: string;
+      nome: string;
+      contas_mes: number;
+      ativacoes_mes: number;
+      tempo_medio_dias: number | null;
+    }[];
+    historico: {
+      pessoa: string;
+      mes: string;
+      comissao_centavos: number;
+      contas: number;
+      ativacoes: number;
+    }[];
+  };
+  const resumo = (resumoBruto ?? null) as ResumoRpc | null;
+  const pessoaResumo = new Map(
+    (resumo?.por_pessoa ?? []).map((p) => [p.id, p]),
+  );
+  // Histórico por pessoa, meses em ordem (a RPC já ordena por mês).
+  const historicoDe = new Map<string, ResumoRpc["historico"]>();
+  for (const h of resumo?.historico ?? []) {
+    const lista = historicoDe.get(h.pessoa) ?? [];
+    lista.push(h);
+    historicoDe.set(h.pessoa, lista);
+  }
+
+  // ----- Dias úteis do mês (Brasília), para a projeção -----------------------
+  const hojeLocal = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+  }).format(new Date(agoraMs));
+  const [anoBR, mesBR, diaBR] = hojeLocal.split("-").map(Number);
+  const ultimoDia = new Date(Date.UTC(anoBR, mesBR, 0)).getUTCDate();
+  let uteisTotal = 0;
+  let uteisAteHoje = 0; // inclui hoje: o realizado já conta as vendas de hoje
+  for (let d = 1; d <= ultimoDia; d++) {
+    const semana = new Date(Date.UTC(anoBR, mesBR - 1, d)).getUTCDay();
+    if (semana === 0 || semana === 6) continue;
+    uteisTotal += 1;
+    if (d <= diaBR) uteisAteHoje += 1;
+  }
+  const hojeUtil =
+    new Date(Date.UTC(anoBR, mesBR - 1, diaBR)).getUTCDay() % 6 !== 0;
+  // Para o "ritmo necessário" hoje ainda conta: dá tempo de agir hoje.
+  const uteisRestantes = uteisTotal - uteisAteHoje + (hojeUtil ? 1 : 0);
+
+  /** Projeção linear por dias úteis + estado vs meta + ritmo diário. */
+  const projetar = (realizado: number, meta: number) => {
+    const proj = Math.round(
+      (realizado / Math.max(uteisAteHoje, 1)) * uteisTotal,
+    );
+    const estado =
+      meta <= 0
+        ? ("sem-meta" as const)
+        : proj >= meta * 1.1
+          ? ("acima" as const)
+          : proj >= meta * 0.9
+            ? ("ritmo" as const)
+            : ("abaixo" as const);
+    const falta = Math.max(meta - realizado, 0);
+    const ritmoDia =
+      meta <= 0 ? 0 : uteisRestantes > 0 ? Math.ceil(falta / uteisRestantes) : falta;
+    return { proj, estado, ritmoDia };
+  };
+
+  type PerfilMeta = {
+    id: string;
+    nome: string;
+    meta_mensal_centavos: number;
+    meta_contas_mes?: number;
+    meta_ativacoes_mes?: number;
+  };
+  const metas = ((equipe ?? []) as PerfilMeta[])
+    .map((v) => {
+      const r = pessoaResumo.get(v.id);
+      return {
+        ...v,
+        realizado: doMes.get(v.id) ?? 0,
+        contas: r?.contas_mes ?? 0,
+        ativacoes: r?.ativacoes_mes ?? 0,
+        tempoMedio: r?.tempo_medio_dias ?? null,
+      };
+    })
+    .filter(
+      (v) =>
+        v.meta_mensal_centavos > 0 ||
+        (v.meta_contas_mes ?? 0) > 0 ||
+        (v.meta_ativacoes_mes ?? 0) > 0 ||
+        v.realizado > 0 ||
+        v.contas > 0 ||
+        v.ativacoes > 0,
+    )
     .sort((a, b) => b.realizado - a.realizado);
+
+  const conversao = (parte: number, todo: number) =>
+    todo > 0 ? `${Math.round((parte / todo) * 100)}%` : "—";
 
   return (
     <div className="p-2 md:p-3">
@@ -490,6 +602,59 @@ export default async function PagamentosPage({
         </div>
       </dl>
 
+      {/* Funil do período (5.3): conta aberta → ativada → comprou produto */}
+      {resumo ? (
+        <section aria-labelledby="funil-titulo" className="mt-3">
+          <h2
+            id="funil-titulo"
+            className="text-xs tracking-[0.06em] text-neutral-600 uppercase"
+          >
+            Funil do período — toda a mesa
+          </h2>
+          <div className="mt-1 grid gap-1 sm:grid-cols-3">
+            {(
+              [
+                {
+                  rotulo: "Contas abertas",
+                  valor: resumo.funil.contas,
+                  de: null,
+                },
+                {
+                  rotulo: "Clientes ativados",
+                  valor: resumo.funil.ativadas,
+                  de: resumo.funil.contas,
+                },
+                {
+                  rotulo: "Compraram produto",
+                  valor: resumo.funil.compraram,
+                  de: resumo.funil.ativadas,
+                },
+              ] as const
+            ).map((etapa) => (
+              <div
+                key={etapa.rotulo}
+                className="rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
+              >
+                <p className="text-xs text-neutral-600">{etapa.rotulo}</p>
+                <p className="mt-0.5 font-mono text-h2 text-neutral-900 tabular-nums">
+                  {etapa.valor.toLocaleString("pt-BR")}
+                  {etapa.de !== null ? (
+                    <span className="ml-1 align-middle font-sans text-sm text-neutral-600">
+                      {conversao(etapa.valor, etapa.de)} da anterior
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-0.5 text-xs text-neutral-400">
+            Ativação = 1º lote da vida do cliente, pelo dia real da operação.
+            Cada etapa conta quem fez aquilo NO período — a ativação pode ser
+            de conta aberta antes dele.
+          </p>
+        </section>
+      ) : null}
+
       {/* Pipeline de pendentes (5.5) */}
       {pendentes.length > 0 ? (
         <section aria-labelledby="pendentes-titulo" className="mt-3">
@@ -576,45 +741,169 @@ export default async function PagamentosPage({
         </section>
       ) : null}
 
-      {/* Metas do mês */}
+      {/* Metas do mês (5.4): R$ / contas / ativações com projeção */}
       {metas.length > 0 ? (
         <section aria-labelledby="metas-titulo" className="mt-3">
           <h2 id="metas-titulo" className="text-h3 text-neutral-900">
             Meta do mês por vendedor
           </h2>
-          <ul className="mt-2 flex max-w-[680px] flex-col gap-1">
+          <p className="mt-0.5 text-sm text-neutral-600">
+            Projeção pelo ritmo dos dias úteis:{" "}
+            <span className="font-mono tabular-nums">
+              {uteisAteHoje}/{uteisTotal}
+            </span>{" "}
+            já correram{resumo ? "" : " — rode a migração 0053 para ver contas e ativações"}.
+          </p>
+          <ul className="mt-2 flex flex-col gap-2">
             {metas.map((v) => {
-              const pct =
-                v.meta_mensal_centavos > 0
-                  ? Math.min((v.realizado / v.meta_mensal_centavos) * 100, 100)
-                  : 0;
-              const bateu =
-                v.meta_mensal_centavos > 0 && v.realizado >= v.meta_mensal_centavos;
+              const hist = historicoDe.get(v.id) ?? [];
+              const celulas = [
+                {
+                  rotulo: "Comissão",
+                  realizado: v.realizado,
+                  meta: v.meta_mensal_centavos,
+                  dinheiro: true,
+                  historico: hist.map((h) => ({
+                    mes: h.mes,
+                    valor: h.comissao_centavos,
+                  })),
+                },
+                ...(resumo
+                  ? [
+                      {
+                        rotulo: "Contas abertas",
+                        realizado: v.contas,
+                        meta: v.meta_contas_mes ?? 0,
+                        dinheiro: false,
+                        historico: hist.map((h) => ({
+                          mes: h.mes,
+                          valor: h.contas,
+                        })),
+                      },
+                      {
+                        rotulo: "Ativações",
+                        realizado: v.ativacoes,
+                        meta: v.meta_ativacoes_mes ?? 0,
+                        dinheiro: false,
+                        historico: hist.map((h) => ({
+                          mes: h.mes,
+                          valor: h.ativacoes,
+                        })),
+                      },
+                    ]
+                  : []),
+              ];
               return (
-                // flex-wrap: em 375px o valor desce para a linha de baixo em
-                // vez de estourar a borda e criar rolagem horizontal.
-                <li key={v.id} className="flex flex-wrap items-center gap-1">
-                  <span className="w-[180px] shrink-0 truncate text-sm text-neutral-800">
-                    {v.nome}
-                  </span>
-                  <span
-                    aria-hidden
-                    className="h-1 min-w-[120px] flex-1 overflow-hidden rounded-sm bg-neutral-100"
-                  >
-                    <span
-                      className={cn(
-                        "block h-full rounded-sm",
-                        bateu ? "bg-success" : "bg-primary-500",
-                      )}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </span>
-                  <span className="ml-auto w-[176px] shrink-0 text-right font-mono text-xs text-neutral-600 tabular-nums">
-                    {formatarReais(v.realizado)}
-                    {v.meta_mensal_centavos > 0
-                      ? ` / ${formatarReais(v.meta_mensal_centavos)}`
-                      : " · sem meta"}
-                  </span>
+                <li
+                  key={v.id}
+                  className="rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-1">
+                    <h3 className="text-sm font-medium text-neutral-800">
+                      {v.nome}
+                    </h3>
+                    {v.tempoMedio !== null ? (
+                      <span
+                        className="font-mono text-xs text-neutral-600 tabular-nums"
+                        title="Tempo médio entre abrir a conta e o 1º lote — só contas abertas dentro do histórico de lotes (o resto não tem 1º lote confiável)"
+                      >
+                        abre→ativa: {v.tempoMedio}d
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 grid gap-1 sm:grid-cols-3">
+                    {celulas.map((c) => {
+                      const { proj, estado, ritmoDia } = projetar(
+                        c.realizado,
+                        c.meta,
+                      );
+                      const pct =
+                        c.meta > 0
+                          ? Math.min((c.realizado / c.meta) * 100, 100)
+                          : 0;
+                      const fmt = (n: number) =>
+                        c.dinheiro ? formatarReais(n) : String(n);
+                      return (
+                        <div
+                          key={c.rotulo}
+                          className="rounded-md border border-neutral-200 p-1.5"
+                        >
+                          <p className="text-xs text-neutral-600">{c.rotulo}</p>
+                          <p className="mt-0.5 font-mono text-sm text-neutral-900 tabular-nums">
+                            {fmt(c.realizado)}
+                            <span className="text-neutral-400">
+                              {c.meta > 0 ? ` / ${fmt(c.meta)}` : " · sem meta"}
+                            </span>
+                          </p>
+                          <span
+                            aria-hidden
+                            className="mt-1 block h-0.5 overflow-hidden rounded-sm bg-neutral-100"
+                          >
+                            <span
+                              className={cn(
+                                "block h-full rounded-sm",
+                                estado === "abaixo"
+                                  ? "bg-danger"
+                                  : c.meta > 0 && c.realizado >= c.meta
+                                    ? "bg-success"
+                                    : "bg-primary-500",
+                              )}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </span>
+                          {c.meta > 0 ? (
+                            <p className="mt-1 text-xs">
+                              <span
+                                className={cn(
+                                  "font-medium",
+                                  estado === "acima"
+                                    ? "text-success"
+                                    : estado === "abaixo"
+                                      ? "text-danger"
+                                      : "text-neutral-600",
+                                )}
+                              >
+                                {estado === "acima"
+                                  ? "acima do ritmo"
+                                  : estado === "abaixo"
+                                    ? "abaixo do ritmo"
+                                    : "no ritmo"}
+                              </span>
+                              <span className="text-neutral-600">
+                                {" · proj. "}
+                                <span className="font-mono tabular-nums">
+                                  {fmt(proj)}
+                                </span>
+                                {ritmoDia > 0 && uteisRestantes > 0 ? (
+                                  <>
+                                    {" · falta "}
+                                    <span className="font-mono tabular-nums">
+                                      {fmt(ritmoDia)}
+                                    </span>
+                                    /dia útil
+                                  </>
+                                ) : null}
+                              </span>
+                            </p>
+                          ) : null}
+                          {c.historico.length > 1 ? (
+                            <p className="mt-0.5 font-mono text-xs text-neutral-400 tabular-nums">
+                              {c.historico
+                                .map(
+                                  (h) =>
+                                    `${nomeMes(h.mes)} ${
+                                      c.dinheiro
+                                        ? reaisCompacto(h.valor)
+                                        : h.valor
+                                    }`,
+                                )
+                                .join(" · ")}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </li>
               );
             })}
@@ -787,6 +1076,23 @@ export default async function PagamentosPage({
       </section>
     </div>
   );
+}
+
+/** "2026-06" → "jun" — rótulo curto do mini-histórico. */
+function nomeMes(anoMes: string) {
+  const [ano, mes] = anoMes.split("-").map(Number);
+  return new Date(Date.UTC(ano, mes - 1, 1))
+    .toLocaleDateString("pt-BR", { month: "short", timeZone: "UTC" })
+    .replace(".", "");
+}
+
+/** Centavos → "4,1k" / "830" — o histórico precisa caber em meia linha. */
+function reaisCompacto(centavos: number) {
+  const reais = centavos / 100;
+  if (reais >= 1000) {
+    return `${(reais / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}k`;
+  }
+  return Math.round(reais).toLocaleString("pt-BR");
 }
 
 function urlPagina(periodo: ChavePeriodo, pagina: number) {
