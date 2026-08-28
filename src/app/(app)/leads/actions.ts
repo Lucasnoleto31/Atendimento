@@ -109,6 +109,8 @@ import {
 import { enviarTemplateMeta } from "@/lib/whatsapp";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { COLUNA_DISPARO, LISTAS_DISPARO } from "@/lib/listas-leads";
+import { orcamentoEnviosRestante } from "@/lib/envios";
+import { marcarRoteiroEnviado } from "@/lib/ativacao";
 
 const LIMITE_MS_DISPARO = 100_000;
 const MAX_POR_EXECUCAO = 30; // ritmo por leva — respeita os limites da Meta
@@ -206,18 +208,28 @@ export async function dispararTemplateLista(
     return q;
   }
 
+  // Disparo manual também debita do orçamento único do número (lib/envios):
+  // foi a soma dos três motores que derrubou a qualidade em 24/08.
+  const orcamento = await orcamentoEnviosRestante(service);
+  if (orcamento <= 0) {
+    return {
+      erro: "O orçamento de envios de hoje acabou — o teto diário protege a qualidade do número. Ajuste em Configurações ou continue amanhã.",
+    };
+  }
+  const maxDestaExecucao = Math.min(MAX_POR_EXECUCAO, orcamento);
+
   const inicio = Date.now();
   let enviados = 0;
   let pulados = 0;
   const contatados: string[] = [];
 
   while (
-    enviados + pulados < MAX_POR_EXECUCAO &&
+    enviados + pulados < maxDestaExecucao &&
     Date.now() - inicio < LIMITE_MS_DISPARO
   ) {
     const { data: lote } = await consultaFila("dados")
       .order("criado_em", { ascending: true })
-      .limit(Math.min(10, MAX_POR_EXECUCAO - enviados - pulados));
+      .limit(Math.min(10, maxDestaExecucao - enviados - pulados));
 
     const ids = ((lote ?? []) as { lead_id: string }[]).map((l) => l.lead_id);
     // A view não carrega os ids do Chatwoot; busca só os do lote (até 10).
@@ -324,6 +336,7 @@ export async function dispararTemplateLista(
 
   // Quem recebeu template saiu de "Novo": vai para "Em Contato".
   await avancarAposDisparo(service, contatados);
+  await marcarRoteiroEnviado(service, contatados);
 
   const { count: restantes } = await consultaFila("contagem");
 

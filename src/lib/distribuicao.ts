@@ -2,8 +2,11 @@ import { createServiceClient } from "@/lib/supabase/server";
 
 /**
  * Distribuição automática: com o parâmetro `distribuicao_automatica` = 1,
- * lead novo vai para o vendedor ativo com menos atendimentos em aberto.
- * Usada pelos webhooks do Chatwoot e da Meta.
+ * lead novo vai para quem ATENDE (profiles.recebe_leads) com menos
+ * atendimentos em aberto. Papel não decide mais: o rodízio antigo filtrava
+ * papel = vendedor, só o Aikon passava, e o "rodízio" era de uma pessoa só
+ * (1.022 leads nas costas dele). Quem entra na roda é decisão do gestor, no
+ * Admin. Usada pelos webhooks do Chatwoot e da Meta.
  */
 export async function escolherVendedor(
   service: ReturnType<typeof createServiceClient>,
@@ -15,12 +18,22 @@ export async function escolherVendedor(
     .maybeSingle();
   if (Number(config?.valor ?? 0) !== 1) return null;
 
-  const { data: vendedores } = await service
+  let { data: vendedores } = await service
     .from("profiles")
     .select("id, nome, email")
     .eq("ativo", true)
-    .eq("papel", "vendedor")
+    .eq("recebe_leads", true)
     .order("nome");
+  // Banco ainda sem a 0041: cai na regra antiga (papel vendedor).
+  if (vendedores === null) {
+    const antigo = await service
+      .from("profiles")
+      .select("id, nome, email")
+      .eq("ativo", true)
+      .eq("papel", "vendedor")
+      .order("nome");
+    vendedores = antigo.data;
+  }
   const equipe = (vendedores ?? []) as {
     id: string;
     nome: string;

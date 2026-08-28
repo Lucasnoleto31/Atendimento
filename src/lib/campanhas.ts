@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { dispararTemplate, type Alvo } from "@/lib/cadencia";
 import { agoraEmBrasilia } from "@/lib/format";
+import { orcamentoEnviosRestante } from "@/lib/envios";
 import { avancarAposDisparo } from "@/lib/kanban";
 
 /**
@@ -106,7 +107,12 @@ export async function executarCampanhas(): Promise<ResultadoCampanhas> {
     const restaHoje = campanha.por_dia - (jaHoje ?? 0);
     if (restaHoje <= 0) continue;
 
-    const quantos = Math.min(restaHoje, LOTE_POR_RODADA);
+    // Orçamento único do número: campanha não passa por cima do que a
+    // cadência e o disparo manual já gastaram hoje (lib/envios).
+    const orcamento = await orcamentoEnviosRestante(service);
+    if (orcamento <= 0) break;
+
+    const quantos = Math.min(restaHoje, LOTE_POR_RODADA, orcamento);
     const { alvos, publicoAcabou } = await proximosAlvos(
       service,
       campanha,

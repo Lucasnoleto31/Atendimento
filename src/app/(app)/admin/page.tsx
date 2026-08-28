@@ -81,7 +81,9 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       .order("ordem"),
     supabase
       .from("profiles")
-      .select("id, nome, email, papel, ativo")
+      // "*": recebe_leads só existe após a 0041 — com "*" a lista de
+      // usuários funciona antes e depois da migração.
+      .select("*")
       .order("nome"),
     supabase
       .from("whatsapp_instances")

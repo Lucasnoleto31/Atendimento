@@ -5,6 +5,7 @@ import { variantesTelefone } from "@/lib/csv";
 import { escolherVendedor } from "@/lib/distribuicao";
 import { hospedarMidiaMeta } from "@/lib/whatsapp";
 import { extrairDocumento } from "@/lib/documento";
+import { marcarPrintRecebido } from "@/lib/ativacao";
 
 /**
  * Webhook do WhatsApp Cloud API (Meta).
@@ -434,6 +435,12 @@ async function processarMensagem(
     // Sem a interação gravada, o evento não pode virar "processado" — a falha
     // fica visível em webhook_events.erro em vez de sumir com a mensagem.
     throw new Error(`Falha ao gravar a mensagem: ${erroInteracao.message}`);
+  }
+
+  // Imagem de lead na fila de Ativação = quase sempre o print da 1ª operação.
+  // A marca alimenta o funil do roteiro; a nota avisa a equipe de conferir.
+  if (mensagem.type === "image") {
+    await marcarPrintRecebido(service, leadId);
   }
 
   // CPF/CNPJ dito na conversa: grava no lead — o gatilho do banco vincula à

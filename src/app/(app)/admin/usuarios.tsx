@@ -6,6 +6,7 @@ import { KeyRound, Plus, UserCheck, UserX } from "lucide-react";
 import { CAMPO, BOTAO_ICONE } from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
 import {
+  alternarRecebeLeads,
   alternarUsuarioAtivo,
   criarUsuario,
   mudarPapel,
@@ -21,6 +22,7 @@ export type UsuarioLinha = {
   email: string;
   papel: "admin" | "gestor" | "vendedor";
   ativo: boolean;
+  recebe_leads?: boolean | null;
 };
 
 function SenhaGerada({ estado }: { estado: ResultadoUsuario }) {
@@ -168,6 +170,27 @@ export function Usuarios({
                   <UserX size={12} strokeWidth={1.5} aria-hidden />
                 )}
                 {usuario.ativo ? "ativo" : "inativo"}
+              </button>
+            </form>
+
+            <form action={alternarRecebeLeads}>
+              <input type="hidden" name="id" value={usuario.id} />
+              <button
+                type="submit"
+                aria-pressed={Boolean(usuario.recebe_leads)}
+                title={
+                  usuario.recebe_leads
+                    ? "Está no rodízio: lead novo pode cair com esta pessoa"
+                    : "Fora do rodízio: não recebe lead novo automaticamente"
+                }
+                className={cn(
+                  "inline-flex h-[20px] items-center rounded-sm px-1 text-xs transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                  usuario.recebe_leads
+                    ? "bg-primary-50 text-primary-900"
+                    : "bg-neutral-100 text-neutral-400",
+                )}
+              >
+                {usuario.recebe_leads ? "no rodízio" : "fora do rodízio"}
               </button>
             </form>
 

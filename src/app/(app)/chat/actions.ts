@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { avancarAposDisparo } from "@/lib/kanban";
+import { marcarRoteiroEnviado } from "@/lib/ativacao";
 import { perfilAtual } from "@/lib/auth";
 import {
   alterarStatusConversa,
@@ -456,7 +457,9 @@ export async function enviarMensagemLead(
     .eq("id", leadId);
 
   // Template disparado é contato feito: sai de "Novo" para "Em Contato".
-  await avancarAposDisparo(createServiceClient(), [leadId]);
+  const servico = createServiceClient();
+  await avancarAposDisparo(servico, [leadId]);
+  await marcarRoteiroEnviado(servico, [leadId]);
 
   revalidatePath("/chat");
   // A carteira mostra "último contato": sem isto ela seguia no valor velho.

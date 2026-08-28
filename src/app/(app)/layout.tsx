@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell, type Perfil } from "@/components/app/app-shell";
+import { processarCadencia } from "@/lib/cadencia";
+import { processarAgendadas } from "@/lib/agendadas";
+import { processarCampanhas } from "@/lib/campanhas";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const supabase = await createClient();
@@ -48,6 +52,16 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       </main>
     );
   }
+
+  // O batimento das automações morava só no /chat: cadência e campanha
+  // paravam se ninguém abrisse aquela tela (e o dono optou por não usar cron
+  // externo). Daqui, QUALQUER página aberta por QUALQUER pessoa alimenta os
+  // motores — o freio de 5 min dentro de cada processador evita repetição.
+  after(async () => {
+    await processarCadencia().catch(() => {});
+    await processarAgendadas().catch(() => {});
+    await processarCampanhas().catch(() => {});
+  });
 
   return <AppShell perfil={perfil as Perfil}>{children}</AppShell>;
 }

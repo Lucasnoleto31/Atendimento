@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { after } from "next/server";
 import Link from "next/link";
 import { ArrowLeft, Search, UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -13,9 +12,6 @@ import {
 } from "@/lib/chatwoot";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { estiloEtiqueta } from "@/lib/etiquetas";
-import { processarCadencia } from "@/lib/cadencia";
-import { processarAgendadas } from "@/lib/agendadas";
-import { processarCampanhas } from "@/lib/campanhas";
 import { Janela, type Mensagem, type MensagemPadrao } from "./janela";
 import { AtualizadorTempoReal } from "./tempo-real";
 import {
@@ -110,16 +106,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
     atendenteFiltro = perfil.id; // link antigo continua filtrando as minhas
   }
 
-  // Heartbeat: cadência, agendadas e campanhas pegam carona na atualização
-  // da tela. Roda em after() — depois que a resposta é enviada — porque na
-  // Vercel a instância CONGELA quando o render termina; sem isso a tarefa
-  // podia parar no meio (agendada marcada como enviada sem ter saído).
   const canal = canalAtivo();
-  after(async () => {
-    await processarCadencia().catch(() => {});
-    await processarAgendadas().catch(() => {});
-    await processarCampanhas().catch(() => {});
-  });
 
   // A lista da caixa de entrada. `comAdiado` desliga tudo que depende da
   // coluna chat_adiado_em, para a tela seguir de pé sem a migração 0017.

@@ -8,6 +8,8 @@ import { enviarTemplateMeta } from "@/lib/whatsapp";
 import { canalAtivo, listarTemplatesCanal } from "@/lib/canal";
 import { avancarAposDisparo } from "@/lib/kanban";
 import { agoraEmBrasilia } from "@/lib/format";
+import { orcamentoEnviosRestante } from "@/lib/envios";
+import { marcarRoteiroEnviado } from "@/lib/ativacao";
 
 /**
  * Cadência de follow-up com duas famílias de regras (followup_rules.ancora):
@@ -131,7 +133,10 @@ export async function executarCadencia(): Promise<ResultadoCadencia> {
     .select("lead_id", { count: "exact", head: true })
     .gte("enviado_em", relogio.inicioDoDia);
 
-  let restaHoje = porDia - (jaHoje ?? 0);
+  // Dois tetos: o da cadência E o orçamento único do número (lib/envios).
+  // O que for menor manda — cadência nunca esgota o dia das campanhas.
+  const orcamento = await orcamentoEnviosRestante(service);
+  let restaHoje = Math.min(porDia - (jaHoje ?? 0), orcamento);
   if (restaHoje <= 0) {
     return { enviados: 0, pulados: 0, regras: regras.length };
   }
@@ -511,7 +516,10 @@ export async function dispararTemplate(
   valores: Record<string, string>,
 ): Promise<string | number | null> {
   if (canal === "meta") {
-    return enviarTemplateMeta(alvo.telefone, template, valores);
+    const id = await enviarTemplateMeta(alvo.telefone, template, valores);
+    // Lead na fila de Ativação recebendo template = roteiro enviado.
+    await marcarRoteiroEnviado(service, [alvo.leadId]);
+    return id;
   }
 
   let conversaId = alvo.chatwootConversaId;

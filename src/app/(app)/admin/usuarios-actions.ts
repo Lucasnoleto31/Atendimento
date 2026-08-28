@@ -108,6 +108,39 @@ export async function mudarPapel(formData: FormData) {
   terminar();
 }
 
+/** Entra ou sai do rodízio da distribuição automática (0041). */
+export async function alternarRecebeLeads(formData: FormData) {
+  const admin = await exigirAdmin();
+  if (!admin) redirect("/atendimento");
+
+  const id = String(formData.get("id") ?? "");
+
+  function terminar(aviso?: string): never {
+    revalidatePath("/admin");
+    redirect(aviso ? `/admin?aviso=${encodeURIComponent(aviso)}` : "/admin");
+  }
+
+  if (!id) terminar("Usuário não informado.");
+
+  const supabase = await createClient();
+  const { data, error: erroLeitura } = await supabase
+    .from("profiles")
+    .select("recebe_leads")
+    .eq("id", id)
+    .single();
+  if (erroLeitura) {
+    terminar("Rode a migração 0041 para controlar o rodízio por usuário.");
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ recebe_leads: !data?.recebe_leads })
+    .eq("id", id);
+
+  if (error) terminar(`Não deu para alterar: ${error.message}`);
+  terminar();
+}
+
 export async function alternarUsuarioAtivo(formData: FormData) {
   const admin = await exigirAdmin();
   if (!admin) redirect("/atendimento");
