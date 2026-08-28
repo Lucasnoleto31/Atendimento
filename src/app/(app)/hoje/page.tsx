@@ -89,6 +89,13 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   // PRIMEIRO lote da vida entrou na importação de hoje. Como o arquivo da
   // Genial chega no dia seguinte, o rótulo da tela diz "registradas hoje".
   async function ativacoesRegistradasHoje(): Promise<number> {
+    // Uma viagem só (RPC da 0047); sem a migração, cai na cadeia de três.
+    const { data: viaRpc, error: erroRpc } = await supabase.rpc(
+      "ativacoes_registradas",
+      { p_responsavel: alvoId, p_inicio: hoje.inicioDoDia },
+    );
+    if (!erroRpc) return Number(viaRpc ?? 0);
+
     const { data: deHoje } = await supabase
       .from("customer_lots")
       .select("customer_id")
