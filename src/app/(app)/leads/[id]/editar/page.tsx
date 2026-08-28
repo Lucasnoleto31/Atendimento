@@ -9,6 +9,7 @@ import { Field } from "@/components/ui/field";
 import { CAMPO } from "@/components/app/form-styles";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { MOTIVOS_PERDA } from "@/lib/perda";
 import { atualizarLead } from "./actions";
 
 export const metadata: Metadata = { title: "Editar lead · Zeve CRM" };
@@ -22,15 +23,35 @@ export default async function EditarLeadPage({
   const aviso = typeof busca.aviso === "string" ? busca.aviso : null;
 
   const supabase = await createClient();
+
+  // Sem a migração 0038 as colunas de perda não existem; a ficha abre do
+  // mesmo jeito, só sem os campos preenchidos.
+  async function buscarLead() {
+    const completo = await supabase
+      .from("leads")
+      .select(
+        "id, nome, telefone_e164, channel_id, campanha, stage_id, status, responsavel_id, observacao, perda_motivo, perda_detalhe",
+      )
+      .eq("id", id)
+      .maybeSingle();
+    if (completo.error?.code !== "42703") return completo;
+    const basico = await supabase
+      .from("leads")
+      .select(
+        "id, nome, telefone_e164, channel_id, campanha, stage_id, status, responsavel_id, observacao",
+      )
+      .eq("id", id)
+      .maybeSingle();
+    return {
+      data: basico.data
+        ? { ...basico.data, perda_motivo: null, perda_detalhe: null }
+        : null,
+    };
+  }
+
   const [{ data: lead }, { data: canais }, { data: etapas }, { data: equipe }] =
     await Promise.all([
-      supabase
-        .from("leads")
-        .select(
-          "id, nome, telefone_e164, channel_id, campanha, stage_id, status, responsavel_id, observacao",
-        )
-        .eq("id", id)
-        .maybeSingle(),
+      buscarLead(),
       supabase.from("channels").select("id, nome").eq("ativo", true).order("nome"),
       supabase
         .from("pipeline_stages")
@@ -163,6 +184,38 @@ export default async function EditarLeadPage({
             )}
           </select>
         </div>
+
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="perda_motivo"
+            className="text-sm font-medium text-neutral-800"
+          >
+            Motivo da perda
+          </label>
+          <select
+            id="perda_motivo"
+            name="perda_motivo"
+            defaultValue={lead.perda_motivo ?? ""}
+            className={cn(CAMPO, "w-full")}
+          >
+            <option value="">— só para status Perdido —</option>
+            {Object.entries(MOTIVOS_PERDA).map(([valor, rotulo]) => (
+              <option key={valor} value={valor}>
+                {rotulo}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-neutral-600">
+            Obrigatório ao marcar Perdido; nos outros status é ignorado.
+          </p>
+        </div>
+
+        <Field
+          id="perda_detalhe"
+          name="perda_detalhe"
+          label="Detalhe da perda (opcional)"
+          defaultValue={lead.perda_detalhe ?? ""}
+        />
 
         <div className="flex flex-col gap-1">
           <label

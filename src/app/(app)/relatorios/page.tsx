@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import {
+  MOTIVOS_PERDA,
+  corteDiasAtras,
+  type MotivoPerda,
+} from "@/lib/perda";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { formatarReais } from "@/lib/format";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
@@ -67,6 +72,31 @@ export default async function RelatoriosPage({
   const { data, error } = await supabase.rpc("relatorio_leads", {
     p_dias: periodo.dias,
   });
+
+  // Motivos de perda do mesmo período. Sem a 0038 a coluna não existe e a
+  // seção simplesmente não aparece.
+  let perdasPorMotivo: { motivo: string; total: number }[] = [];
+  {
+    let q = supabase
+      .from("leads")
+      .select("perda_motivo")
+      .eq("status", "perdido")
+      .limit(5000);
+    if (periodo.dias !== null) {
+      q = q.gte("perdido_em", corteDiasAtras(periodo.dias));
+    }
+    const { data: perdidos, error: erroPerda } = await q;
+    if (!erroPerda) {
+      const soma = new Map<string, number>();
+      for (const l of (perdidos ?? []) as { perda_motivo: string | null }[]) {
+        const chave = l.perda_motivo ?? "sem_motivo";
+        soma.set(chave, (soma.get(chave) ?? 0) + 1);
+      }
+      perdasPorMotivo = [...soma.entries()]
+        .map(([motivo, total]) => ({ motivo, total }))
+        .sort((a, b) => b.total - a.total);
+    }
+  }
 
   const r = (data ?? null) as Relatorio | null;
 
@@ -632,6 +662,40 @@ export default async function RelatoriosPage({
               </ul>
             </section>
           </div>
+
+          {/* Motivos de perda */}
+          {perdasPorMotivo.length > 0 ? (
+            <section
+              aria-labelledby="perdas-titulo"
+              className="mt-3 rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm"
+            >
+              <h2 id="perdas-titulo" className="text-h3 text-neutral-900">
+                Motivos de perda
+              </h2>
+              <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
+                Cada motivo pede uma resposta diferente: quem sumiu é cadência,
+                concorrente é proposta, e quem não quer abrir conta é
+                qualificação do público — não é derrota da equipe.
+              </p>
+              <ul className="mt-2 flex max-w-[560px] flex-col gap-1">
+                {perdasPorMotivo.map((linha) => (
+                  <Barra
+                    key={linha.motivo}
+                    rotulo={
+                      MOTIVOS_PERDA[linha.motivo as MotivoPerda] ??
+                      "Sem motivo registrado (perda antiga)"
+                    }
+                    valor={linha.total}
+                    maximo={Math.max(...perdasPorMotivo.map((x) => x.total), 1)}
+                    extra={percentual(
+                      linha.total,
+                      perdasPorMotivo.reduce((t, x) => t + x.total, 0),
+                    )}
+                  />
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           {/* Campanhas */}
           <section aria-labelledby="origens-titulo" className="mt-3">
