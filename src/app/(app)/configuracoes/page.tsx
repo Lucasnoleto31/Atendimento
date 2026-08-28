@@ -31,6 +31,7 @@ import {
   salvarMetaTipo,
   salvarMetaContatos,
   salvarParametro,
+  salvarWhatsapp,
 } from "./actions";
 
 export const metadata: Metadata = { title: "Configurações · Zeve CRM" };
@@ -92,6 +93,12 @@ const PARAMETROS = [
     chave: "receita_por_lote",
     rotulo: "Receita por lote (R$)",
     ajuda: "Receita média da assessoria por lote girado; habilita LTV e receita em risco (0 desliga).",
+  },
+  {
+    chave: "resumo_gestor_ativo",
+    rotulo: "Resumo diário do gestor (0/1)",
+    ajuda:
+      "1 = às 18h30 de dia útil o dia da mesa chega no WhatsApp de gestor/admin com número cadastrado abaixo. Exige o template resumo_diario aprovado na Meta.",
   },
 ];
 
@@ -165,9 +172,14 @@ export default async function ConfiguracoesPage({
     meta_mensal_centavos: number;
     meta_contas_mes?: number | null;
     meta_ativacoes_mes?: number | null;
+    whatsapp_e164?: string | null;
   }[];
   const metasTipoDisponiveis = listaEquipe.some(
     (v) => v.meta_contas_mes !== undefined,
+  );
+  // Coluna da 0057: sem ela, o campo de WhatsApp da equipe nem aparece.
+  const whatsappDisponivel = listaEquipe.some(
+    (v) => v.whatsapp_e164 !== undefined,
   );
 
   // Recursos da migração 0013 e templates: tolerantes a ambiente incompleto.
@@ -850,6 +862,37 @@ export default async function ConfiguracoesPage({
                       </button>
                     </form>
                   </>
+                ) : null}
+                {whatsappDisponivel && vendedor.papel !== "vendedor" ? (
+                  <form action={salvarWhatsapp} className="flex items-center gap-1">
+                    <input type="hidden" name="id" value={vendedor.id} />
+                    <label
+                      htmlFor={`whats-${vendedor.id}`}
+                      className="text-xs text-neutral-600"
+                      title="Destino do resumo diário do gestor (7.2). Vazio = não recebe."
+                    >
+                      WhatsApp
+                    </label>
+                    <input
+                      id={`whats-${vendedor.id}`}
+                      name="whatsapp"
+                      inputMode="tel"
+                      placeholder="62 98181-0004"
+                      defaultValue={
+                        vendedor.whatsapp_e164
+                          ? formatarTelefone(vendedor.whatsapp_e164)
+                          : ""
+                      }
+                      className={cn(CAMPO, "w-[150px] font-mono text-xs tabular-nums")}
+                    />
+                    <button
+                      type="submit"
+                      aria-label={`Salvar WhatsApp de ${vendedor.nome}`}
+                      className={BOTAO_ICONE}
+                    >
+                      <Check size={18} strokeWidth={1.5} aria-hidden />
+                    </button>
+                  </form>
                 ) : null}
               </div>
             ))}

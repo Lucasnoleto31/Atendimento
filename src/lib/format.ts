@@ -116,6 +116,7 @@ export function agoraEmBrasilia(referencia = new Date()) {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
+    minute: "2-digit",
     hour12: false,
     weekday: "short",
   }).formatToParts(referencia);
@@ -129,6 +130,9 @@ export function agoraEmBrasilia(referencia = new Date()) {
   return {
     dia: data,
     hora: Number(pegar("hour")),
+    // Campo aditivo (7.2): o resumo do gestor dispara às 18h30 — hora
+    // inteira não bastava. Os campos existentes não mudam.
+    minuto: Number(pegar("minute")),
     fimDeSemana: semana === "Sat" || semana === "Sun",
     inicioDoDia: `${data}T00:00:00${DESLOCAMENTO}`,
   };

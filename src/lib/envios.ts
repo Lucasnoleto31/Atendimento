@@ -29,12 +29,21 @@ export async function orcamentoEnviosRestante(service: Service): Promise<number>
     .maybeSingle();
   const teto = Number(cfg?.valor ?? TETO_PADRAO) || TETO_PADRAO;
 
+  const inicioDia = agoraEmBrasilia().inicioDoDia;
   const { count } = await service
     .from("lead_interactions")
     .select("id", { count: "exact", head: true })
     .eq("tipo", "mensagem_enviada")
-    .gte("criado_em", agoraEmBrasilia().inicioDoDia)
+    .gte("criado_em", inicioDia)
     .in("metadados->>via", ["cadencia", "campanha", "disparo"]);
 
-  return Math.max(0, teto - (count ?? 0));
+  // O resumo diário do gestor (7.2) não tem lead — não vira interação. O
+  // débito dele vive na trilha de auditoria e entra na mesma conta.
+  const { count: resumos } = await service
+    .from("auditoria")
+    .select("id", { count: "exact", head: true })
+    .eq("acao", "resumo_gestor")
+    .gte("criado_em", inicioDia);
+
+  return Math.max(0, teto - (count ?? 0) - (resumos ?? 0));
 }

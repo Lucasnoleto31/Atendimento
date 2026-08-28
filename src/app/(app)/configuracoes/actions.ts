@@ -393,6 +393,39 @@ export async function salvarMetaTipo(formData: FormData) {
   terminar();
 }
 
+/** WhatsApp da própria equipe (7.2): destino do resumo diário do gestor. */
+export async function salvarWhatsapp(formData: FormData) {
+  const perfil = await exigirGestor();
+  if (perfil.papel !== "admin") terminar("Só o admin altera o WhatsApp da equipe.");
+
+  const id = String(formData.get("id") ?? "");
+  if (!id) terminar("Perfil inválido.");
+  const bruto = String(formData.get("whatsapp") ?? "").trim();
+  let numero: string | null = null;
+  if (bruto) {
+    numero = normalizarTelefone(bruto);
+    if (!numero) {
+      terminar("WhatsApp inválido. Use DDD + número, ex.: 62 98181-0004.");
+    }
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ whatsapp_e164: numero })
+    .eq("id", id);
+  if (error) {
+    // UPDATE com coluna desconhecida volta PGRST204 (schema cache do
+    // PostgREST), não o 42703 do Postgres — os dois significam "sem a 0057".
+    terminar(
+      error.code === "42703" || error.code === "PGRST204"
+        ? "Rode a migração 0057 para o WhatsApp da equipe existir."
+        : amigavel(error.code, error.message),
+    );
+  }
+  terminar();
+}
+
 // ===========================================================================
 // Parâmetros de reativação
 // ===========================================================================
@@ -405,12 +438,24 @@ const PARAMETROS_VALIDOS = new Set([
   "distribuicao_automatica",
   "dias_churn",
   "receita_por_lote",
+  // As três abaixo SEMPRE estiveram na tela, mas faltavam aqui: salvar
+  // falhava com "Parâmetro desconhecido" desde que os campos nasceram.
+  "envios_teto_dia",
+  "cadencia_por_dia",
+  "custo_template_centavos",
+  "resumo_gestor_ativo",
 ]);
 
 // Parâmetros liga/desliga aceitam 0; os demais exigem número positivo.
-const PARAMETROS_BINARIOS = new Set(["distribuicao_automatica"]);
+const PARAMETROS_BINARIOS = new Set([
+  "distribuicao_automatica",
+  "resumo_gestor_ativo",
+]);
 // Zero desliga o recurso (ex.: receita por lote sem taxa definida).
-const PARAMETROS_ZERO_OK = new Set(["receita_por_lote"]);
+const PARAMETROS_ZERO_OK = new Set([
+  "receita_por_lote",
+  "custo_template_centavos",
+]);
 
 export async function salvarParametro(formData: FormData) {
   await exigirGestor();

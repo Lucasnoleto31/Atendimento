@@ -7,6 +7,7 @@ import { processarAgendadas } from "@/lib/agendadas";
 import { processarCampanhas } from "@/lib/campanhas";
 import { garantirGiroFresco } from "@/lib/giro";
 import { sincronizarGenial } from "@/lib/genial";
+import { processarResumoGestor } from "@/lib/resumo-gestor";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const supabase = await createClient();
@@ -67,6 +68,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     await processarCadencia().catch(() => {});
     await processarAgendadas().catch(() => {});
     await processarCampanhas().catch(() => {});
+    await processarResumoGestor().catch(() => {});
   });
 
   return <AppShell perfil={perfil as Perfil}>{children}</AppShell>;
