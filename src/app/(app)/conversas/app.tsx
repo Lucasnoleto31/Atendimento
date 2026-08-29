@@ -12,7 +12,9 @@ import {
   ListFilter,
   RotateCcw,
   Search,
+  Sparkles,
   Timer,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Janela } from "@/app/(app)/chat/janela";
@@ -21,6 +23,9 @@ import {
   alterarStatusConversaChat,
 } from "@/app/(app)/chat/actions";
 import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
+import { resumirConversa } from "@/app/(app)/chat/ia";
+import { FerramentasPalco } from "./ferramentas-palco";
+import { PaletaComandos } from "./paleta";
 import {
   carregarListaConversas,
   type CargaConversas,
@@ -119,9 +124,25 @@ export function AppConversas({
   );
   const [carregandoConversa, setCarregandoConversa] = useState(false);
   const [erroConversa, setErroConversa] = useState<string | null>(null);
-  const [acaoPendente, setAcaoPendente] = useState<string | null>(null);
+  // Conjunto, não um slot só: duas linhas podem estar sendo resolvidas ao
+  // mesmo tempo, e uma delas travada não pode calar a outra.
+  const [acaoPendente, setAcaoPendente] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [resumo, setResumo] = useState<{ texto?: string; erro?: string } | null>(null);
+  const [resumindo, setResumindo] = useState(false);
+  const [paletaAberta, setPaletaAberta] = useState(false);
 
   const pedidoRef = useRef(0);
+  // Contadores de corrida: resposta que chega depois de outra troca é lixo.
+  const pedidoConversaRef = useRef(0);
+  const pedidoResumoRef = useRef(0);
+  // Quem está EM CENA agora. O contador sozinho não basta para a recarga do
+  // menu ⋯: ela nasce numa closure do lead antigo e só é chamada depois da
+  // troca, quando o contador já subiu — a identidade do lead é o que decide.
+  const abertaRef = useRef<{ leadId: string; nome: string } | null>(
+    leadInicial ? { leadId: leadInicial.leadId, nome: leadInicial.nome } : null,
+  );
 
   const recarregarLista = useCallback(
     async (v: VisaoConversas, e: "minhas" | "todas", b: string) => {
@@ -158,11 +179,19 @@ export function AppConversas({
 
   const abrirConversa = useCallback(
     async (linha: { leadId: string; nome: string }) => {
+      const pedido = ++pedidoConversaRef.current;
+      pedidoResumoRef.current++; // resumo em voo era da conversa anterior
+      abertaRef.current = linha;
       setAberta(linha);
       setConversa(null);
       setErroConversa(null);
+      setResumo(null);
+      setResumindo(false);
       setCarregandoConversa(true);
       const r = await carregarConversa(linha.leadId);
+      // Dois cliques rápidos: só a resposta do ÚLTIMO clique conta — sem
+      // isto, a resposta lenta do lead A sobrescrevia o lead B já aberto.
+      if (pedido !== pedidoConversaRef.current) return;
       setCarregandoConversa(false);
       if ("erro" in r) setErroConversa(r.erro ?? "Não deu para abrir.");
       else setConversa(r);
@@ -190,12 +219,28 @@ export function AppConversas({
   // o servidor confirma; erro devolve a linha e avisa.
   const despachar = useCallback(
     async (leadId: string, acao: "resolver" | "adiar") => {
-      setAcaoPendente(leadId);
-      const r =
-        acao === "resolver"
-          ? await alterarStatusConversaChat(leadId, "resolved")
-          : await adiarConversa(leadId, "amanha");
-      setAcaoPendente(null);
+      // Tecla presa ou E-E em sequência na MESMA conversa: a segunda espera
+      // (o repeat duplicava o adiar e inflava as contagens). Outra conversa
+      // segue livre.
+      if (acaoPendente.has(leadId)) return;
+      setAcaoPendente((s) => new Set(s).add(leadId));
+      let r: { ok?: boolean; erro?: string };
+      try {
+        r =
+          acao === "resolver"
+            ? await alterarStatusConversaChat(leadId, "resolved")
+            : await adiarConversa(leadId, "amanha");
+      } catch {
+        // Rede caiu no meio: sem este catch a promessa rejeitava, o lead
+        // ficava preso em "pendente" e resolver/adiar morria em silêncio.
+        r = { erro: "Sem resposta do servidor — tente de novo." };
+      } finally {
+        setAcaoPendente((s) => {
+          const n = new Set(s);
+          n.delete(leadId);
+          return n;
+        });
+      }
       if (r.erro) {
         setErroLista(r.erro);
         return;
@@ -218,26 +263,113 @@ export function AppConversas({
       }));
       if (aberta?.leadId === leadId) proxima();
     },
-    [visao, aberta, proxima],
+    [visao, aberta, proxima, acaoPendente],
   );
 
-  // Atalho J: próxima da fila (desktop; no celular o gesto vem no Bloco C).
+  // Atalhos J/E/H/⌘K (desktop; no celular o gesto vem no Bloco C). E e H
+  // ESCREVEM no servidor — a ordem das guardas abaixo é o que impede a
+  // digitação de resolver uma conversa sem querer.
   useEffect(() => {
     const aoTeclar = (e: KeyboardEvent) => {
+      // Modal aberto (diálogo de perda, template): nada atravessa por baixo
+      // — nem a paleta, que empilharia por cima dele.
+      const temModal = Boolean(document.querySelector('[role="dialog"]'));
+      // ⌘K vale até com o foco num campo — é o contrato de toda paleta.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        if (temModal && !paletaAberta) return;
+        e.preventDefault();
+        setPaletaAberta((v) => !v);
+        return;
+      }
+      if (e.key === "Escape") {
+        // Um painel interno (prontas da Janela, menu ⋯) que já tratou o Esc
+        // chega aqui consumido — não fecha a paleta por cima dele.
+        if (!e.defaultPrevented) setPaletaAberta(false);
+        return;
+      }
+      if (paletaAberta || temModal) return;
       const alvo = e.target as HTMLElement | null;
       if (
         alvo &&
         (alvo.tagName === "INPUT" ||
           alvo.tagName === "TEXTAREA" ||
+          alvo.tagName === "SELECT" ||
           alvo.isContentEditable)
       ) {
         return;
       }
+      // Foco DENTRO de um menu/lista aberto, ou no botão que o abriu: a
+      // tecla é do menu (type-ahead), não do palco. Vale pelo foco — não
+      // pela existência do painel no DOM, senão o painel de prontas aberto
+      // matava J/E/H mesmo com o foco longe dele.
+      const ativo = document.activeElement as HTMLElement | null;
+      if (
+        ativo &&
+        (ativo.closest(
+          '[data-popover], [role="menu"], [role="listbox"], [role="dialog"]',
+        ) ||
+          ativo.getAttribute("aria-expanded") === "true")
+      ) {
+        return;
+      }
+      // Com modificador é atalho do navegador/SO (Cmd+E, Ctrl+H) e repeat é
+      // tecla presa — nenhum dos dois é intenção de despachar conversa.
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
       if (e.key.toLowerCase() === "j") proxima();
+      if (e.key.toLowerCase() === "e" && aberta) {
+        void despachar(aberta.leadId, "resolver");
+      }
+      if (e.key.toLowerCase() === "h" && aberta) {
+        void despachar(aberta.leadId, "adiar");
+      }
     };
     window.addEventListener("keydown", aoTeclar);
     return () => window.removeEventListener("keydown", aoTeclar);
-  }, [proxima]);
+  }, [proxima, paletaAberta, aberta, despachar]);
+
+  const pedirResumo = useCallback(async () => {
+    if (!aberta || resumindo) return;
+    const pedido = ++pedidoResumoRef.current;
+    setResumindo(true);
+    setResumo(null);
+    let r: { resumo?: string; erro?: string };
+    try {
+      r = await resumirConversa(aberta.leadId);
+    } catch {
+      // Sem este catch o ✦ ficava pulsando para sempre em queda de rede.
+      r = { erro: "Sem resposta do servidor — tente de novo." };
+    }
+    // Trocou de conversa no meio: o resumo do lead A não pode aparecer
+    // sob o cabeçalho do lead B (abrirConversa invalida o pedido).
+    if (pedido !== pedidoResumoRef.current) return;
+    setResumindo(false);
+    setResumo(r.resumo ? { texto: r.resumo } : { erro: r.erro });
+  }, [aberta, resumindo]);
+
+  // Recarga SILENCIOSA após uma ação do menu ⋯: troca os dados por baixo
+  // sem desmontar a Janela — desmontar apagava anexos na fila, fechava o
+  // menu e re-disparava o marcarChatLido que desfazia o "marcar não lida".
+  const recarregarConversaAberta = useCallback(async () => {
+    const leadDaRecarga = aberta?.leadId;
+    if (!leadDaRecarga) return;
+    // Guarda por IDENTIDADE, antes e depois da ida ao servidor: a ação do
+    // menu ⋯ pode ter começado no lead A e terminado com o B em cena — e um
+    // contador não pega isso, porque ele já subiu antes desta chamada.
+    if (abertaRef.current?.leadId !== leadDaRecarga) return;
+    const r = await carregarConversa(leadDaRecarga);
+    if (abertaRef.current?.leadId !== leadDaRecarga) return;
+    if (!("erro" in r)) setConversa(r);
+  }, [aberta]);
+
+  /** O menu ⋯ marcou "não lida": a linha volta a ficar em negrito na hora. */
+  const marcarLinhaNaoLida = useCallback((leadId: string) => {
+    setCarga((c) => ({
+      ...c,
+      linhas: c.linhas.map((l) =>
+        l.leadId === leadId ? { ...l, naoLida: true } : l,
+      ),
+    }));
+  }, []);
 
   const contagemDe = (v: VisaoConversas): number | null =>
     v === "caixa"
@@ -362,7 +494,7 @@ export function AppConversas({
                 linha={l}
                 aberta={l.leadId === aberta?.leadId}
                 hojeChave={hojeChave}
-                pendente={acaoPendente === l.leadId}
+                pendente={acaoPendente.has(l.leadId)}
                 aoAbrir={() => void abrirConversa({ leadId: l.leadId, nome: l.nome })}
                 aoResolver={() => void despachar(l.leadId, "resolver")}
                 aoAdiar={() => void despachar(l.leadId, "adiar")}
@@ -408,7 +540,10 @@ export function AppConversas({
             <header className="flex items-center gap-1.5 border-b border-neutral-200 bg-neutral-0 px-2 py-1">
               <button
                 type="button"
-                onClick={() => setAberta(null)}
+                onClick={() => {
+                  abertaRef.current = null;
+                  setAberta(null);
+                }}
                 aria-label="Voltar para a lista"
                 className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 md:hidden"
               >
@@ -429,29 +564,76 @@ export function AppConversas({
               <div className="ml-auto flex items-center gap-1">
                 <button
                   type="button"
-                  disabled={acaoPendente === aberta.leadId}
+                  disabled={acaoPendente.has(aberta.leadId)}
                   onClick={() => void despachar(aberta.leadId, "resolver")}
-                  className="inline-flex h-[36px] items-center gap-0.5 rounded-full border border-neutral-200 bg-neutral-0 px-1.5 text-sm font-medium text-success hover:bg-success-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
+                  className="inline-flex h-[40px] items-center gap-0.5 rounded-full border border-neutral-200 bg-neutral-0 px-1.5 text-sm font-medium text-success hover:bg-success-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
                 >
                   <Check size={15} strokeWidth={2} aria-hidden /> Resolver
                 </button>
                 <button
                   type="button"
-                  disabled={acaoPendente === aberta.leadId}
+                  disabled={acaoPendente.has(aberta.leadId)}
                   onClick={() => void despachar(aberta.leadId, "adiar")}
-                  className="inline-flex h-[36px] items-center gap-0.5 rounded-full border border-neutral-200 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
+                  className="inline-flex h-[40px] items-center gap-0.5 rounded-full border border-neutral-200 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
                 >
                   <Clock size={15} strokeWidth={1.7} aria-hidden /> Adiar
                 </button>
-                <Link
-                  href={`/chat?lead=${aberta.leadId}`}
-                  title="Etapa, atendente, etiquetas, perdido — na tela completa (até o Bloco B)"
-                  className="inline-flex h-[36px] w-[36px] items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                <button
+                  type="button"
+                  title="Resumo da conversa pela IA"
+                  aria-label="Resumo da conversa pela IA"
+                  disabled={resumindo}
+                  onClick={() => void pedirResumo()}
+                  className={cn(
+                    "inline-flex h-[40px] w-[40px] items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                    resumindo && "animate-pulse text-primary-600",
+                  )}
                 >
-                  <ExternalLink size={16} strokeWidth={1.7} aria-hidden />
-                </Link>
+                  <Sparkles size={16} strokeWidth={1.7} aria-hidden />
+                </button>
+                {conversa?.ferramentas ? (
+                  <FerramentasPalco
+                    leadId={aberta.leadId}
+                    nome={aberta.nome}
+                    ferramentas={conversa.ferramentas}
+                    aoMudar={recarregarConversaAberta}
+                    aoMarcarNaoLida={() => marcarLinhaNaoLida(aberta.leadId)}
+                  />
+                ) : (
+                  <Link
+                    href={`/chat?lead=${aberta.leadId}`}
+                    title="Abrir na tela antiga"
+                    className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  >
+                    <ExternalLink size={16} strokeWidth={1.7} aria-hidden />
+                  </Link>
+                )}
               </div>
             </header>
+
+            {resumo || resumindo ? (
+              <div className="mx-2 mt-1 flex items-start gap-1 rounded-lg border border-neutral-200 border-l-2 border-l-primary-500 bg-neutral-0 px-1.5 py-1 text-sm shadow-sm">
+                <Sparkles
+                  size={14}
+                  strokeWidth={1.7}
+                  aria-hidden
+                  className="mt-0.5 shrink-0 text-primary-600"
+                />
+                <p className={cn("min-w-0", resumo?.erro ? "text-danger" : "text-neutral-800")}>
+                  {resumindo
+                    ? "Resumindo a conversa…"
+                    : (resumo?.texto ?? resumo?.erro)}
+                </p>
+                <button
+                  type="button"
+                  aria-label="Fechar resumo"
+                  onClick={() => setResumo(null)}
+                  className="-my-1 -mr-1 ml-auto inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  <X size={14} strokeWidth={2} aria-hidden />
+                </button>
+              </div>
+            ) : null}
 
             {erroConversa ? (
               <p role="alert" className="m-2 rounded-md border border-danger bg-danger-bg px-1.5 py-1 text-sm text-danger">
@@ -487,6 +669,51 @@ export function AppConversas({
           </>
         )}
       </section>
+
+      <PaletaComandos
+        aberta={paletaAberta}
+        aoFechar={() => setPaletaAberta(false)}
+        temConversa={Boolean(aberta)}
+        comandos={[
+          {
+            grupo: "Esta conversa",
+            itens: [
+              {
+                rotulo: "Resolver e ir para a próxima",
+                tecla: "E",
+                precisaConversa: true,
+                acao: () => {
+                  if (aberta) void despachar(aberta.leadId, "resolver");
+                },
+              },
+              {
+                rotulo: "Adiar até amanhã e ir para a próxima",
+                tecla: "H",
+                precisaConversa: true,
+                acao: () => {
+                  if (aberta) void despachar(aberta.leadId, "adiar");
+                },
+              },
+              {
+                rotulo: "Resumo da conversa pela IA",
+                tecla: "",
+                precisaConversa: true,
+                acao: () => void pedirResumo(),
+              },
+            ],
+          },
+          {
+            grupo: "Ir para",
+            itens: [
+              { rotulo: "Caixa", tecla: "", acao: () => trocarVisao("caixa") },
+              { rotulo: "Aguardando", tecla: "", acao: () => trocarVisao("aguardando") },
+              { rotulo: "Adiadas", tecla: "", acao: () => trocarVisao("adiadas") },
+              { rotulo: "Tudo (acervo e busca)", tecla: "", acao: () => trocarVisao("tudo") },
+              { rotulo: "Próxima da fila", tecla: "J", acao: proxima },
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -557,7 +784,7 @@ function LinhaLista({
             ) : espera ? (
               <span
                 className={cn(
-                  "rounded-full px-1 py-[2px] font-mono text-[11px] font-semibold tabular-nums",
+                  "rounded-full px-1 py-0.5 font-mono text-xs font-semibold tabular-nums",
                   critica
                     ? "bg-danger-bg text-danger"
                     : alta

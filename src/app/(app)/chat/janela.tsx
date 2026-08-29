@@ -23,7 +23,6 @@ import {
   LoaderCircle,
   Paperclip,
   Send,
-  Smile,
   Sparkles,
   SpellCheck,
   TriangleAlert,
@@ -63,13 +62,6 @@ const MAX_ANEXOS = 5;
 const MAX_TAMANHO_ANEXO = 16 * 1024 * 1024; // teto do WhatsApp para mídia
 const MAX_IMAGEM = 5 * 1024 * 1024; // o WhatsApp limita imagem a 5MB
 const LIMIAR_FIM_PX = 80;
-
-const EMOJIS = [
-  "😀", "😂", "😉", "😊", "😍", "🤔", "😅", "😎", "🥳", "😢",
-  "😮", "🙄", "👍", "👎", "🙏", "👏", "🤝", "💪", "🙌", "🤙",
-  "🎉", "🔥", "❤️", "💚", "⭐", "✅", "❌", "⚠️", "⏰", "📄",
-  "📎", "💰", "📈", "📉", "🚀", "☕",
-];
 
 // Mesmo fuso usado no servidor para as chaves de dia dos separadores.
 const FORMATO_DIA = new Intl.DateTimeFormat("pt-BR", {
@@ -198,13 +190,20 @@ const Bolhas = memo(function Bolhas({
                   ) : null}
                   <div
                     className={cn(
-                      "max-w-[75%] rounded-md px-1.5 py-1 shadow-sm",
+                      "max-w-[75%] px-1.5 py-1 shadow-sm",
                       nota
-                        ? "self-end border border-accent-300 bg-accent-100"
+                        ? "self-end rounded-[16px] rounded-br-[4px] border border-accent-300 bg-accent-100"
                         : enviada
-                          ? "self-end border border-primary-100 bg-primary-50"
-                          : "self-start border border-neutral-200 bg-neutral-0",
-                      mensagem.pendente ? "opacity-70" : "",
+                          ? cn(
+                              "self-end rounded-[16px] rounded-br-[4px]",
+                              // Pendente clareia UM passo (não opacity: 70%
+                              // sobre o azul derrubava o texto abaixo de AA).
+                              mensagem.pendente
+                                ? "bg-primary-500"
+                                : "bg-primary-600",
+                            )
+                          : "self-start rounded-[16px] rounded-bl-[4px] border border-neutral-200 bg-neutral-0",
+                      mensagem.pendente && !enviada ? "opacity-70" : "",
                     )}
                   >
                     {nota ? (
@@ -213,7 +212,7 @@ const Bolhas = memo(function Bolhas({
                       </p>
                     ) : null}
                     {automatica ? (
-                      <p className="text-xs text-neutral-400">
+                      <p className="text-xs text-primary-100">
                         automático
                         {mensagem.metadados?.campanha
                           ? ` · ${mensagem.metadados.campanha}`
@@ -223,16 +222,36 @@ const Bolhas = memo(function Bolhas({
                     {anexos.length > 0 ? (
                       <div className="mb-0.5 flex flex-col gap-0.5">
                         {anexos.map((anexo, j) => (
-                          <AnexoMensagem key={j} anexo={anexo} />
+                          <AnexoMensagem
+                            key={j}
+                            anexo={anexo}
+                            sobreEscuro={enviada}
+                          />
                         ))}
                       </div>
                     ) : null}
                     {!soPlaceholder ? (
-                      <p className="text-sm break-words whitespace-pre-wrap text-neutral-800">
+                      <p
+                        className={cn(
+                          "text-sm break-words whitespace-pre-wrap",
+                          enviada ? "text-neutral-0" : "text-neutral-800",
+                        )}
+                      >
                         {mensagem.conteudo}
                       </p>
                     ) : null}
-                    <p className="mt-0.5 flex items-center justify-end gap-0.5 text-right font-mono text-xs text-neutral-400 tabular-nums">
+                    <p
+                      className={cn(
+                        "mt-0.5 flex items-center justify-end gap-0.5 text-right font-mono text-xs tabular-nums",
+                        enviada
+                          ? // Sobre primary-500 (pendente) o primary-100 cai
+                            // para 4,4:1 — o branco segura AA nos dois temas.
+                            mensagem.pendente
+                            ? "text-neutral-0"
+                            : "text-primary-100"
+                          : "text-neutral-400",
+                      )}
+                    >
                       {(enviada || nota) && mensagem.autor
                         ? `${mensagem.autor} · `
                         : ""}
@@ -292,10 +311,29 @@ const assinaturaStore = {
   },
 };
 
-function AnexoMensagem({ anexo }: { anexo: Anexo }) {
+/**
+ * `sobreEscuro`: o anexo está dentro da bolha enviada (fundo primary-600).
+ * O anel de foco padrão é primary-500 — sobre o azul ele fica em 1,4:1, ou
+ * seja, invisível para quem navega por teclado. Lá o anel vira branco.
+ */
+function AnexoMensagem({
+  anexo,
+  sobreEscuro = false,
+}: {
+  anexo: Anexo;
+  sobreEscuro?: boolean;
+}) {
+  const anel = sobreEscuro
+    ? "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-0"
+    : "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500";
   if (anexo.tipo === "image") {
     return (
-      <a href={anexo.url} target="_blank" rel="noreferrer">
+      <a
+        href={anexo.url}
+        target="_blank"
+        rel="noreferrer"
+        className={cn("rounded-md", anel)}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element -- URL externa da mídia, sem otimização do Next */}
         <img
           src={anexo.url}
@@ -306,15 +344,17 @@ function AnexoMensagem({ anexo }: { anexo: Anexo }) {
       </a>
     );
   }
+  // Players nativos também recebem foco por Tab — sem o anel da casa sobra
+  // só o do navegador, que sobre o azul da bolha some.
   if (anexo.tipo === "audio") {
-    return <audio controls src={anexo.url} className="max-w-full" />;
+    return <audio controls src={anexo.url} className={cn("max-w-full", anel)} />;
   }
   if (anexo.tipo === "video") {
     return (
       <video
         controls
         src={anexo.url}
-        className="max-h-[240px] w-auto max-w-full rounded-md"
+        className={cn("max-h-[240px] w-auto max-w-full rounded-md", anel)}
       />
     );
   }
@@ -325,7 +365,10 @@ function AnexoMensagem({ anexo }: { anexo: Anexo }) {
       href={anexo.url}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex max-w-full items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100",
+        anel,
+      )}
     >
       <Paperclip
         size={16}
@@ -338,7 +381,12 @@ function AnexoMensagem({ anexo }: { anexo: Anexo }) {
   );
 }
 
-/** Recibo do WhatsApp: ✓ enviada, ✓✓ entregue, ✓✓ azul lida, alerta falhou. */
+/**
+ * Recibo do WhatsApp: ✓ enviada, ✓✓ entregue, ✓✓ branco lida, alerta falhou.
+ * Só existe em bolha enviada — as cores assumem o fundo primary-600 (o par
+ * com neutral-0/primary-100 segura AA nos dois temas; falha vira chip
+ * danger sobre danger-bg, o único par vermelho legível sobre o azul).
+ */
 function ReciboEnvio({
   status,
   erro,
@@ -350,7 +398,7 @@ function ReciboEnvio({
     return (
       <span
         title={erro ?? "O WhatsApp recusou a mensagem."}
-        className="inline-flex items-center gap-0.5 text-danger"
+        className="inline-flex items-center gap-0.5 rounded-sm bg-danger-bg px-0.5 text-danger"
       >
         <TriangleAlert size={12} strokeWidth={1.5} aria-hidden />
         falhou
@@ -363,7 +411,7 @@ function ReciboEnvio({
         size={14}
         strokeWidth={1.5}
         aria-label="Lida"
-        className="inline text-info"
+        className="inline text-neutral-0"
       />
     );
   }
@@ -373,7 +421,7 @@ function ReciboEnvio({
         size={14}
         strokeWidth={1.5}
         aria-label="Entregue"
-        className="inline text-neutral-400"
+        className="inline text-primary-100"
       />
     );
   }
@@ -383,7 +431,7 @@ function ReciboEnvio({
         size={14}
         strokeWidth={1.5}
         aria-label="Enviada"
-        className="inline text-neutral-400"
+        className="inline text-primary-100"
       />
     );
   }
@@ -398,20 +446,30 @@ function BotaoEnviar({
   nota: boolean;
 }) {
   const { pending } = useFormStatus();
+  const rotulo = nota ? "Salvar nota privada" : "Enviar mensagem";
   return (
     <button
       type="submit"
       disabled={pending || desabilitado}
-      aria-label={nota ? "Salvar nota privada" : "Enviar mensagem"}
+      aria-label={rotulo}
+      title={rotulo}
       className={cn(
-        "inline-flex h-[40px] shrink-0 items-center gap-0.5 rounded-md px-2 text-sm font-medium text-neutral-0 transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60",
+        "inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-full text-neutral-0 transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60",
         nota
           ? "bg-accent-700 hover:bg-accent-700/90"
           : "bg-primary-600 hover:bg-primary-700",
       )}
     >
-      <Send size={16} strokeWidth={1.5} aria-hidden />
-      {pending ? "…" : nota ? "Salvar nota" : "Enviar"}
+      {pending ? (
+        <LoaderCircle
+          size={18}
+          strokeWidth={1.5}
+          aria-hidden
+          className="animate-spin"
+        />
+      ) : (
+        <Send size={18} strokeWidth={1.5} aria-hidden />
+      )}
     </button>
   );
 }
@@ -437,10 +495,16 @@ function BannerJanela({ restanteInicialMs }: { restanteInicialMs: number }) {
 
   const restanteMs = restanteInicialMs - tique * 60_000;
   if (restanteMs <= 0) {
+    // Pílula com o par semântico da casa (warning sobre warning-bg), o mesmo
+    // dos badges de status. Mede 3,5:1 no tema claro — dívida do design
+    // system, não desta tela: mexer no token afeta todos os badges do app.
     return (
-      <p className="rounded-md bg-warning-bg px-1.5 py-0.5 text-xs font-medium text-warning">
-        Janela de 24h fechada — mensagem livre não chega ao lead. Use um
-        template.
+      <p className="inline-flex items-center gap-1 self-start rounded-full bg-warning-bg px-1 py-0.5 text-xs font-medium text-warning">
+        <span
+          aria-hidden
+          className="h-[8px] w-[8px] shrink-0 rounded-full bg-warning"
+        />
+        Janela de 24h fechada — só template chega ao lead.
       </p>
     );
   }
@@ -448,8 +512,12 @@ function BannerJanela({ restanteInicialMs }: { restanteInicialMs: number }) {
   const horas = Math.floor(restanteMs / 3_600_000);
   const minutos = Math.floor((restanteMs % 3_600_000) / 60_000);
   return (
-    <p className="px-0.5 text-xs text-neutral-600">
-      Janela do WhatsApp aberta — fecha em{" "}
+    <p className="flex items-center gap-1 px-0.5 text-xs text-neutral-600">
+      <span
+        aria-hidden
+        className="h-[8px] w-[8px] shrink-0 rounded-full bg-success"
+      />
+      Janela aberta — fecha em{" "}
       <span className="font-mono tabular-nums">
         {horas > 0
           ? `${horas}h${String(minutos).padStart(2, "0")}`
@@ -536,13 +604,24 @@ export function Janela({
   const [idxSel, setIdxSel] = useState(0);
   const [barraSuprimida, setBarraSuprimida] = useState(false);
 
-  const [emojiAberto, setEmojiAberto] = useState(false);
-
   // Anexos: o estado espelha o input de arquivo (via DataTransfer), então o
   // form envia exatamente o que os chips mostram.
   const [arquivos, setArquivos] = useState<File[]>([]);
   const [avisoArquivo, setAvisoArquivo] = useState<string | null>(null);
   const inputArquivosRef = useRef<HTMLInputElement>(null);
+
+  // IA (sugerir/corrigir) e erro de envio: declarados aqui em cima porque o
+  // bloco de troca de lead (mais abaixo, durante o render) limpa os três.
+  const [iaOcupada, setIaOcupada] = useState<"sugerir" | "corrigir" | null>(
+    null,
+  );
+  const [erroIa, setErroIa] = useState<string | null>(null);
+  // O menu único de IA (sugerir/corrigir) — um botão só na barra.
+  const [iaAberta, setIaAberta] = useState(false);
+  // O erro de envio mora num estado próprio (não direto no estado da action):
+  // a action retém o erro até o PRÓXIMO envio concluir, e o slot único de
+  // erro mostraria o erro velho por cima de avisos novos de anexo/IA.
+  const [erroEnvio, setErroEnvio] = useState<string | null>(null);
 
   // Rolagem: só cola no fim se o atendente já estava perto do fim.
   const pertoDoFimRef = useRef(true);
@@ -584,6 +663,10 @@ export function Janela({
   if (leadId !== leadAnterior) {
     setLeadAnterior(leadId);
     setConfirmadasLocais([]);
+    // Erro e avisos são da conversa anterior — não podem vazar para esta.
+    setErroEnvio(null);
+    setAvisoArquivo(null);
+    setErroIa(null);
   }
 
   useEffect(() => {
@@ -618,6 +701,7 @@ export function Janela({
     if (estado.ok) {
       setBackupEnvio(null);
       setAvisoArquivo(null);
+      setErroEnvio(null);
       aoEnviarComSucesso?.();
       if (estado.interacao) {
         // O eco do Realtime desta mensagem não custa refresh…
@@ -635,10 +719,13 @@ export function Janela({
           atuais.some((m) => m.id === nova.id) ? atuais : [...atuais, nova],
         );
       }
-    } else if (estado.erro && backupEnvio) {
-      setTexto(backupEnvio.texto);
-      setArquivos(backupEnvio.arquivos);
-      setBackupEnvio(null);
+    } else if (estado.erro) {
+      setErroEnvio(estado.erro);
+      if (backupEnvio) {
+        setTexto(backupEnvio.texto);
+        setArquivos(backupEnvio.arquivos);
+        setBackupEnvio(null);
+      }
     }
   }
 
@@ -746,11 +833,6 @@ export function Janela({
   // IA: sugestão lê a conversa e propõe a próxima mensagem; correção arruma a
   // ortografia do que foi digitado. Nos dois casos o texto só CAI NA CAIXA —
   // nada vai ao lead sem o atendente revisar e apertar Enviar.
-  const [iaOcupada, setIaOcupada] = useState<"sugerir" | "corrigir" | null>(
-    null,
-  );
-  const [erroIa, setErroIa] = useState<string | null>(null);
-
   const aplicarTextoIa = (valor: string) => {
     atualizarTexto(valor);
     textareaRef.current?.focus();
@@ -758,6 +840,7 @@ export function Janela({
 
   const pedirSugestao = () => {
     setErroIa(null);
+    setAvisoArquivo(null); // aviso velho não pode mascarar o erro da IA
     setIaOcupada("sugerir");
     sugerirResposta(leadId)
       .then((r) => {
@@ -770,6 +853,7 @@ export function Janela({
 
   const pedirCorrecao = () => {
     setErroIa(null);
+    setAvisoArquivo(null); // aviso velho não pode mascarar o erro da IA
     setIaOcupada("corrigir");
     corrigirTexto(texto)
       .then((r) => {
@@ -784,14 +868,6 @@ export function Janela({
     const dt = new DataTransfer();
     dt.items.add(arquivo);
     adicionarArquivos(dt.files);
-  };
-
-  const inserirEmoji = (emoji: string) => {
-    const area = textareaRef.current;
-    const posicao = area?.selectionStart ?? texto.length;
-    atualizarTexto(texto.slice(0, posicao) + emoji + texto.slice(posicao));
-    setEmojiAberto(false);
-    area?.focus();
   };
 
   const adicionarArquivos = useCallback((novos: FileList | null) => {
@@ -897,6 +973,12 @@ export function Janela({
       ? texto.trim().length > 0
       : !janelaFechada && (texto.trim().length > 0 || arquivos.length > 0));
 
+  // Um slot de erro só: três parágrafos empilhados brigavam por atenção.
+  // Aviso de anexo primeiro (é sempre reação ao ÚLTIMO gesto), depois IA,
+  // depois o erro de envio — que é estado próprio zerado a cada envio novo,
+  // para um erro velho nunca mascarar um aviso fresco.
+  const erroCompositor = avisoArquivo || erroIa || erroEnvio || null;
+
   const aoRolar = () => {
     const caixa = caixaRef.current;
     if (!caixa) return;
@@ -916,6 +998,11 @@ export function Janela({
   const aoEnviar = async (formData: FormData) => {
     // Anexos da pronta em voo: enviar agora mandaria o texto sem eles.
     if (baixandoPronta) return;
+    // Envio novo zera os avisos da rodada anterior — o que aparecer a partir
+    // daqui é deste envio.
+    setErroEnvio(null);
+    setAvisoArquivo(null);
+    setErroIa(null);
     const textoEnvio = String(formData.get("texto") ?? "").trim();
     // O arquivo NÃO viaja no corpo da requisição (a Vercel corta em ~4,5MB e
     // a página quebrava): sobe direto do navegador ao Storage por URL
@@ -1088,10 +1175,13 @@ export function Janela({
           </div>
 
           {modo === "responder" && marketingBloqueado ? (
-            <p className="rounded-md bg-danger-bg px-1.5 py-0.5 text-xs font-medium text-danger">
-              Este cliente desativou mensagens de marketing no WhatsApp.
-              Template de marketing não chega — use template de utilidade, ou
-              responda dentro da janela de 24h depois que ele escrever.
+            <p className="inline-flex items-center gap-1 self-start rounded-full bg-danger-bg px-1 py-0.5 text-xs font-medium text-danger">
+              <span
+                aria-hidden
+                className="h-[8px] w-[8px] shrink-0 rounded-full bg-danger"
+              />
+              Cliente bloqueou marketing no WhatsApp — use template de
+              utilidade ou responda na janela de 24h.
             </p>
           ) : null}
 
@@ -1100,15 +1190,21 @@ export function Janela({
           ) : null}
 
           {modo === "responder" && restanteJanela === null ? (
-            <p className="rounded-md bg-warning-bg px-1.5 py-0.5 text-xs font-medium text-warning">
-              Este lead ainda não mandou mensagem — a janela de 24h nunca
-              abriu, e mensagem livre não chega. Dispare um template para
-              iniciar a conversa.
+            <p className="inline-flex items-center gap-1 self-start rounded-full bg-warning-bg px-1 py-0.5 text-xs font-medium text-warning">
+              <span
+                aria-hidden
+                className="h-[8px] w-[8px] shrink-0 rounded-full bg-warning"
+              />
+              Lead nunca respondeu — a janela de 24h não abriu; só template
+              chega.
             </p>
           ) : null}
 
           {painelAberto ? (
-            <div className="absolute bottom-[calc(100%+4px)] left-1.5 z-30 w-[320px] rounded-[10px] border border-neutral-200 bg-neutral-0 shadow-lg">
+            <div
+              data-popover="prontas"
+              className="absolute bottom-[calc(100%+4px)] left-1.5 z-30 w-[320px] rounded-lg border border-neutral-200 bg-neutral-0 shadow-lg"
+            >
               {prontasAbertas ? (
                 <div className="border-b border-neutral-200 p-1">
                   <label htmlFor="busca-prontas" className="sr-only">
@@ -1207,34 +1303,6 @@ export function Janela({
             </div>
           ) : null}
 
-          {emojiAberto ? (
-            <>
-              <button
-                type="button"
-                aria-label="Fechar emojis"
-                tabIndex={-1}
-                onClick={() => setEmojiAberto(false)}
-                className="fixed inset-0 z-20 cursor-default"
-              />
-              <div
-                role="group"
-                aria-label="Escolher emoji"
-                className="absolute bottom-[calc(100%+4px)] left-1.5 z-30 grid w-[288px] grid-cols-9 gap-0.5 rounded-[10px] border border-neutral-200 bg-neutral-0 p-1 shadow-lg"
-              >
-                {EMOJIS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => inserirEmoji(emoji)}
-                    className="inline-flex h-[28px] w-[28px] items-center justify-center rounded-sm text-base hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-primary-500"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : null}
-
           {arquivos.length > 0 && modo === "responder" ? (
             <div className="flex flex-wrap gap-0.5">
               {arquivos.map((arquivo, i) => (
@@ -1310,6 +1378,14 @@ export function Janela({
                 fecharPainel();
                 return;
               }
+              if (e.key === "Escape" && iaAberta) {
+                e.preventDefault();
+                // Consome: senão o Esc seguia e fechava o painel inteiro da
+                // /hoje por baixo do menu.
+                e.stopPropagation();
+                setIaAberta(false);
+                return;
+              }
               // No teclado do iPhone não existe Shift+Enter: lá o return
               // quebra linha e o envio é só pelo botão. Envio pendente
               // segura o Enter — segurar a tecla duplicava a mensagem.
@@ -1328,7 +1404,7 @@ export function Janela({
                   : 'Escreva a mensagem… ("/" para prontas, Enter envia)'
             }
             className={cn(
-              "field-sizing-content max-h-[240px] min-h-[88px] w-full resize-y rounded-md border px-1.5 py-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+              "field-sizing-content max-h-[240px] min-h-[88px] w-full resize-y rounded-lg border px-1.5 py-1 text-sm text-neutral-800 placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
               modo === "nota"
                 ? "border-accent-300 bg-accent-100/60"
                 : "border-neutral-300 bg-neutral-0",
@@ -1342,7 +1418,7 @@ export function Janela({
               aria-expanded={painelAberto}
               title='Mensagens prontas — atalho "/"'
               onClick={() => {
-                setEmojiAberto(false);
+                setIaAberta(false);
                 if (painelAberto) fecharPainel();
                 else {
                   setProntasAbertas(true);
@@ -1354,71 +1430,148 @@ export function Janela({
               <Zap size={16} strokeWidth={1.5} aria-hidden />
             </button>
 
-            <button
-              type="button"
-              aria-label="Inserir emoji"
-              aria-expanded={emojiAberto}
-              title="Emoji"
-              onClick={() => {
-                setProntasAbertas(false);
-                setEmojiAberto((v) => !v);
+            {/* IA num botão só: o menu escolhe entre sugerir e corrigir —
+                dois botões de faísca lado a lado confundiam a equipe. */}
+            <span
+              className="relative"
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && iaAberta) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIaAberta(false);
+                  textareaRef.current?.focus();
+                }
               }}
-              className={cn(BOTAO_FERRAMENTA, "hidden sm:inline-flex")}
+              onBlur={(e) => {
+                // Tab para fora fecha o menu: aberto e sem foco dentro, ele
+                // ficava pendurado na tela sem tecla que o alcançasse.
+                if (iaAberta && !e.currentTarget.contains(e.relatedTarget)) {
+                  setIaAberta(false);
+                }
+              }}
             >
-              <Smile size={16} strokeWidth={1.5} aria-hidden />
-            </button>
+              <button
+                type="button"
+                aria-label="Assistente de IA"
+                aria-expanded={iaAberta}
+                title="IA — sugerir resposta ou corrigir ortografia (nada sai sem você revisar)"
+                disabled={iaOcupada !== null}
+                onClick={() => {
+                  // fecharPainel também some com o painel aberto pela "/".
+                  if (painelAberto) fecharPainel();
+                  setIaAberta((v) => !v);
+                }}
+                className={cn(
+                  BOTAO_FERRAMENTA,
+                  "disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
+                )}
+              >
+                {iaOcupada !== null ? (
+                  <LoaderCircle
+                    size={16}
+                    strokeWidth={1.5}
+                    aria-hidden
+                    className="animate-spin"
+                  />
+                ) : (
+                  <Sparkles size={16} strokeWidth={1.5} aria-hidden />
+                )}
+              </button>
 
-            <button
-              type="button"
-              aria-label="Sugerir resposta com IA"
-              title={
-                modo === "nota"
-                  ? "Sugestão só em resposta ao lead"
-                  : janelaFechada
-                    ? "Janela de 24h fechada — texto livre não chega; use um template"
-                    : "Sugerir resposta com IA — lê a conversa e escreve um rascunho para você revisar"
-              }
-              disabled={modo === "nota" || janelaFechada || iaOcupada !== null}
-              onClick={pedirSugestao}
-              className={cn(
-                BOTAO_FERRAMENTA,
-                "disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
-              )}
-            >
-              {iaOcupada === "sugerir" ? (
-                <LoaderCircle
-                  size={16}
-                  strokeWidth={1.5}
-                  aria-hidden
-                  className="animate-spin"
-                />
-              ) : (
-                <Sparkles size={16} strokeWidth={1.5} aria-hidden />
-              )}
-            </button>
-
-            <button
-              type="button"
-              aria-label="Corrigir ortografia com IA"
-              title="Corrigir ortografia com IA — arruma acentos e erros sem mudar o que você escreveu"
-              disabled={texto.trim().length === 0 || iaOcupada !== null}
-              onClick={pedirCorrecao}
-              className={cn(
-                BOTAO_FERRAMENTA,
-                "disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-neutral-0",
-              )}
-            >
-              {iaOcupada === "corrigir" ? (
-                <LoaderCircle
-                  size={16}
-                  strokeWidth={1.5}
-                  aria-hidden
-                  className="animate-spin"
-                />
-              ) : (
-                <SpellCheck size={16} strokeWidth={1.5} aria-hidden />
-              )}
-            </button>
+              {iaAberta ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Fechar menu de IA"
+                    tabIndex={-1}
+                    onClick={() => {
+                      setIaAberta(false);
+                      // O foco volta para a caixa — solto no body, a próxima
+                      // letra digitada viraria atalho do palco (E resolve!).
+                      textareaRef.current?.focus();
+                    }}
+                    className="fixed inset-0 z-20 cursor-default"
+                  />
+                  <div
+                    role="menu"
+                    data-popover="ia"
+                    aria-label="Assistente de IA"
+                    className="absolute bottom-[calc(100%+4px)] left-0 z-30 w-[288px] rounded-lg border border-neutral-200 bg-neutral-0 p-0.5 shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      // Sem isto o mousedown tira o foco do gatilho, o onBlur
+                      // fecha o menu e o clique morre antes do onClick
+                      // (Safari e Firefox no macOS).
+                      onMouseDown={(e) => e.preventDefault()}
+                      disabled={modo === "nota" || janelaFechada}
+                      onClick={() => {
+                        setIaAberta(false);
+                        textareaRef.current?.focus();
+                        pedirSugestao();
+                      }}
+                      className="group flex w-full items-start gap-1 rounded-md px-1 py-1 text-left transition-colors duration-[120ms] hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:hover:bg-neutral-0"
+                    >
+                      <Sparkles
+                        size={16}
+                        strokeWidth={1.5}
+                        aria-hidden
+                        className="mt-[2px] shrink-0 text-neutral-600 group-disabled:text-neutral-400"
+                      />
+                      <span className="min-w-0">
+                        {/* Desativado apaga o TÍTULO, não a frase que explica
+                            o porquê — era ela que sumia com o opacity. */}
+                        <span className="block text-sm font-medium text-neutral-800 group-disabled:text-neutral-400">
+                          Sugerir resposta
+                        </span>
+                        <span className="block text-xs text-neutral-600">
+                          {modo === "nota"
+                            ? "Só em resposta ao lead."
+                            : janelaFechada
+                              ? "Janela de 24h fechada — use um template."
+                              : "Lê a conversa e escreve um rascunho para você revisar."}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      // Sem isto o mousedown tira o foco do gatilho, o onBlur
+                      // fecha o menu e o clique morre antes do onClick
+                      // (Safari e Firefox no macOS).
+                      onMouseDown={(e) => e.preventDefault()}
+                      disabled={texto.trim().length === 0}
+                      onClick={() => {
+                        setIaAberta(false);
+                        textareaRef.current?.focus();
+                        pedirCorrecao();
+                      }}
+                      className="group flex w-full items-start gap-1 rounded-md px-1 py-1 text-left transition-colors duration-[120ms] hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:hover:bg-neutral-0"
+                    >
+                      <SpellCheck
+                        size={16}
+                        strokeWidth={1.5}
+                        aria-hidden
+                        className="mt-[2px] shrink-0 text-neutral-600 group-disabled:text-neutral-400"
+                      />
+                      <span className="min-w-0">
+                        {/* Desativado apaga o TÍTULO, não a frase que explica
+                            o porquê — era ela que sumia com o opacity. */}
+                        <span className="block text-sm font-medium text-neutral-800 group-disabled:text-neutral-400">
+                          Corrigir ortografia
+                        </span>
+                        <span className="block text-xs text-neutral-600">
+                          {texto.trim().length === 0
+                            ? "Escreva algo primeiro."
+                            : "Arruma acentos e erros sem mudar o que você escreveu."}
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </span>
 
             <GravadorAudio
               desabilitado={modo === "nota" || janelaFechada}
@@ -1459,26 +1612,37 @@ export function Janela({
             />
 
             <span className="ml-auto flex items-center gap-1">
-              {modo === "responder" ? (
-                <BotaoTemplates leadId={leadId} templates={templates} />
-              ) : null}
-              <BotaoEnviar desabilitado={!podeEnviar} nota={modo === "nota"} />
+              {/* Janela fechada: só template chega — ele assume o lugar do
+                  Enviar como a ação principal, em vez de deixar um Enviar
+                  morto ao lado. Sem template cadastrado (Meta fora/sem
+                  config), o Enviar desabilitado volta a ancorar a região. */}
+              {janelaFechada ? (
+                templates.length > 0 ? (
+                  <BotaoTemplates
+                    leadId={leadId}
+                    templates={templates}
+                    principal
+                  />
+                ) : (
+                  <BotaoEnviar desabilitado nota={false} />
+                )
+              ) : (
+                <>
+                  {modo === "responder" ? (
+                    <BotaoTemplates leadId={leadId} templates={templates} />
+                  ) : null}
+                  <BotaoEnviar
+                    desabilitado={!podeEnviar}
+                    nota={modo === "nota"}
+                  />
+                </>
+              )}
             </span>
           </div>
 
-          {erroIa ? (
+          {erroCompositor ? (
             <p role="alert" className="text-sm text-danger">
-              {erroIa}
-            </p>
-          ) : null}
-          {avisoArquivo ? (
-            <p role="alert" className="text-sm text-danger">
-              {avisoArquivo}
-            </p>
-          ) : null}
-          {estado.erro ? (
-            <p role="alert" className="text-sm text-danger">
-              {estado.erro}
+              {erroCompositor}
             </p>
           ) : null}
         </form>

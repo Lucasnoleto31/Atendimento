@@ -88,6 +88,16 @@ export async function sonecarConversa(
   return resultado?.erro ? { erro: resultado.erro } : { ok: true };
 }
 
+export type FerramentasDaConversa = {
+  etapaId: string | null;
+  responsavelId: string | null;
+  etapas: { id: string; nome: string }[];
+  equipe: { id: string; nome: string }[];
+  etiquetas: { id: string; nome: string; cor: string | null }[];
+  etiquetasLead: string[];
+  leadPerdido: boolean;
+};
+
 export type ConversaDoPainel = {
   nome: string;
   temConversa: boolean;
@@ -98,6 +108,9 @@ export type ConversaDoPainel = {
   marketingBloqueado: boolean;
   hojeChave: string;
   ontemChave: string;
+  /** O que o menu "⋯" do palco (/conversas, Bloco B) precisa. Opcional:
+   *  bancos sem alguma migração degradam sem quebrar o painel da /hoje. */
+  ferramentas?: FerramentasDaConversa;
 };
 
 /**
@@ -111,32 +124,101 @@ export async function carregarConversa(
   if (!perfil) return { erro: "Sessão expirada." };
 
   const supabase = await createClient();
-  const [{ data: lead }, { data: interacoes }, { data: padroes }, templates] =
-    await Promise.all([
-      supabase
+  const [
+    leadR,
+    { data: interacoes },
+    padroesR,
+    templates,
+    etapasR,
+    equipeR,
+    etiquetasR,
+    vinculosR,
+  ] = await Promise.all([
+    (async () => {
+      const cheio = await supabase
         .from("leads")
-        .select("id, nome, ultima_interacao_em, marketing_bloqueado_em")
-        .eq("id", leadId)
-        .maybeSingle(),
-      supabase
-        .from("lead_interactions")
         .select(
-          "id, tipo, conteudo, criado_em, metadados, autor:profiles(nome)",
+          "id, nome, ultima_interacao_em, marketing_bloqueado_em, status, stage_id, responsavel_id",
         )
-        .eq("lead_id", leadId)
-        .in("tipo", ["mensagem_recebida", "mensagem_enviada", "nota"])
-        .order("criado_em", { ascending: false })
-        .limit(200),
-      supabase
-        .from("quick_replies")
-        .select("id, titulo, corpo")
-        .order("titulo"),
-      // Sem a Meta configurada a janela abre sem templates — enviar avisa lá.
-      (metaConfigurada()
-        ? listarTemplatesMeta()
-        : Promise.resolve([] as TemplateWhatsapp[])
-      ).catch(() => [] as TemplateWhatsapp[]),
-    ]);
+        .eq("id", leadId)
+        .maybeSingle();
+      // Coluna ausente (banco sem alguma migração): a conversa continua
+      // abrindo com o essencial, e o menu "⋯" some — melhor sem menu do que
+      // com um menu mostrando etapa/atendente vazios que não são verdade.
+      if (cheio.error) {
+        const minimo = await supabase
+          .from("leads")
+          .select("id, nome, ultima_interacao_em, marketing_bloqueado_em")
+          .eq("id", leadId)
+          .maybeSingle();
+        return { ...minimo, degradado: true };
+      }
+      return { ...cheio, degradado: false };
+    })(),
+    supabase
+      .from("lead_interactions")
+      .select(
+        "id, tipo, conteudo, criado_em, metadados, autor:profiles(nome)",
+      )
+      .eq("lead_id", leadId)
+      .in("tipo", ["mensagem_recebida", "mensagem_enviada", "nota"])
+      .order("criado_em", { ascending: false })
+      .limit(200),
+    // Anexos das prontas (0060); sem a migração, formato antigo.
+    supabase
+      .from("quick_replies")
+      .select("id, titulo, corpo, anexos")
+      .eq("ativo", true)
+      .order("titulo")
+      .then((r) =>
+        r.error
+          ? supabase
+              .from("quick_replies")
+              .select("id, titulo, corpo")
+              .eq("ativo", true)
+              .order("titulo")
+          : r,
+      ),
+    // Sem a Meta configurada a janela abre sem templates — enviar avisa lá.
+    (metaConfigurada()
+      ? listarTemplatesMeta()
+      : Promise.resolve([] as TemplateWhatsapp[])
+    ).catch(() => [] as TemplateWhatsapp[]),
+    supabase
+      .from("pipeline_stages")
+      .select("id, nome, pipeline:pipelines!inner(padrao)")
+      .eq("pipeline.padrao", true)
+      .order("ordem"),
+    supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome"),
+    supabase.from("tags").select("id, nome, cor").eq("ativo", true).order("nome"),
+    supabase.from("lead_tags").select("tag_id").eq("lead_id", leadId),
+  ]);
+  const lead = leadR.data as
+    | {
+        id: string;
+        nome: string;
+        ultima_interacao_em: string | null;
+        marketing_bloqueado_em: string | null;
+        status?: string;
+        stage_id?: string | null;
+        responsavel_id?: string | null;
+      }
+    | null;
+  const padroes = padroesR.data;
+
+  // O menu "⋯" só aparece se TODAS as consultas que o alimentam vieram —
+  // uma delas falhando (migração faltando, RLS) devolveria um menu com
+  // listas vazias, que o atendente lê como "não há etapa/etiqueta".
+  const ferramentasIntegras =
+    !leadR.degradado &&
+    !etapasR.error &&
+    !equipeR.error &&
+    !etiquetasR.error &&
+    !vinculosR.error;
+  const etapas = etapasR.data;
+  const equipe = equipeR.data;
+  const etiquetas = etiquetasR.data;
+  const vinculos = vinculosR.data;
 
   if (!lead) return { erro: "Lead não encontrado." };
 
@@ -201,5 +283,26 @@ export async function carregarConversa(
     marketingBloqueado: lead.marketing_bloqueado_em !== null,
     hojeChave: formatoDia.format(new Date()),
     ontemChave: formatoDia.format(new Date(Date.now() - 86_400_000)),
+    // Sem os dados completos o menu "⋯" não tem como dizer a verdade sobre
+    // etapa/atendente/etiquetas — some, e o palco cai no link da tela antiga.
+    ferramentas: !ferramentasIntegras
+      ? undefined
+      : {
+          etapaId: lead.stage_id ?? null,
+          responsavelId: lead.responsavel_id ?? null,
+          etapas: ((etapas ?? []) as { id: string; nome: string }[]).map(
+            (e) => ({ id: e.id, nome: e.nome }),
+          ),
+          equipe: (equipe ?? []) as { id: string; nome: string }[],
+          etiquetas: (etiquetas ?? []) as {
+            id: string;
+            nome: string;
+            cor: string | null;
+          }[],
+          etiquetasLead: ((vinculos ?? []) as { tag_id: string }[]).map(
+            (v) => v.tag_id,
+          ),
+          leadPerdido: lead.status === "perdido",
+        },
   };
 }

@@ -30,9 +30,12 @@ function BotaoEnviarTemplate() {
 export function BotaoTemplates({
   leadId,
   templates,
+  principal = false,
 }: {
   leadId: string;
   templates: TemplateWhatsapp[];
+  /** Janela de 24h fechada: o template é a ÚNICA saída e vira o primário. */
+  principal?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const [indice, setIndice] = useState<number | null>(null);
@@ -240,11 +243,18 @@ export function BotaoTemplates({
         ref={gatilhoRef}
         type="button"
         onClick={() => setAberto(true)}
-        className="inline-flex h-[40px] shrink-0 items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+        className={cn(
+          "inline-flex h-[40px] shrink-0 items-center gap-0.5 rounded-md px-1.5 text-sm font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+          principal
+            ? "bg-primary-600 px-2 text-neutral-0 hover:bg-primary-700"
+            : "border border-neutral-300 bg-neutral-0 text-neutral-800 hover:bg-neutral-100",
+        )}
         title="Enviar template do WhatsApp (vale fora da janela de 24h)"
       >
         <FileText size={16} strokeWidth={1.5} aria-hidden />
-        <span className="hidden sm:inline">Template</span>
+        <span className={principal ? undefined : "hidden sm:inline"}>
+          {principal ? "Enviar template" : "Template"}
+        </span>
       </button>
 
       {aberto ? createPortal(dialogo, document.body) : null}
