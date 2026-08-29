@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import Link from "next/link";
 import {
   ArrowDown,
@@ -10,6 +16,7 @@ import {
   ExternalLink,
   Inbox,
   ListFilter,
+  PanelRight,
   RotateCcw,
   Search,
   Sparkles,
@@ -25,6 +32,7 @@ import {
 import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
 import { resumirConversa } from "@/app/(app)/chat/ia";
 import { FerramentasPalco } from "./ferramentas-palco";
+import { PainelContexto } from "./contexto";
 import { PaletaComandos } from "./paleta";
 import {
   carregarListaConversas,
@@ -72,6 +80,16 @@ function iniciaisDe(nome: string): string {
   const p = nome.trim().split(/\s+/);
   return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "?";
 }
+
+// xl (1280px) é onde cabem as três colunas — abaixo disso o contexto vira
+// folha. Lido do cliente para não montar as duas versões ao mesmo tempo.
+const CONSULTA_XL = "(min-width: 1280px)";
+function assinarXl(avisar: () => void) {
+  const mq = window.matchMedia(CONSULTA_XL);
+  mq.addEventListener("change", avisar);
+  return () => mq.removeEventListener("change", avisar);
+}
+const lerXl = () => window.matchMedia(CONSULTA_XL).matches;
 
 function rotuloEspera(horas: number | null): string | null {
   if (horas === null) return null;
@@ -132,6 +150,18 @@ export function AppConversas({
   const [resumo, setResumo] = useState<{ texto?: string; erro?: string } | null>(null);
   const [resumindo, setResumindo] = useState(false);
   const [paletaAberta, setPaletaAberta] = useState(false);
+  // Painel de contexto: no desktop é uma coluna fixa (o atendente quer ver
+  // giro e combinados enquanto escreve); abaixo de xl vira folha por cima.
+  const [painelAberto, setPainelAberto] = useState(false);
+  const telaLarga = useSyncExternalStore(assinarXl, lerXl, () => false);
+  const [sinalContexto, setSinalContexto] = useState(0);
+  // Devolve o foco ao botão que abriu a folha — solto no body, a próxima
+  // letra digitada viraria atalho do palco (E resolve a conversa).
+  const gatilhoPainelRef = useRef<HTMLButtonElement>(null);
+  const fecharPainel = useCallback(() => {
+    setPainelAberto(false);
+    gatilhoPainelRef.current?.focus();
+  }, []);
 
   const pedidoRef = useRef(0);
   // Contadores de corrida: resposta que chega depois de outra troca é lixo.
@@ -284,7 +314,10 @@ export function AppConversas({
       if (e.key === "Escape") {
         // Um painel interno (prontas da Janela, menu ⋯) que já tratou o Esc
         // chega aqui consumido — não fecha a paleta por cima dele.
-        if (!e.defaultPrevented) setPaletaAberta(false);
+        if (e.defaultPrevented) return;
+        // A folha de contexto é o que está por cima: fecha ela primeiro.
+        if (painelAberto && !paletaAberta) fecharPainel();
+        else setPaletaAberta(false);
         return;
       }
       if (paletaAberta || temModal) return;
@@ -325,7 +358,7 @@ export function AppConversas({
     };
     window.addEventListener("keydown", aoTeclar);
     return () => window.removeEventListener("keydown", aoTeclar);
-  }, [proxima, paletaAberta, aberta, despachar]);
+  }, [proxima, paletaAberta, painelAberto, fecharPainel, aberta, despachar]);
 
   const pedirResumo = useCallback(async () => {
     if (!aberta || resumindo) return;
@@ -359,6 +392,9 @@ export function AppConversas({
     const r = await carregarConversa(leadDaRecarga);
     if (abertaRef.current?.leadId !== leadDaRecarga) return;
     if (!("erro" in r)) setConversa(r);
+    // O painel de contexto mostra etapa e atendente: sem este sinal ele
+    // ficaria com o valor velho ao lado do menu que acabou de mudá-lo.
+    setSinalContexto((n) => n + 1);
   }, [aberta]);
 
   /** O menu ⋯ marcou "não lida": a linha volta a ficar em negrito na hora. */
@@ -450,7 +486,7 @@ export function AppConversas({
             <button
               type="button"
               onClick={trocarEscopo}
-              className="ml-auto inline-flex h-[28px] items-center rounded-md border border-neutral-200 bg-neutral-0 px-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              className="ml-auto inline-flex h-[40px] items-center rounded-md border border-neutral-200 bg-neutral-0 px-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
             >
               {escopo === "todas" ? "Todas" : "Minhas"}
             </button>
@@ -510,7 +546,7 @@ export function AppConversas({
           <button
             type="button"
             onClick={proxima}
-            className="inline-flex h-[32px] items-center gap-0.5 rounded-md bg-primary-50 px-1.5 text-xs font-semibold text-primary-600 hover:bg-primary-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            className="inline-flex h-[40px] items-center gap-0.5 rounded-md bg-primary-50 px-1.5 text-xs font-semibold text-primary-600 hover:bg-primary-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
           >
             Próxima <ArrowDown size={13} strokeWidth={2} aria-hidden />
             <kbd className="font-mono text-[10px] font-normal opacity-60">J</kbd>
@@ -577,6 +613,21 @@ export function AppConversas({
                   className="inline-flex h-[40px] items-center gap-0.5 rounded-full border border-neutral-200 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
                 >
                   <Clock size={15} strokeWidth={1.7} aria-hidden /> Adiar
+                </button>
+                <button
+                  ref={gatilhoPainelRef}
+                  type="button"
+                  title="Contexto do lead"
+                  aria-label="Contexto do lead"
+                  aria-expanded={painelAberto}
+                  onClick={() => setPainelAberto((v) => !v)}
+                  className={cn(
+                    "inline-flex h-[40px] w-[40px] items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 xl:hidden",
+                    painelAberto && "bg-neutral-100 text-neutral-800",
+                  )}
+                  hidden={telaLarga}
+                >
+                  <PanelRight size={16} strokeWidth={1.7} aria-hidden />
                 </button>
                 <button
                   type="button"
@@ -670,6 +721,44 @@ export function AppConversas({
         )}
       </section>
 
+      {/* ── contexto ── coluna fixa no desktop largo; folha por cima abaixo
+          de xl, onde não cabem três colunas. */}
+      {aberta ? (
+        <>
+          {telaLarga ? (
+            <aside className="w-[320px] shrink-0 border-l border-neutral-200">
+              <PainelContexto
+                key={aberta.leadId}
+                leadId={aberta.leadId}
+                nome={aberta.nome}
+                sinalRecarga={sinalContexto}
+              />
+            </aside>
+          ) : null}
+          {painelAberto && !telaLarga ? (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Contexto de ${aberta.nome}`}
+              className="fixed inset-0 z-40 flex justify-end bg-overlay"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) fecharPainel();
+              }}
+            >
+              <div className="h-full w-full max-w-[360px] border-l border-neutral-200 shadow-lg">
+                <PainelContexto
+                  key={aberta.leadId}
+                  leadId={aberta.leadId}
+                  nome={aberta.nome}
+                  sinalRecarga={sinalContexto}
+                  aoFechar={fecharPainel}
+                />
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
       <PaletaComandos
         aberta={paletaAberta}
         aoFechar={() => setPaletaAberta(false)}
@@ -738,20 +827,119 @@ function LinhaLista({
   const espera = rotuloEspera(linha.esperaHoras);
   const critica = (linha.esperaHoras ?? 0) >= 24;
   const alta = !critica && (linha.esperaHoras ?? 0) >= 0.25;
+
+  // Gesto do celular: arrastar a linha para a direita resolve, para a
+  // esquerda adia — os dois gestos que a equipe faz o dia inteiro e que no
+  // toque custavam mirar um alvo de 32px. Só com o dedo (pointer coarse);
+  // no mouse continuam valendo os botões do hover.
+  const [arrasto, setArrasto] = useState(0);
+  const inicioRef = useRef<{ x: number; y: number; id: number } | null>(null);
+  // O clique sintético chega DEPOIS do pointerup, quando o estado já voltou
+  // a zero — só um ref segura a informação de que houve gesto.
+  const arrastouRef = useRef(false);
+  // Passou daqui, o gesto vale. Abaixo disso é toque, e toque abre.
+  const LIMIAR = 72;
+  const deslizando = arrasto !== 0;
+
+  const aoSoltar = () => {
+    const distancia = arrasto;
+    inicioRef.current = null;
+    setArrasto(0);
+    if (Math.abs(distancia) >= 8) arrastouRef.current = true;
+    if (distancia >= LIMIAR) aoResolver();
+    else if (distancia <= -LIMIAR) aoAdiar();
+  };
+
   return (
+    <div className="relative overflow-hidden rounded-lg">
+      {/* A pista que aparece atrás da linha enquanto o dedo arrasta: verde à
+          esquerda (resolver), âmbar à direita (adiar). */}
+      {arrasto !== 0 ? (
+        <div
+          aria-hidden
+          className={cn(
+            "absolute inset-0 flex items-center rounded-lg px-2 text-sm font-semibold",
+            arrasto > 0
+              ? "justify-start bg-success-bg text-success"
+              : "justify-end bg-accent-100 text-accent-700",
+          )}
+        >
+          {arrasto > 0 ? (
+            <span className="inline-flex items-center gap-0.5">
+              <Check size={16} strokeWidth={2} aria-hidden />
+              {arrasto >= LIMIAR ? "Resolver" : "Arraste"}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5">
+              {arrasto <= -LIMIAR ? "Adiar" : "Arraste"}
+              <Clock size={16} strokeWidth={1.7} aria-hidden />
+            </span>
+          )}
+        </div>
+      ) : null}
     <div
       className={cn(
-        "group relative flex cursor-pointer items-center gap-1.5 rounded-lg px-1 py-1 transition-colors duration-[120ms]",
+        "group relative flex cursor-pointer touch-pan-y items-center gap-1.5 rounded-lg px-1 py-1",
+        // Sem transição durante o arrasto: a linha precisa colar no dedo.
+        deslizando ? "" : "transition-colors duration-[120ms]",
         aberta
           ? "bg-neutral-0 shadow-sm ring-1 ring-neutral-200"
           : "hover:bg-neutral-0",
         pendente && "opacity-50",
       )}
-      onClick={aoAbrir}
+      style={arrasto !== 0 ? { transform: `translateX(${arrasto}px)` } : undefined}
+      onPointerDown={(e) => {
+        if (e.pointerType === "mouse" || pendente) return;
+        inicioRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+        arrastouRef.current = false;
+      }}
+      onPointerMove={(e) => {
+        const inicio = inicioRef.current;
+        if (!inicio || inicio.id !== e.pointerId) return;
+        const dx = e.clientX - inicio.x;
+        const dy = e.clientY - inicio.y;
+        // Rolagem vertical vence: o dedo desce a lista muito mais do que
+        // arrasta a linha.
+        if (arrasto === 0 && Math.abs(dy) > Math.abs(dx)) {
+          inicioRef.current = null;
+          return;
+        }
+        if (arrasto === 0 && Math.abs(dx) < 8) return;
+        if (arrasto === 0) {
+          // Captura só AQUI, quando já se sabe que o gesto é horizontal:
+          // capturar no pointerdown atrapalharia a rolagem da lista. Sem
+          // ela, o dedo que sai da linha leva o pointerup embora e a linha
+          // fica travada deslocada.
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            // navegador sem captura: o gesto ainda vale dentro da linha
+          }
+        }
+        setArrasto(Math.max(-140, Math.min(140, dx)));
+      }}
+      onPointerUp={aoSoltar}
+      onPointerCancel={() => {
+        inicioRef.current = null;
+        setArrasto(0);
+      }}
+      onClick={() => {
+        // Arrastou: o clique que o navegador manda depois do gesto não pode
+        // abrir a conversa.
+        if (arrastouRef.current) {
+          arrastouRef.current = false;
+          return;
+        }
+        aoAbrir();
+      }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === "Enter") aoAbrir();
+        // Espaço também abre: é o contrato de qualquer role="button".
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          aoAbrir();
+        }
       }}
     >
       <span className="relative shrink-0" aria-hidden>
@@ -833,7 +1021,7 @@ function LinhaLista({
             e.stopPropagation();
             aoResolver();
           }}
-          className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md text-success hover:bg-success-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-success hover:bg-success-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         >
           <Check size={15} strokeWidth={2} aria-hidden />
         </button>
@@ -845,11 +1033,12 @@ function LinhaLista({
             e.stopPropagation();
             aoAdiar();
           }}
-          className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         >
           <Clock size={15} strokeWidth={1.7} aria-hidden />
         </button>
       </div>
+    </div>
     </div>
   );
 }

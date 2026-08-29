@@ -328,3 +328,148 @@ export async function carregarListaConversas(
     temMais,
   };
 }
+
+// ═════════════════════ Bloco C: o painel de contexto ═════════════════════
+
+export type TarefaDoLead = {
+  id: string;
+  titulo: string;
+  venceEm: string;
+  vencida: boolean;
+};
+
+export type ContextoConversa = {
+  telefone: string | null;
+  email: string | null;
+  criadoEm: string;
+  primeiraRespostaEm: string | null;
+  entradaMotivo: string;
+  campanha: string | null;
+  canal: string | null;
+  observacao: string | null;
+  responsavelNome: string | null;
+  etapaNome: string | null;
+  /** Preenchido só quando o lead já é cliente da corretora. */
+  cliente: {
+    nome: string;
+    contaAbertaEm: string | null;
+    lotes30d: number | null;
+    lotes30dAnterior: number | null;
+    ultimoGiroEm: string | null;
+    receita30dCentavos: number | null;
+    ltvCentavos: number | null;
+  } | null;
+  tarefas: TarefaDoLead[];
+  /** false quando a 0013 não está aplicada — o painel avisa em vez de mentir. */
+  tarefasDisponiveis: boolean;
+};
+
+/**
+ * O contexto do lead para o painel do palco. É uma chamada À PARTE de
+ * carregarConversa de propósito: abrir a conversa (o gesto de 200×/dia) não
+ * pode esperar por giro, receita e tarefas — o painel chega logo depois.
+ */
+export async function carregarContexto(
+  leadId: string,
+): Promise<ContextoConversa | { erro: string }> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada." };
+
+  const supabase = await createClient();
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select(
+      "telefone_e164, email, criado_em, primeira_resposta_em, entrada_motivo, campanha, utm_campaign, observacao, customer_id, responsavel:profiles(nome), etapa:pipeline_stages(nome), canal:channels(nome), customer:customers(nome_completo, conta_aberta_em)",
+    )
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error) return { erro: "Não deu para ler os dados do lead." };
+  if (!lead) return { erro: "Lead não encontrado." };
+
+  type LeadContexto = {
+    telefone_e164: string | null;
+    email: string | null;
+    criado_em: string;
+    primeira_resposta_em: string | null;
+    entrada_motivo: string;
+    campanha: string | null;
+    utm_campaign: string | null;
+    observacao: string | null;
+    customer_id: string | null;
+    responsavel: { nome: string } | null;
+    etapa: { nome: string } | null;
+    canal: { nome: string } | null;
+    customer: { nome_completo: string; conta_aberta_em: string | null } | null;
+  };
+  const l = lead as unknown as LeadContexto;
+  const agora = Date.now();
+
+  // Giro, receita e tarefas em paralelo — e cada uma tolerante: view ou
+  // migração ausente vira ausência de cartão, nunca painel quebrado.
+  const [giroR, receitaR, tarefasR] = await Promise.all([
+    l.customer_id
+      ? supabase
+          .from("v_customer_giro")
+          .select("lotes_30d, lotes_30d_anterior, ultimo_giro_em")
+          .eq("customer_id", l.customer_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    l.customer_id
+      ? supabase
+          .from("v_customer_receita")
+          .select("receita_30d_centavos, ltv_centavos")
+          .eq("customer_id", l.customer_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("lead_tasks")
+      .select("id, titulo, vence_em")
+      .eq("lead_id", leadId)
+      .is("concluida_em", null)
+      .order("vence_em")
+      .limit(10),
+  ]);
+
+  const giro = giroR.data as {
+    lotes_30d: number | null;
+    lotes_30d_anterior: number | null;
+    ultimo_giro_em: string | null;
+  } | null;
+  const receita = receitaR.data as {
+    receita_30d_centavos: number | null;
+    ltv_centavos: number | null;
+  } | null;
+
+  return {
+    telefone: l.telefone_e164,
+    email: l.email,
+    criadoEm: l.criado_em,
+    primeiraRespostaEm: l.primeira_resposta_em,
+    entradaMotivo: l.entrada_motivo,
+    campanha: l.campanha ?? l.utm_campaign,
+    canal: l.canal?.nome ?? null,
+    observacao: l.observacao,
+    responsavelNome: l.responsavel?.nome ?? null,
+    etapaNome: l.etapa?.nome ?? null,
+    cliente: l.customer
+      ? {
+          nome: l.customer.nome_completo,
+          contaAbertaEm: l.customer.conta_aberta_em,
+          lotes30d: giro?.lotes_30d ?? null,
+          lotes30dAnterior: giro?.lotes_30d_anterior ?? null,
+          ultimoGiroEm: giro?.ultimo_giro_em ?? null,
+          receita30dCentavos: receita?.receita_30d_centavos ?? null,
+          ltvCentavos: receita?.ltv_centavos ?? null,
+        }
+      : null,
+    tarefas: (
+      (tarefasR.data ?? []) as { id: string; titulo: string; vence_em: string }[]
+    ).map((t) => ({
+      id: t.id,
+      titulo: t.titulo,
+      venceEm: t.vence_em,
+      vencida: Date.parse(t.vence_em) < agora,
+    })),
+    tarefasDisponiveis: tarefasR.error === null,
+  };
+}

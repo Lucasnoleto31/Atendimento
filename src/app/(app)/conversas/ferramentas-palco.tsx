@@ -348,7 +348,7 @@ export function FerramentasPalco({
                 type="button"
                 disabled={pendente}
                 onClick={() => executar(() => marcarStandBy(leadId))}
-                className="inline-flex h-[32px] items-center rounded-md border border-accent-300 bg-neutral-0 px-1.5 text-sm font-medium text-accent-700 hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
+                className="inline-flex h-[40px] items-center rounded-md border border-accent-300 bg-neutral-0 px-1.5 text-sm font-medium text-accent-700 hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
               >
                 Stand-by — volta em 1 semana
               </button>
