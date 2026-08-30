@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Ban, ExternalLink, Mail, MoreHorizontal, RotateCcw, UserRound } from "lucide-react";
+import { Ban, Mail, MoreHorizontal, RotateCcw, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { estiloEtiqueta } from "@/lib/etiquetas";
 import { MOTIVOS_PERDA, type MotivoPerda } from "@/lib/perda";
@@ -286,13 +286,6 @@ export function FerramentasPalco({
                   Marcar como perdido…
                 </button>
               )}
-              <Link
-                href={`/chat?lead=${leadId}`}
-                className="flex h-[40px] items-center gap-1 rounded-md px-1 text-sm text-neutral-600 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500"
-              >
-                <ExternalLink size={15} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
-                Abrir na tela antiga
-              </Link>
             </div>
             {erro ? (
               <p role="alert" className="px-1 pb-0.5 text-xs text-danger">

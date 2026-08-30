@@ -28,6 +28,7 @@ import { Janela } from "@/app/(app)/chat/janela";
 import {
   adiarConversa,
   alterarStatusConversaChat,
+  marcarChatLido,
 } from "@/app/(app)/chat/actions";
 import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
 import { resumirConversa, sugerirResposta } from "@/app/(app)/chat/ia";
@@ -44,14 +45,14 @@ import {
 } from "./actions";
 
 /**
- * O Chat da Mesa (Bloco A do redesign aprovado no mockup): a lista vive no
- * NAVEGADOR — trocar de visão é uma chamada, abrir conversa é outra. Nada
- * de refazer a página inteira a cada clique (o pecado arquitetural do chat
- * antigo, ~18–28 consultas por gesto).
+ * O Chat da Mesa, servido em /chat: a lista vive no NAVEGADOR — trocar de
+ * visão é uma chamada, abrir conversa é outra. Nada de refazer a página
+ * inteira a cada clique (o pecado arquitetural do chat antigo, ~18–28
+ * consultas por gesto).
  *
- * Bloco A entrega lista + responder (a Janela existente no palco). As
- * ferramentas completas da conversa e o compositor novo são o Bloco B — até
- * lá, o link "abrir no Chat" leva à tela antiga para o que faltar.
+ * Três colunas: trilho de visões, lista e palco (a Janela do compositor,
+ * compartilhada com o painel da /hoje). O contexto do lead entra como
+ * quarta coluna a partir de 1280px e como folha abaixo disso.
  */
 
 const VISOES: { chave: VisaoConversas; rotulo: string; icone: React.ReactNode }[] = [
@@ -92,6 +93,10 @@ function assinarXl(avisar: () => void) {
   return () => mq.removeEventListener("change", avisar);
 }
 const lerXl = () => window.matchMedia(CONSULTA_XL).matches;
+
+// Quanto a conversa precisa ficar aberta antes de a IA ser chamada. Quem
+// está varrendo a fila com J passa muito mais rápido que isto e não gasta.
+const ESPERA_SUGESTAO_MS = 1_200;
 
 function rotuloEspera(horas: number | null): string | null {
   if (horas === null) return null;
@@ -134,6 +139,7 @@ export function AppConversas({
   const [busca, setBusca] = useState("");
   const [carga, setCarga] = useState<CargaConversas>(inicial);
   const [carregandoLista, setCarregandoLista] = useState(false);
+  const [carregandoMais, setCarregandoMais] = useState(false);
   const [erroLista, setErroLista] = useState<string | null>(null);
 
   const [aberta, setAberta] = useState<{ leadId: string; nome: string } | null>(
@@ -156,19 +162,37 @@ export function AppConversas({
   // giro e combinados enquanto escreve); abaixo de xl vira folha por cima.
   const [painelAberto, setPainelAberto] = useState(false);
   const telaLarga = useSyncExternalStore(assinarXl, lerXl, () => false);
+  // Cruzar os 1280px com a folha aberta a deixava pendurada, para reaparecer
+  // sozinha ao estreitar de novo — ajuste durante o render, sem efeito.
+  const [larguraAnterior, setLarguraAnterior] = useState(telaLarga);
+  if (telaLarga !== larguraAnterior) {
+    setLarguraAnterior(telaLarga);
+    if (telaLarga && painelAberto) setPainelAberto(false);
+  }
   const [sinalContexto, setSinalContexto] = useState(0);
   // Devolve o foco ao botão que abriu a folha — solto no body, a próxima
   // letra digitada viraria atalho do palco (E resolve a conversa).
   const gatilhoPainelRef = useRef<HTMLButtonElement>(null);
+  const folhaRef = useRef<HTMLDivElement>(null);
   const fecharPainel = useCallback(() => {
     setPainelAberto(false);
     gatilhoPainelRef.current?.focus();
   }, []);
+  // A folha é aria-modal: o foco entra nela ao abrir. Sem isto ele ficava
+  // do lado de fora, e as teclas do palco (E resolve, H adia) seguiam vivas
+  // por trás do overlay.
+  useEffect(() => {
+    if (painelAberto && !telaLarga) folhaRef.current?.focus();
+  }, [painelAberto, telaLarga]);
 
   const pedidoRef = useRef(0);
   // Contadores de corrida: resposta que chega depois de outra troca é lixo.
   const pedidoConversaRef = useRef(0);
   const pedidoResumoRef = useRef(0);
+  // Freio do balão fantasma: espera antes de chamar a IA e memória do que
+  // já foi sugerido (chave conversa + última mensagem).
+  const timerSugestaoRef = useRef<number | null>(null);
+  const cacheSugestaoRef = useRef(new Map<string, string>());
   const acordeGRef = useRef(0);
   // Quem está EM CENA agora. O contador sozinho não basta para a recarga do
   // menu ⋯: ela nasce numa closure do lead antigo e só é chamada depois da
@@ -177,16 +201,36 @@ export function AppConversas({
     leadInicial ? { leadId: leadInicial.leadId, nome: leadInicial.nome } : null,
   );
 
+  /**
+   * Recarrega a fila. `silenciosa` é para o que o atendente não pediu — o
+   * tempo real e o polling: sem estado de carregamento (a lista não pode
+   * piscar a cada mensagem que chega) e sem mexer no erro que estiver na
+   * tela (o aviso do resolver que falhou não some sozinho em 12s).
+   */
   const recarregarLista = useCallback(
-    async (v: VisaoConversas, e: "minhas" | "todas", b: string) => {
+    async (
+      v: VisaoConversas,
+      e: "minhas" | "todas",
+      b: string,
+      { silenciosa = false }: { silenciosa?: boolean } = {},
+    ) => {
       const pedido = ++pedidoRef.current;
-      setCarregandoLista(true);
-      setErroLista(null);
-      const r = await carregarListaConversas(v, { escopo: e, busca: b });
+      if (!silenciosa) {
+        setCarregandoLista(true);
+        setErroLista(null);
+      }
+      let r: Awaited<ReturnType<typeof carregarListaConversas>>;
+      try {
+        r = await carregarListaConversas(v, { escopo: e, busca: b });
+      } catch {
+        // Sem este catch a lista ficava presa em opacity-50, sem erro.
+        r = { erro: "Sem resposta do servidor — tente de novo." };
+      }
       if (pedido !== pedidoRef.current) return; // resposta velha: descarta
-      setCarregandoLista(false);
-      if ("erro" in r) setErroLista(r.erro);
-      else setCarga(r);
+      if (!silenciosa) setCarregandoLista(false);
+      if ("erro" in r) {
+        if (!silenciosa) setErroLista(r.erro);
+      } else setCarga(r);
     },
     [],
   );
@@ -210,9 +254,47 @@ export function AppConversas({
           setCarga(r);
         }
       });
+      // A conversa em cena entra na mesma rede: sem isto, canal caído
+      // deixava o atendente olhando uma conversa congelada.
+      const emCena = abertaRef.current?.leadId;
+      if (emCena) {
+        void carregarConversa(emCena).then((rc) => {
+          if (abertaRef.current?.leadId !== emCena) return;
+          if (!("erro" in rc)) setConversa(rc);
+        });
+      }
     }, 60_000);
     return () => window.clearInterval(t);
   }, []);
+
+  /** Página seguinte da fila, anexada ao fim — sem mexer no que já está. */
+  const carregarMais = useCallback(async () => {
+    if (carregandoMais) return;
+    setCarregandoMais(true);
+    const marca = pedidoRef.current;
+    let r: Awaited<ReturnType<typeof carregarListaConversas>>;
+    try {
+      r = await carregarListaConversas(visao, {
+        escopo,
+        busca,
+        offset: carga.linhas.length,
+      });
+    } catch {
+      r = { erro: "Sem resposta do servidor — tente de novo." };
+    }
+    setCarregandoMais(false);
+    // Trocou de visão/filtro no meio: a página seguinte é de outra lista.
+    if (marca !== pedidoRef.current) return;
+    if ("erro" in r) {
+      setErroLista(r.erro);
+      return;
+    }
+    setCarga((c) => {
+      const vistos = new Set(c.linhas.map((l) => l.leadId));
+      const novas = r.linhas.filter((l) => !vistos.has(l.leadId));
+      return { ...r, linhas: [...c.linhas, ...novas] };
+    });
+  }, [carregandoMais, visao, escopo, busca, carga.linhas.length]);
 
   // Busca com respiro de 300ms; visão/escopo recarregam na hora.
   const timerBusca = useRef<number | null>(null);
@@ -232,6 +314,42 @@ export function AppConversas({
     setEscopo(novo);
     void recarregarLista(visao, novo, busca);
   };
+
+  /**
+   * Pede a sugestão da IA para o balão fantasma — com FREIO. Cada chamada é
+   * um Opus com o histórico inteiro: varrer a fila com J queimava uma por
+   * linha, e reabrir a mesma conversa pagava de novo. Aqui a conversa
+   * precisa ficar aberta 1,2s (quem está passando o olho não paga) e o
+   * resultado fica guardado por conversa+última mensagem.
+   */
+  const agendarSugestao = useCallback(
+    (leadId: string, pedido: number, ultimaMensagemId: string) => {
+      if (timerSugestaoRef.current !== null) {
+        clearTimeout(timerSugestaoRef.current);
+        timerSugestaoRef.current = null;
+      }
+      const chave = `${leadId}:${ultimaMensagemId}`;
+      const guardada = cacheSugestaoRef.current.get(chave);
+      if (guardada) {
+        sugestaoStore.definir(leadId, guardada);
+        return;
+      }
+      timerSugestaoRef.current = window.setTimeout(() => {
+        timerSugestaoRef.current = null;
+        if (pedido !== pedidoConversaRef.current) return; // já trocou
+        void sugerirResposta(leadId)
+          .then((sug) => {
+            if (!sug.sugestao) return;
+            cacheSugestaoRef.current.set(chave, sug.sugestao);
+            if (pedido === pedidoConversaRef.current) {
+              sugestaoStore.definir(leadId, sug.sugestao);
+            }
+          })
+          .catch(() => {});
+      }, ESPERA_SUGESTAO_MS);
+    },
+    [],
+  );
 
   const abrirConversa = useCallback(
     async (linha: { leadId: string; nome: string }) => {
@@ -258,14 +376,12 @@ export function AppConversas({
         // atendente trocar de conversa ou começar a digitar.
         sugestaoStore.limpar();
         const ultima = r.mensagens[r.mensagens.length - 1];
-        if (ultima && ultima.tipo === "mensagem_recebida") {
-          void sugerirResposta(linha.leadId)
-            .then((sug) => {
-              if (sug.sugestao && pedido === pedidoConversaRef.current) {
-                sugestaoStore.definir(linha.leadId, sug.sugestao);
-              }
-            })
-            .catch(() => {});
+        // E só DENTRO da janela de 24h: fora dela o texto livre não chega ao
+        // lead (o compositor bloqueia e o caminho é template), então pedir
+        // sugestão seria pagar por um rascunho que ninguém pode enviar.
+        const janelaAberta = r.restanteJanela !== null && r.restanteJanela > 0;
+        if (ultima && ultima.tipo === "mensagem_recebida" && janelaAberta) {
+          agendarSugestao(linha.leadId, pedido, ultima.id);
         }
       }
       // Abrir marca como lida no servidor (carregarConversa cuida); o
@@ -277,7 +393,7 @@ export function AppConversas({
         ),
       }));
     },
-    [],
+    [agendarSugestao],
   );
 
   const proxima = useCallback(() => {
@@ -406,13 +522,14 @@ export function AppConversas({
         if (tecla === "c") {
           setVisao("caixa");
           void recarregarLista("caixa", escopo, busca);
-          return;
-        }
-        if (tecla === "a") {
+        } else if (tecla === "a") {
           setVisao("aguardando");
           void recarregarLista("aguardando", escopo, busca);
-          return;
         }
+        // Qualquer outra tecla apenas CANCELA o acorde. Sem este return, o
+        // G→H de dedo torto (elas são vizinhas) caía no atalho de adiar e
+        // mandava a conversa para amanhã sem ninguém pedir.
+        return;
       }
       if (tecla === "g") {
         acordeGRef.current = Date.now();
@@ -453,20 +570,36 @@ export function AppConversas({
   // Recarga SILENCIOSA após uma ação do menu ⋯: troca os dados por baixo
   // sem desmontar a Janela — desmontar apagava anexos na fila, fechava o
   // menu e re-disparava o marcarChatLido que desfazia o "marcar não lida".
-  const recarregarConversaAberta = useCallback(async () => {
-    const leadDaRecarga = aberta?.leadId;
-    if (!leadDaRecarga) return;
-    // Guarda por IDENTIDADE, antes e depois da ida ao servidor: a ação do
-    // menu ⋯ pode ter começado no lead A e terminado com o B em cena — e um
-    // contador não pega isso, porque ele já subiu antes desta chamada.
-    if (abertaRef.current?.leadId !== leadDaRecarga) return;
-    const r = await carregarConversa(leadDaRecarga);
-    if (abertaRef.current?.leadId !== leadDaRecarga) return;
-    if (!("erro" in r)) setConversa(r);
-    // O painel de contexto mostra etapa e atendente: sem este sinal ele
-    // ficaria com o valor velho ao lado do menu que acabou de mudá-lo.
-    setSinalContexto((n) => n + 1);
-  }, [aberta]);
+  /**
+   * Recarrega a conversa em cena. `mudouCadastro` é para as ações do menu
+   * ⋯ (etapa, atendente, etiqueta): só elas precisam refazer o painel de
+   * contexto — mensagem que chega não mexe em giro nem em receita, e
+   * recarregar tudo a cada mensagem era conta de graça.
+   */
+  const recarregarConversaAberta = useCallback(
+    async ({ mudouCadastro = false }: { mudouCadastro?: boolean } = {}) => {
+      const leadDaRecarga = aberta?.leadId;
+      if (!leadDaRecarga) return;
+      // Guarda por IDENTIDADE, antes e depois da ida ao servidor: a ação do
+      // menu ⋯ pode ter começado no lead A e terminado com o B em cena — e
+      // um contador não pega isso, porque já subiu antes desta chamada.
+      if (abertaRef.current?.leadId !== leadDaRecarga) return;
+      let r: Awaited<ReturnType<typeof carregarConversa>>;
+      try {
+        r = await carregarConversa(leadDaRecarga);
+      } catch {
+        // Sem o catch, a falha era muda e o menu ⋯ seguia mostrando o
+        // estado anterior como se a mudança não tivesse acontecido.
+        setErroConversa("Sem resposta do servidor — reabra a conversa.");
+        return;
+      }
+      if (abertaRef.current?.leadId !== leadDaRecarga) return;
+      if ("erro" in r) setErroConversa(r.erro ?? "Não deu para recarregar.");
+      else setConversa(r);
+      if (mudouCadastro) setSinalContexto((n) => n + 1);
+    },
+    [aberta],
+  );
 
   /** O menu ⋯ marcou "não lida": a linha volta a ficar em negrito na hora. */
   const marcarLinhaNaoLida = useCallback((leadId: string) => {
@@ -486,6 +619,19 @@ export function AppConversas({
         : v === "adiadas"
           ? carga.contagens.adiadas
           : null;
+
+  // Quem está no atendimento da conversa aberta. A fonte de verdade é o
+  // payload de ferramentas (recém-carregado com a conversa); sem ele —
+  // banco sem alguma migração — cai para o que a fila já sabe.
+  const ferramentasAberta = conversa?.ferramentas;
+  const responsavelDaAberta = ferramentasAberta
+    ? (ferramentasAberta.equipe.find(
+        (p) => p.id === ferramentasAberta.responsavelId,
+      )?.nome ?? null)
+    : aberta
+      ? (carga.linhas.find((l) => l.leadId === aberta.leadId)
+          ?.responsavelNome ?? null)
+      : null;
 
   return (
     <div className="flex h-[calc(100dvh-1px)] min-h-0 bg-neutral-50">
@@ -511,11 +657,11 @@ export function AppConversas({
               )}
             >
               {v.icone}
-              <span className="text-[10px] font-medium">{v.rotulo}</span>
+              <span className="text-xs font-medium">{v.rotulo}</span>
               {n !== null && n > 0 ? (
                 <span
                   className={cn(
-                    "absolute top-0.5 right-0.5 inline-flex h-[17px] min-w-[17px] items-center justify-center rounded-full px-0.5 font-mono text-[10px] font-semibold tabular-nums",
+                    "absolute top-0.5 right-0.5 inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-full px-0.5 font-mono text-xs font-semibold tabular-nums",
                     v.chave === "caixa"
                       ? "bg-danger text-neutral-0"
                       : "bg-primary-600 text-neutral-0",
@@ -527,13 +673,6 @@ export function AppConversas({
             </button>
           );
         })}
-        <Link
-          href="/chat"
-          title="Tela antiga do chat (ferramentas completas até o Bloco B)"
-          className="mt-auto mb-1 inline-flex h-[40px] w-[40px] items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-        >
-          <ExternalLink size={17} strokeWidth={1.7} aria-hidden />
-        </Link>
       </nav>
 
       {/* ── lista ── */}
@@ -571,7 +710,7 @@ export function AppConversas({
               className="h-full min-w-0 flex-1 bg-transparent text-sm text-neutral-800 placeholder:text-neutral-400 focus:outline-none"
             />
           </label>
-          <p className="mt-1 mb-1 px-0.5 text-[11px] leading-tight text-neutral-400">
+          <p className="mt-1 mb-1 px-0.5 text-xs leading-tight text-neutral-600">
             {ORDENS[visao]}
           </p>
         </div>
@@ -608,10 +747,21 @@ export function AppConversas({
               />
             ))
           )}
+
+          {carga.temMais && !carregandoLista ? (
+            <button
+              type="button"
+              disabled={carregandoMais}
+              onClick={() => void carregarMais()}
+              className="mt-1 mb-1 inline-flex h-[40px] w-full items-center justify-center rounded-lg border border-neutral-200 bg-neutral-0 text-sm font-medium text-neutral-800 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-60"
+            >
+              {carregandoMais ? "Carregando…" : "Carregar mais conversas"}
+            </button>
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between border-t border-neutral-200 px-2 py-1">
-          <span className="text-[11px] text-neutral-400">
+          <span className="text-xs text-neutral-600">
             anel verde = janela aberta · amarelo = só template
           </span>
           <button
@@ -620,7 +770,7 @@ export function AppConversas({
             className="inline-flex h-[40px] items-center gap-0.5 rounded-md bg-primary-50 px-1.5 text-xs font-semibold text-primary-600 hover:bg-primary-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
           >
             Próxima <ArrowDown size={13} strokeWidth={2} aria-hidden />
-            <kbd className="font-mono text-[10px] font-normal opacity-60">J</kbd>
+            <kbd className="font-mono text-xs font-normal opacity-70">J</kbd>
           </button>
         </div>
       </section>
@@ -664,6 +814,17 @@ export function AppConversas({
                 {iniciaisDe(aberta.nome)}
               </span>
               <div className="min-w-0">
+                {/* Quem está no atendimento, acima do nome — a mesma
+                    informação da fila, para quem já está com a conversa
+                    aberta não precisar procurar no menu. */}
+                <p
+                  className={cn(
+                    "truncate text-xs",
+                    responsavelDaAberta ? "text-neutral-600" : "text-accent-700",
+                  )}
+                >
+                  {responsavelDaAberta ?? "sem dono"}
+                </p>
                 <p className="truncate text-sm font-semibold text-neutral-900">
                   {aberta.nome}
                 </p>
@@ -718,13 +879,18 @@ export function AppConversas({
                     leadId={aberta.leadId}
                     nome={aberta.nome}
                     ferramentas={conversa.ferramentas}
-                    aoMudar={recarregarConversaAberta}
+                    aoMudar={() =>
+                      void recarregarConversaAberta({ mudouCadastro: true })
+                    }
                     aoMarcarNaoLida={() => marcarLinhaNaoLida(aberta.leadId)}
                   />
                 ) : (
+                  // Sem o payload de ferramentas (banco sem alguma migração):
+                  // a ficha 360 é o caminho — a tela antiga não existe mais.
                   <Link
-                    href={`/chat?lead=${aberta.leadId}`}
-                    title="Abrir na tela antiga"
+                    href={`/leads/${aberta.leadId}`}
+                    title="Abrir a ficha do lead"
+                    aria-label="Abrir a ficha do lead"
                     className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                   >
                     <ExternalLink size={16} strokeWidth={1.7} aria-hidden />
@@ -815,8 +981,33 @@ export function AppConversas({
               onClick={(e) => {
                 if (e.target === e.currentTarget) fecharPainel();
               }}
+              onKeyDown={(e) => {
+                // Diálogo modal: o Tab não passeia pela tela de trás, onde
+                // Enter abriria outra conversa por baixo do overlay.
+                if (e.key !== "Tab") return;
+                const foco = folhaRef.current;
+                if (!foco) return;
+                const alvos = foco.querySelectorAll<HTMLElement>(
+                  'a[href], button:not([disabled]), input, select, textarea',
+                );
+                if (alvos.length === 0) return;
+                const primeiro = alvos[0];
+                const ultimo = alvos[alvos.length - 1];
+                const ativo = document.activeElement;
+                if (e.shiftKey && (ativo === primeiro || ativo === foco)) {
+                  e.preventDefault();
+                  ultimo.focus();
+                } else if (!e.shiftKey && ativo === ultimo) {
+                  e.preventDefault();
+                  primeiro.focus();
+                }
+              }}
             >
-              <div className="h-full w-full max-w-[360px] border-l border-neutral-200 shadow-lg">
+              <div
+                ref={folhaRef}
+                tabIndex={-1}
+                className="h-full w-full max-w-[360px] border-l border-neutral-200 shadow-lg outline-none"
+              >
                 <PainelContexto
                   key={aberta.leadId}
                   leadId={aberta.leadId}
@@ -832,8 +1023,19 @@ export function AppConversas({
 
       <TempoRealConversas
         leadAbertoId={aberta?.leadId ?? null}
-        aoMensagemDoAberto={() => void recarregarConversaAberta()}
-        aoMudancaNaLista={() => void recarregarLista(visao, escopo, busca)}
+        aoMensagemDoAberto={() => {
+          void recarregarConversaAberta();
+          // A sugestão era resposta para a mensagem ANTERIOR: chegou outra,
+          // ela não serve mais (e o Tab a mandaria assim mesmo).
+          sugestaoStore.limpar();
+          const emCena = abertaRef.current?.leadId;
+          // O atendente está com a conversa na tela: o badge do menu não
+          // pode contar (nem bipar) por ela.
+          if (emCena) void marcarChatLido(emCena);
+        }}
+        aoMudancaNaLista={() =>
+          void recarregarLista(visao, escopo, busca, { silenciosa: true })
+        }
       />
       <PaletaComandos
         aberta={paletaAberta}
@@ -956,6 +1158,9 @@ function LinhaLista({
     <div
       className={cn(
         "group relative flex cursor-pointer touch-pan-y items-center gap-1.5 rounded-lg px-1 py-1",
+        // ring por dentro, não outline: o wrapper do gesto tem
+        // overflow-hidden e recortaria o anel do navegador.
+        "focus-within:ring-2 focus-within:ring-primary-500",
         // Sem transição durante o arrasto: a linha precisa colar no dedo.
         deslizando ? "" : "transition-colors duration-[120ms]",
         aberta
@@ -999,25 +1204,25 @@ function LinhaLista({
         inicioRef.current = null;
         setArrasto(0);
       }}
-      onClick={() => {
-        // Arrastou: o clique que o navegador manda depois do gesto não pode
-        // abrir a conversa.
-        if (arrastouRef.current) {
-          arrastouRef.current = false;
-          return;
-        }
-        aoAbrir();
-      }}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        // Espaço também abre: é o contrato de qualquer role="button".
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          aoAbrir();
-        }
-      }}
+      role="listitem"
     >
+      {/* O conteúdo é um BOTÃO — alcançável por Tab e anunciado pelo leitor
+          de tela. Os de resolver/adiar são irmãos, não filhos: botão dentro
+          de botão é HTML inválido e some para quem navega por teclado. */}
+      <button
+        type="button"
+        aria-current={aberta ? "true" : undefined}
+        onClick={() => {
+          // Arrastou: o clique que o navegador manda depois do gesto não
+          // pode abrir a conversa.
+          if (arrastouRef.current) {
+            arrastouRef.current = false;
+            return;
+          }
+          aoAbrir();
+        }}
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left focus-visible:outline-none"
+      >
       <span className="relative shrink-0" aria-hidden>
         <span
           className={cn(
@@ -1031,6 +1236,17 @@ function LinhaLista({
         </span>
       </span>
       <div className="min-w-0 flex-1">
+        {/* Quem está no atendimento, ACIMA do nome: numa fila que todo mundo
+            enxerga, saber de quem é a conversa antes de abri-la evita dois
+            atendentes na mesma pessoa. */}
+        <p
+          className={cn(
+            "truncate text-xs",
+            linha.responsavelNome ? "text-neutral-600" : "text-accent-700",
+          )}
+        >
+          {linha.responsavelNome ?? "sem dono"}
+        </p>
         <div className="flex items-baseline gap-1">
           <span
             className={cn(
@@ -1042,7 +1258,7 @@ function LinhaLista({
           </span>
           <span className="ml-auto shrink-0">
             {linha.adiadaAte && !linha.adiadaVencida ? (
-              <span className="font-mono text-[11px] text-neutral-400">
+              <span className="font-mono text-xs text-neutral-600">
                 volta {horaOuDia(linha.adiadaAte, hojeChave)}
               </span>
             ) : espera ? (
@@ -1059,7 +1275,7 @@ function LinhaLista({
                 {espera}
               </span>
             ) : (
-              <span className="font-mono text-[11px] text-neutral-400">
+              <span className="font-mono text-xs text-neutral-600">
                 {horaOuDia(linha.ultimaEm, hojeChave)}
               </span>
             )}
@@ -1071,24 +1287,27 @@ function LinhaLista({
           ) : null}
           <span
             className={cn(
-              "truncate text-[13px]",
+              "truncate text-sm",
               linha.naoLida ? "text-neutral-800" : "text-neutral-600",
             )}
           >
             {linha.previa ?? (linha.telefone ? "" : linha.instagram ? `@${linha.instagram}` : "")}
           </span>
           {linha.naoLida ? (
-            <span className="ml-auto inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary-600 px-0.5 font-mono text-[10px] font-semibold text-neutral-0">
+            <span className="ml-auto inline-flex h-[20px] min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary-600 px-0.5 font-mono text-xs font-semibold text-neutral-0">
               1
             </span>
           ) : null}
         </div>
         {linha.sub ? (
-          <p className="text-[10.5px] text-neutral-400">{linha.sub}</p>
+          <p className="text-xs text-neutral-600">{linha.sub}</p>
         ) : null}
       </div>
+      </button>
 
-      <div className="absolute top-1/2 right-1 hidden -translate-y-1/2 gap-0.5 rounded-lg border border-neutral-200 bg-neutral-0 p-0.5 shadow-sm group-hover:flex">
+      {/* Aparece no hover E no foco: escondido só no hover, o teclado nunca
+          alcançava resolver e adiar. */}
+      <div className="absolute top-1/2 right-1 hidden -translate-y-1/2 gap-0.5 rounded-lg border border-neutral-200 bg-neutral-0 p-0.5 shadow-sm group-hover:flex group-focus-within:flex">
         <button
           type="button"
           aria-label={`Resolver conversa com ${linha.nome}`}

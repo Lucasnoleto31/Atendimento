@@ -213,6 +213,9 @@ export function PainelConversa() {
             marketingBloqueado={dados.marketingBloqueado}
             hojeChave={dados.hojeChave}
             ontemChave={dados.ontemChave}
+            // Esta tela não tem tempo real próprio: a rede de segurança de
+            // 60s da conversa aberta é o refresh daqui.
+            aoRecarregarPeriodico={() => router.refresh()}
             aoEnviarComSucesso={() => {
               // A resposta saiu: a fila "Aguardando" se recalcula no servidor
               // e o item some — sem gambiarra de esconder linha no cliente.

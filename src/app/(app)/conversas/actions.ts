@@ -38,6 +38,8 @@ export type LinhaConversa = {
   adiadaVencida: boolean;
   resolvida: boolean;
   responsavelIniciais: string | null;
+  /** Quem está no atendimento — aparece acima do nome do lead na fila. */
+  responsavelNome: string | null;
   etiquetaNome: string | null;
   sub: string | null;
 };
@@ -309,6 +311,7 @@ export async function carregarListaConversas(
       adiadaVencida,
       resolvida: Boolean(ex?.chat_resolvido_em),
       responsavelIniciais: iniciais(l.responsavel_nome),
+      responsavelNome: l.responsavel_nome,
       etiquetaNome: l.etiquetas?.[0] ?? null,
       sub: adiadaVencida
         ? "adiada · prazo venceu"

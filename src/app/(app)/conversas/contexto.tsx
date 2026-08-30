@@ -7,6 +7,7 @@ import {
   Copy,
   ExternalLink,
   Plus,
+  Minus,
   TrendingDown,
   TrendingUp,
   X,
@@ -172,11 +173,16 @@ export function PainelContexto({
       });
   };
 
-  const giroCai =
+  const tendenciaGiro: "cai" | "sobe" | "igual" | null =
     dados?.cliente &&
     dados.cliente.lotes30d !== null &&
-    dados.cliente.lotes30dAnterior !== null &&
-    dados.cliente.lotes30d < dados.cliente.lotes30dAnterior;
+    dados.cliente.lotes30dAnterior !== null
+      ? dados.cliente.lotes30d < dados.cliente.lotes30dAnterior
+        ? "cai"
+        : dados.cliente.lotes30d > dados.cliente.lotes30dAnterior
+          ? "sobe"
+          : "igual"
+      : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-neutral-0">
@@ -251,9 +257,9 @@ export function PainelContexto({
             {/* Cliente da corretora: o que ele vale hoje */}
             {dados.cliente ? (
               <section className="rounded-lg border border-neutral-200 bg-neutral-50 p-1.5">
-                <p className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+                <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
                   Cliente
-                </p>
+                </h3>
                 <div className="mt-1 flex flex-col gap-1">
                   {/* Só quando difere do nome do lead: o cruzamento é por
                       telefone, e número reciclado põe a conta de outra
@@ -277,19 +283,26 @@ export function PainelContexto({
                         </span>
                         {dados.cliente.lotes30dAnterior !== null ? (
                           <>
-                            {giroCai ? (
+                            {tendenciaGiro === "cai" ? (
                               <TrendingDown
                                 size={14}
                                 strokeWidth={1.7}
-                                aria-hidden
+                                aria-label="caiu"
                                 className="text-danger"
                               />
-                            ) : (
+                            ) : tendenciaGiro === "sobe" ? (
                               <TrendingUp
                                 size={14}
                                 strokeWidth={1.7}
-                                aria-hidden
+                                aria-label="subiu"
                                 className="text-success"
+                              />
+                            ) : (
+                              <Minus
+                                size={14}
+                                strokeWidth={1.7}
+                                aria-label="sem mudança"
+                                className="text-neutral-600"
                               />
                             )}
                             <span className="text-xs text-neutral-600">
@@ -328,9 +341,9 @@ export function PainelContexto({
             {/* Tarefas — o que ficou combinado */}
             <section>
               <div className="flex items-center gap-1">
-                <p className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+                <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
                   Combinado
-                </p>
+                </h3>
                 {dados.tarefasDisponiveis ? (
                   <button
                     type="button"
@@ -419,7 +432,7 @@ export function PainelContexto({
                         type="button"
                         aria-label={`Concluir: ${t.titulo}`}
                         onClick={() => concluir(t.id)}
-                        className="inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md text-neutral-400 transition-colors duration-[120ms] hover:bg-success-bg hover:text-success focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                        className="inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition-colors duration-[120ms] hover:border-success hover:bg-success-bg hover:text-success focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                       >
                         <Check size={16} strokeWidth={2} aria-hidden />
                       </button>

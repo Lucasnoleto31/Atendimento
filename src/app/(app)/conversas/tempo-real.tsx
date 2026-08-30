@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { consumirEcoRealtime } from "@/app/(app)/chat/tempo-real";
 
 /**
  * Tempo real do Chat da Mesa — a versão sem router.refresh(): o palco nunca
@@ -53,6 +54,10 @@ export function TempoRealConversas({
 
     const aoEvento = (linha: LinhaInteracao) => {
       if (!linha.lead_id) return;
+      // Eco do próprio envio: a Janela já colocou a mensagem na tela pelo
+      // retorno da action. Recarregar aqui descartaria o estado local do
+      // compositor por uma mensagem que já está lá.
+      if (linha.id && consumirEcoRealtime(linha.id)) return;
       if (linha.lead_id === abertoRef.current) {
         // A conversa na tela atualiza já — é o que o atendente está olhando.
         cbAbertoRef.current();

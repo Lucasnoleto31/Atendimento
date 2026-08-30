@@ -73,18 +73,27 @@ function iniciarCiclo() {
   // Tempo real (migração 0014): mensagem nova acende o badge — com respiro,
   // para rajada da equipe inteira não virar uma consulta por evento.
   const supabase = createClient();
+  const aoInserir = () => {
+    if (respiro !== null) return;
+    respiro = window.setTimeout(() => {
+      respiro = null;
+      if (document.visibilityState === "visible") void atualizar();
+    }, RESPIRO_TEMPO_REAL_MS);
+  };
+  // Filtra por tipo, como o chat faz: sem filtro, a rajada de mudanca_etapa
+  // das automações (64% dos inserts) atravessava a rede e acordava o badge
+  // — desfazendo no menu a economia que o chat fez na tela.
   const canal = supabase
     .channel("badge-tempo-real")
     .on(
       "postgres_changes",
-      { event: "INSERT", schema: "public", table: "lead_interactions" },
-      () => {
-        if (respiro !== null) return;
-        respiro = window.setTimeout(() => {
-          respiro = null;
-          if (document.visibilityState === "visible") void atualizar();
-        }, RESPIRO_TEMPO_REAL_MS);
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "lead_interactions",
+        filter: "tipo=eq.mensagem_recebida",
       },
+      aoInserir,
     )
     .subscribe();
 

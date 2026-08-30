@@ -220,8 +220,7 @@ export async function enviarMensagemLead(
     // Sem revalidatePath("/chat"): a Janela recebe a nota criada e coloca no
     // histórico local — a página não re-renderiza inteira por causa disso.
     // Se o insert não devolveu a linha (não deveria), revalida como antes.
-    if (!notaCriada) revalidatePath("/chat");
-    revalidatePath(`/leads/${leadId}`);
+    if (!notaCriada)    revalidatePath(`/leads/${leadId}`);
     return {
       ok: true,
       ...(notaCriada
@@ -431,8 +430,7 @@ export async function enviarMensagemLead(
   // render duplo de cada envio — revalidate + eco 3s depois — deixa de
   // existir. Se o insert não devolveu a linha (não deveria), revalida como
   // antes para a mensagem não sumir da tela.
-  if (!criada) revalidatePath("/chat");
-  // A carteira mostra "último contato": sem isto ela seguia no valor velho.
+  if (!criada)  // A carteira mostra "último contato": sem isto ela seguia no valor velho.
   revalidatePath("/carteira");
   revalidatePath("/atendimento");
   revalidatePath(`/leads/${leadId}`);
@@ -548,7 +546,6 @@ export async function enviarTemplateLead(
     .update({ ultima_interacao_em: agora, chat_lido_em: agora })
     .eq("id", leadId);
 
-  revalidatePath("/chat");
   // A carteira mostra "último contato": sem isto ela seguia no valor velho.
   revalidatePath("/carteira");
   revalidatePath(`/leads/${leadId}`);
@@ -596,7 +593,6 @@ export async function definirResponsavelChat(
     metadados: { via: "crm", sistema: true },
   });
 
-  revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true };
 }
@@ -627,7 +623,6 @@ export async function alternarEtiquetaChat(
     if (error) return { erro: error.message };
   }
 
-  revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true };
 }
@@ -673,7 +668,6 @@ export async function alterarStatusConversaChat(
     metadados: { via: "crm", sistema: true },
   });
 
-  revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   // Resolver/reabrir muda as filas de /hoje e a caixa em /atendimento —
   // sem revalidar, as duas telas seguiam mostrando a conversa no lugar velho.
@@ -698,7 +692,6 @@ export async function alterarEtapaChat(
     .eq("id", leadId);
   if (error) return { erro: error.message };
 
-  revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/atendimento");
   return { ok: true };
@@ -772,7 +765,6 @@ export async function marcarPerdidoChat(
     }
   }
 
-  revalidatePath("/chat");
   revalidatePath("/atendimento");
   revalidatePath("/hoje");
   revalidatePath(`/leads/${leadId}`);
@@ -854,7 +846,6 @@ export async function reabrirLeadChat(leadId: string): Promise<ResultadoEnvio> {
     }
   }
 
-  revalidatePath("/chat");
   revalidatePath("/atendimento");
   revalidatePath("/hoje");
   revalidatePath(`/leads/${leadId}`);
@@ -1042,7 +1033,6 @@ export async function criarTarefaLead(
     };
   }
 
-  revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   // Tarefa nova entra na agenda do dia — /hoje e /agenda listam lead_tasks.
   revalidatePath("/hoje");
@@ -1065,7 +1055,6 @@ export async function concluirTarefaLead(
     .eq("id", tarefaId);
   if (error) return { erro: error.message };
 
-  revalidatePath("/chat");
   revalidatePath(`/leads/${leadId}`);
   // Tarefa concluída sai das pendências de /hoje e /agenda na hora.
   revalidatePath("/hoje");
@@ -1154,7 +1143,6 @@ export async function adiarConversa(
     metadados: { via: "crm", sistema: true },
   });
 
-  revalidatePath("/chat");
   // Adiar tira a conversa das filas de /hoje e /atendimento até o prazo.
   revalidatePath("/hoje");
   revalidatePath("/atendimento");
@@ -1183,7 +1171,6 @@ export async function reativarConversa(
   }
   if (error) return { erro: error.message };
 
-  revalidatePath("/chat");
   // Reativar devolve a conversa às filas de /hoje e /atendimento na hora.
   revalidatePath("/hoje");
   revalidatePath("/atendimento");
@@ -1205,7 +1192,6 @@ export async function marcarChatNaoLido(
     .eq("id", leadId);
   if (error) return { erro: error.message };
 
-  revalidatePath("/chat");
   return { ok: true };
 }
 
@@ -1251,7 +1237,6 @@ async function emMassa(
     );
   }
 
-  revalidatePath("/chat");
   return { ok: true, total: ids.length };
 }
 
@@ -1330,7 +1315,6 @@ export async function etiquetarEmMassa(
     if (error) return { erro: error.message };
   }
 
-  revalidatePath("/chat");
   return { ok: true, total: ids.length };
 }
 

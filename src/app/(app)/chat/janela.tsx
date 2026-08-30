@@ -13,7 +13,6 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useFormStatus } from "react-dom";
-import { useRouter } from "next/navigation";
 import { ignorarEcoRealtime } from "./tempo-real";
 import Link from "next/link";
 import {
@@ -547,6 +546,7 @@ export function Janela({
   hojeChave,
   ontemChave,
   aoEnviarComSucesso,
+  aoRecarregarPeriodico,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -560,6 +560,9 @@ export function Janela({
   ontemChave: string;
   /** Chamado quando um envio conclui com sucesso (painel da /hoje usa). */
   aoEnviarComSucesso?: () => void;
+  /** Rede de segurança de 60s da tela que hospeda a janela. Sem isto a
+   *  Janela não recarrega nada sozinha — quem tem tempo real não passa. */
+  aoRecarregarPeriodico?: () => void;
 }) {
   const [estado, formAction, enviandoAcao] = useActionState(
     enviarMensagemLead,
@@ -579,18 +582,11 @@ export function Janela({
     sugestaoStore.ler,
     sugestaoStore.lerNoServidor,
   );
-  const sugestaoFantasma =
-    sugestaoBruta &&
-    sugestaoBruta.leadId === leadId &&
-    texto === "" &&
-    modo === "responder"
-      ? sugestaoBruta.texto
-      : null;
+  // A condição completa vive mais abaixo (precisa de janelaFechada).
 
   const caixaRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const router = useRouter();
 
   // Confirmadas locais: sem revalidatePath no envio, a bolha otimista
   // reverteria quando a action termina — a interação que ela devolve entra
@@ -688,13 +684,24 @@ export function Janela({
     void marcarChatLido(leadId);
   }, [leadId]);
 
-  // Mensagens novas aparecem sozinhas (aba visível).
+  // Rede de segurança periódica — só onde a tela pede. O chat tem tempo
+  // real e polling próprios: lá este intervalo refazia o server component
+  // inteiro de minuto em minuto, justamente o que o redesign eliminou.
+  // A callback vive num ref para o intervalo não reiniciar a cada render.
+  const recargaPeriodicaRef = useRef(aoRecarregarPeriodico);
   useEffect(() => {
+    recargaPeriodicaRef.current = aoRecarregarPeriodico;
+  }, [aoRecarregarPeriodico]);
+  const temRecargaPeriodica = Boolean(aoRecarregarPeriodico);
+  useEffect(() => {
+    if (!temRecargaPeriodica) return;
     const intervalo = setInterval(() => {
-      if (document.visibilityState === "visible") router.refresh();
+      if (document.visibilityState === "visible") {
+        recargaPeriodicaRef.current?.();
+      }
     }, INTERVALO_ATUALIZACAO);
     return () => clearInterval(intervalo);
-  }, [router]);
+  }, [temRecargaPeriodica]);
 
   // Teclado virtual (iPhone/Android): sem Shift+Enter, Enter deve quebrar
   // linha. Lido do cliente; no servidor assume teclado físico.
@@ -988,6 +995,18 @@ export function Janela({
       ? texto.trim().length > 0
       : !janelaFechada && (texto.trim().length > 0 || arquivos.length > 0));
 
+  // O balão fantasma só aparece com a caixa vazia, em modo resposta, para
+  // ESTE lead e com a janela de 24h aberta — fora dela o texto livre não
+  // chega, e sugerir seria convidar a escrever para o vazio.
+  const sugestaoFantasma =
+    sugestaoBruta &&
+    sugestaoBruta.leadId === leadId &&
+    texto === "" &&
+    modo === "responder" &&
+    !janelaFechada
+      ? sugestaoBruta.texto
+      : null;
+
   // Um slot de erro só: três parágrafos empilhados brigavam por atenção.
   // Aviso de anexo primeiro (é sempre reação ao ÚLTIMO gesto), depois IA,
   // depois o erro de envio — que é estado próprio zerado a cada envio novo,
@@ -1084,6 +1103,10 @@ export function Janela({
     // Nota privada não envia anexos: eles ficam para a resposta ao lead.
     setBackupEnvio({ texto, arquivos });
     setTexto("");
+    // A sugestão morre no envio: ela é derivada de "caixa vazia", então sem
+    // isto o balão RESSUSCITAVA logo depois do Enviar — oferecendo resposta
+    // para a mensagem que acabou de sair.
+    sugestaoStore.limpar(leadId);
     if (modo !== "nota") setArquivos([]);
     localStorage.removeItem(chaveRascunho);
     formAction(formData);
@@ -1349,20 +1372,30 @@ export function Janela({
           ) : null}
 
           {sugestaoFantasma ? (
-            <div className="mb-1 flex items-start gap-1 rounded-md border border-dashed border-primary-300 bg-primary-50 px-1.5 py-1">
-              <p className="min-w-0 flex-1 text-sm text-primary-900 opacity-80">
+            // role=status: o balão aparece SOZINHO e muda o que o Tab faz —
+            // quem usa leitor de tela precisa ser avisado disso.
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-1 flex items-start gap-1 rounded-md border border-dashed border-primary-300 bg-primary-50 px-1.5 py-1"
+            >
+              <p className="min-w-0 flex-1 text-sm text-primary-900">
+                <span className="sr-only">Sugestão da IA, Tab aceita: </span>
                 {sugestaoFantasma}
               </p>
-              <span className="shrink-0 font-mono text-xs text-primary-600">
+              <span
+                aria-hidden
+                className="shrink-0 font-mono text-xs text-primary-600"
+              >
                 Tab aceita
               </span>
               <button
                 type="button"
                 aria-label="Dispensar sugestão"
                 onClick={() => sugestaoStore.limpar(leadId)}
-                className="shrink-0 rounded-sm px-0.5 text-xs text-primary-600 hover:text-primary-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                className="-my-1 -mr-1 inline-flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-md text-primary-600 hover:bg-primary-100 hover:text-primary-900 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500"
               >
-                ✕
+                <X size={14} strokeWidth={2} aria-hidden />
               </button>
             </div>
           ) : null}
@@ -1385,8 +1418,16 @@ export function Janela({
             onKeyDown={(e) => {
               if (e.key === "Tab" && sugestaoFantasma && !e.shiftKey) {
                 // Tab aceita a sugestão; digitar qualquer coisa a ignora.
+                // Para SAIR do campo com o balão na tela: Esc dispensa (logo
+                // abaixo) ou Shift+Tab, que segue navegando normalmente.
                 e.preventDefault();
                 atualizarTexto(sugestaoFantasma);
+                sugestaoStore.limpar(leadId);
+                return;
+              }
+              if (e.key === "Escape" && sugestaoFantasma && !painelAberto) {
+                e.preventDefault();
+                e.stopPropagation();
                 sugestaoStore.limpar(leadId);
                 return;
               }

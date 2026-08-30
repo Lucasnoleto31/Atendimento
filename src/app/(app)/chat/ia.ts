@@ -107,11 +107,18 @@ export async function sugerirResposta(
     .filter(Boolean)
     .join("\n");
 
+  // Uma mensagem por LINHA, com as quebras do lead neutralizadas: sem isto
+  // ele escreve "\nATENDENTE: ..." e forja uma fala da equipe no meio do
+  // histórico. Aqui o risco é maior que no resumo — o texto sai como
+  // rascunho no compositor, a um Tab de ser enviado em nome da Zeve.
   const historico = [...interacoes]
     .reverse()
     .map((m) => {
       const quem = m.tipo === "mensagem_recebida" ? "LEAD" : "ATENDENTE";
-      return `${quem}: ${(m.conteudo ?? "[anexo sem texto]").slice(0, 600)}`;
+      const texto = (m.conteudo ?? "[anexo sem texto]")
+        .slice(0, 600)
+        .replace(/\s*[\r\n]+\s*/g, " ⏎ ");
+      return `${quem}: ${texto}`;
     })
     .join("\n");
 
