@@ -30,6 +30,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { sugestaoStore } from "./sugestao-store";
 import type { TemplateWhatsapp } from "@/lib/whatsapp";
 import { BotaoTemplates } from "./templates";
 import { GravadorAudio } from "./gravador-audio";
@@ -571,6 +572,20 @@ export function Janela({
     assinaturaStore.ler,
     assinaturaStore.lerNoServidor,
   );
+  // Balão fantasma do Chat da Mesa: o palco pede a sugestão à IA e deposita
+  // no store; ela só aparece enquanto a caixa está vazia e é DESTE lead.
+  const sugestaoBruta = useSyncExternalStore(
+    sugestaoStore.subscribe,
+    sugestaoStore.ler,
+    sugestaoStore.lerNoServidor,
+  );
+  const sugestaoFantasma =
+    sugestaoBruta &&
+    sugestaoBruta.leadId === leadId &&
+    texto === "" &&
+    modo === "responder"
+      ? sugestaoBruta.texto
+      : null;
 
   const caixaRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1333,6 +1348,24 @@ export function Janela({
             </div>
           ) : null}
 
+          {sugestaoFantasma ? (
+            <div className="mb-1 flex items-start gap-1 rounded-md border border-dashed border-primary-300 bg-primary-50 px-1.5 py-1">
+              <p className="min-w-0 flex-1 text-sm text-primary-900 opacity-80">
+                {sugestaoFantasma}
+              </p>
+              <span className="shrink-0 font-mono text-xs text-primary-600">
+                Tab aceita
+              </span>
+              <button
+                type="button"
+                aria-label="Dispensar sugestão"
+                onClick={() => sugestaoStore.limpar(leadId)}
+                className="shrink-0 rounded-sm px-0.5 text-xs text-primary-600 hover:text-primary-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              >
+                ✕
+              </button>
+            </div>
+          ) : null}
           <label htmlFor="texto-mensagem" className="sr-only">
             Mensagem para o lead
           </label>
@@ -1350,6 +1383,13 @@ export function Janela({
             value={texto}
             onChange={(e) => atualizarTexto(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === "Tab" && sugestaoFantasma && !e.shiftKey) {
+                // Tab aceita a sugestão; digitar qualquer coisa a ignora.
+                e.preventDefault();
+                atualizarTexto(sugestaoFantasma);
+                sugestaoStore.limpar(leadId);
+                return;
+              }
               if (painelAberto) {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();

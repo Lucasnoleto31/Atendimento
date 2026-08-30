@@ -30,10 +30,12 @@ import {
   alterarStatusConversaChat,
 } from "@/app/(app)/chat/actions";
 import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
-import { resumirConversa } from "@/app/(app)/chat/ia";
+import { resumirConversa, sugerirResposta } from "@/app/(app)/chat/ia";
+import { sugestaoStore } from "@/app/(app)/chat/sugestao-store";
 import { FerramentasPalco } from "./ferramentas-palco";
 import { PainelContexto } from "./contexto";
 import { PaletaComandos } from "./paleta";
+import { TempoRealConversas } from "./tempo-real";
 import {
   carregarListaConversas,
   type CargaConversas,
@@ -167,6 +169,7 @@ export function AppConversas({
   // Contadores de corrida: resposta que chega depois de outra troca é lixo.
   const pedidoConversaRef = useRef(0);
   const pedidoResumoRef = useRef(0);
+  const acordeGRef = useRef(0);
   // Quem está EM CENA agora. O contador sozinho não basta para a recarga do
   // menu ⋯: ela nasce numa closure do lead antigo e só é chamada depois da
   // troca, quando o contador já subiu — a identidade do lead é o que decide.
@@ -187,6 +190,29 @@ export function AppConversas({
     },
     [],
   );
+
+  // Rede de segurança do tempo real: uma recarga silenciosa por minuto,
+  // só com a aba visível. Sem publication (0014) ou com o canal caído, é
+  // isto que mantém a fila viva — sem flicker, porque não passa pelo
+  // estado de carregamento.
+  const estadoListaRef = useRef({ visao, escopo, busca });
+  useEffect(() => {
+    estadoListaRef.current = { visao, escopo, busca };
+  }, [visao, escopo, busca]);
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      const { visao: v, escopo: e, busca: b } = estadoListaRef.current;
+      void carregarListaConversas(v, { escopo: e, busca: b }).then((r) => {
+        // Só aplica se o filtro não mudou enquanto a resposta viajava.
+        const atual = estadoListaRef.current;
+        if (atual.visao === v && atual.escopo === e && atual.busca === b && !("erro" in r)) {
+          setCarga(r);
+        }
+      });
+    }, 60_000);
+    return () => window.clearInterval(t);
+  }, []);
 
   // Busca com respiro de 300ms; visão/escopo recarregam na hora.
   const timerBusca = useRef<number | null>(null);
@@ -224,7 +250,24 @@ export function AppConversas({
       if (pedido !== pedidoConversaRef.current) return;
       setCarregandoConversa(false);
       if ("erro" in r) setErroConversa(r.erro ?? "Não deu para abrir.");
-      else setConversa(r);
+      else {
+        setConversa(r);
+        // Balão fantasma: só quando o cliente falou por último — é quando
+        // existe uma resposta a escrever. Roda por fora do fluxo de abrir
+        // (a conversa nunca espera a IA) e o store descarta sozinho se o
+        // atendente trocar de conversa ou começar a digitar.
+        sugestaoStore.limpar();
+        const ultima = r.mensagens[r.mensagens.length - 1];
+        if (ultima && ultima.tipo === "mensagem_recebida") {
+          void sugerirResposta(linha.leadId)
+            .then((sug) => {
+              if (sug.sugestao && pedido === pedidoConversaRef.current) {
+                sugestaoStore.definir(linha.leadId, sug.sugestao);
+              }
+            })
+            .catch(() => {});
+        }
+      }
       // Abrir marca como lida no servidor (carregarConversa cuida); o
       // reflexo local é imediato.
       setCarga((c) => ({
@@ -242,6 +285,14 @@ export function AppConversas({
     if (fila.length === 0) return;
     const i = fila.findIndex((l) => l.leadId === aberta?.leadId);
     const alvo = fila[(i + 1) % fila.length];
+    if (alvo) void abrirConversa({ leadId: alvo.leadId, nome: alvo.nome });
+  }, [carga.linhas, aberta, abrirConversa]);
+
+  const anterior = useCallback(() => {
+    const fila = carga.linhas;
+    if (fila.length === 0) return;
+    const i = fila.findIndex((l) => l.leadId === aberta?.leadId);
+    const alvo = fila[(i - 1 + fila.length) % fila.length];
     if (alvo) void abrirConversa({ leadId: alvo.leadId, nome: alvo.nome });
   }, [carga.linhas, aberta, abrirConversa]);
 
@@ -348,6 +399,26 @@ export function AppConversas({
       // Com modificador é atalho do navegador/SO (Cmd+E, Ctrl+H) e repeat é
       // tecla presa — nenhum dos dois é intenção de despachar conversa.
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      const tecla = e.key.toLowerCase();
+      // Acorde G→C / G→A do desenho: "ir para" Caixa / Aguardando.
+      if (acordeGRef.current && Date.now() - acordeGRef.current < 600) {
+        acordeGRef.current = 0;
+        if (tecla === "c") {
+          setVisao("caixa");
+          void recarregarLista("caixa", escopo, busca);
+          return;
+        }
+        if (tecla === "a") {
+          setVisao("aguardando");
+          void recarregarLista("aguardando", escopo, busca);
+          return;
+        }
+      }
+      if (tecla === "g") {
+        acordeGRef.current = Date.now();
+        return;
+      }
+      if (tecla === "k") anterior();
       if (e.key.toLowerCase() === "j") proxima();
       if (e.key.toLowerCase() === "e" && aberta) {
         void despachar(aberta.leadId, "resolver");
@@ -358,7 +429,7 @@ export function AppConversas({
     };
     window.addEventListener("keydown", aoTeclar);
     return () => window.removeEventListener("keydown", aoTeclar);
-  }, [proxima, paletaAberta, painelAberto, fecharPainel, aberta, despachar]);
+  }, [proxima, anterior, paletaAberta, painelAberto, fecharPainel, aberta, despachar, escopo, busca, recarregarLista]);
 
   const pedirResumo = useCallback(async () => {
     if (!aberta || resumindo) return;
@@ -759,6 +830,11 @@ export function AppConversas({
         </>
       ) : null}
 
+      <TempoRealConversas
+        leadAbertoId={aberta?.leadId ?? null}
+        aoMensagemDoAberto={() => void recarregarConversaAberta()}
+        aoMudancaNaLista={() => void recarregarLista(visao, escopo, busca)}
+      />
       <PaletaComandos
         aberta={paletaAberta}
         aoFechar={() => setPaletaAberta(false)}
