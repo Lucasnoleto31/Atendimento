@@ -40,6 +40,7 @@ import {
   prepararUploadAnexo,
   type ResultadoEnvio,
 } from "./actions";
+import { carregarMensagensAnteriores } from "@/app/(app)/hoje/actions";
 import { corrigirTexto, sugerirResposta } from "./ia";
 
 const ESTADO: ResultadoEnvio = {};
@@ -541,7 +542,6 @@ export function Janela({
   mensagensPadrao,
   templates,
   restanteJanela,
-  urlMaisAntigas,
   marketingBloqueado,
   hojeChave,
   ontemChave,
@@ -554,7 +554,6 @@ export function Janela({
   mensagensPadrao: MensagemPadrao[];
   templates: TemplateWhatsapp[];
   restanteJanela: number | null;
-  urlMaisAntigas: string | null;
   marketingBloqueado: boolean;
   hojeChave: string;
   ontemChave: string;
@@ -593,12 +592,50 @@ export function Janela({
   // aqui e segura a mensagem na tela até um refresh natural alcançá-la
   // (aí o filtro por id descarta a cópia local).
   const [confirmadasLocais, setConfirmadasLocais] = useState<Mensagem[]>([]);
+  // Histórico antigo trazido sob demanda (a conversa abre com as 200
+  // últimas; conversa de cliente velho passa disso).
+  const [anteriores, setAnteriores] = useState<Mensagem[]>([]);
+  const [temAnteriores, setTemAnteriores] = useState(true);
+  const [buscandoAnteriores, setBuscandoAnteriores] = useState(false);
   const baseMensagens = useMemo(() => {
-    if (confirmadasLocais.length === 0) return mensagens;
-    const noServidor = new Set(mensagens.map((m) => m.id));
+    const base =
+      anteriores.length > 0 ? [...anteriores, ...mensagens] : mensagens;
+    if (confirmadasLocais.length === 0) return base;
+    const noServidor = new Set(base.map((m) => m.id));
     const locais = confirmadasLocais.filter((m) => !noServidor.has(m.id));
-    return locais.length > 0 ? [...mensagens, ...locais] : mensagens;
-  }, [mensagens, confirmadasLocais]);
+    return locais.length > 0 ? [...base, ...locais] : base;
+  }, [mensagens, anteriores, confirmadasLocais]);
+
+  /**
+   * Traz o lote anterior ao mais antigo que está na tela. A caixa é
+   * ancorada pela altura para o conteúdo novo não empurrar a leitura.
+   */
+  const carregarAnteriores = async () => {
+    const maisAntiga = baseMensagens[0];
+    if (!maisAntiga || buscandoAnteriores) return;
+    setBuscandoAnteriores(true);
+    const caixa = caixaRef.current;
+    const alturaAntes = caixa?.scrollHeight ?? 0;
+    try {
+      const r = await carregarMensagensAnteriores(leadId, maisAntiga.criado_em);
+      if ("erro" in r) {
+        setAvisoArquivo(r.erro);
+      } else {
+        setTemAnteriores(r.temMais);
+        if (r.mensagens.length === 0) setTemAnteriores(false);
+        else setAnteriores((a) => [...r.mensagens, ...a]);
+      }
+    } catch {
+      setAvisoArquivo("Sem resposta do servidor — tente de novo.");
+    } finally {
+      setBuscandoAnteriores(false);
+      // Mantém o olho onde estava: o conteúdo entrou ACIMA.
+      requestAnimationFrame(() => {
+        const c = caixaRef.current;
+        if (c) c.scrollTop += c.scrollHeight - alturaAntes;
+      });
+    }
+  };
 
   // Envio otimista: a mensagem aparece na hora, em cinza, enquanto viaja.
   const [listaMensagens, adicionarOtimista] = useOptimistic<
@@ -674,6 +711,8 @@ export function Janela({
   if (leadId !== leadAnterior) {
     setLeadAnterior(leadId);
     setConfirmadasLocais([]);
+    setAnteriores([]);
+    setTemAnteriores(true);
     // Erro e avisos são da conversa anterior — não podem vazar para esta.
     setErroEnvio(null);
     setAvisoArquivo(null);
@@ -1121,13 +1160,19 @@ export function Janela({
           aria-label="Histórico da conversa"
           className="flex h-full flex-col gap-1 overflow-y-auto bg-neutral-50 p-2"
         >
-          {urlMaisAntigas ? (
-            <Link
-              href={urlMaisAntigas}
-              className="self-center rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-0.5 text-xs font-medium text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          {/* Só aparece quando a conversa encheu o primeiro lote: conversa
+              curta não precisa de botão nenhum. */}
+          {temAnteriores && listaMensagens.length >= 200 ? (
+            <button
+              type="button"
+              disabled={buscandoAnteriores}
+              onClick={() => void carregarAnteriores()}
+              className="mb-1 inline-flex h-[40px] self-center items-center rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-60"
             >
-              Carregar mensagens anteriores
-            </Link>
+              {buscandoAnteriores
+                ? "Carregando…"
+                : "Carregar mensagens anteriores"}
+            </button>
           ) : null}
 
           {listaMensagens.length === 0 ? (

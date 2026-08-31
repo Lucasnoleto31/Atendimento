@@ -113,6 +113,46 @@ export type ConversaDoPainel = {
   ferramentas?: FerramentasDaConversa;
 };
 
+/** A linha crua de lead_interactions, como o PostgREST devolve. */
+type LinhaBrutaInteracao = {
+  id: string;
+  tipo: Mensagem["tipo"];
+  conteudo: string | null;
+  criado_em: string;
+  metadados: {
+    anexos?: { tipo?: string | null; nome?: string | null; url?: string | null }[];
+    status_envio?: string | null;
+    erro_envio?: string | null;
+    sistema?: boolean | null;
+    via?: string | null;
+    campanha?: string | null;
+  } | null;
+  autor: { nome: string } | null;
+};
+
+/** Linha do banco → bolha da Janela. */
+function paraMensagem(m: LinhaBrutaInteracao): Mensagem {
+  return {
+    id: m.id,
+    tipo: m.tipo,
+    conteudo: m.conteudo,
+    criado_em: m.criado_em,
+    autor: m.autor?.nome ?? null,
+    anexos: (m.metadados?.anexos ?? []).flatMap((a) =>
+      a.url ? [{ tipo: a.tipo ?? "file", nome: a.nome ?? null, url: a.url }] : [],
+    ),
+    statusEnvio: m.metadados?.status_envio ?? null,
+    erroEnvio: m.metadados?.erro_envio ?? null,
+    metadados: m.metadados
+      ? {
+          sistema: m.metadados.sistema === true,
+          via: m.metadados.via ?? null,
+          campanha: m.metadados.campanha ?? null,
+        }
+      : null,
+  };
+}
+
 /**
  * Carrega o necessário para a Janela do chat abrir dentro da /hoje — a
  * mesma conversa, sem sair da fila.
@@ -222,44 +262,10 @@ export async function carregarConversa(
 
   if (!lead) return { erro: "Lead não encontrado." };
 
-  type LinhaBruta = {
-    id: string;
-    tipo: Mensagem["tipo"];
-    conteudo: string | null;
-    criado_em: string;
-    metadados: {
-      anexos?: { tipo?: string | null; nome?: string | null; url?: string | null }[];
-      status_envio?: string | null;
-      erro_envio?: string | null;
-      sistema?: boolean | null;
-      via?: string | null;
-      campanha?: string | null;
-    } | null;
-    autor: { nome: string } | null;
-  };
-
-  const mensagens: Mensagem[] = ((interacoes ?? []) as unknown as LinhaBruta[])
-    .map((m) => ({
-      id: m.id,
-      tipo: m.tipo,
-      conteudo: m.conteudo,
-      criado_em: m.criado_em,
-      autor: m.autor?.nome ?? null,
-      anexos: (m.metadados?.anexos ?? []).flatMap((a) =>
-        a.url
-          ? [{ tipo: a.tipo ?? "file", nome: a.nome ?? null, url: a.url }]
-          : [],
-      ),
-      statusEnvio: m.metadados?.status_envio ?? null,
-      erroEnvio: m.metadados?.erro_envio ?? null,
-      metadados: m.metadados
-        ? {
-            sistema: m.metadados.sistema === true,
-            via: m.metadados.via ?? null,
-            campanha: m.metadados.campanha ?? null,
-          }
-        : null,
-    }))
+  const mensagens: Mensagem[] = (
+    (interacoes ?? []) as unknown as LinhaBrutaInteracao[]
+  )
+    .map(paraMensagem)
     .reverse();
 
   const ultimaRecebida = [...mensagens]
@@ -304,5 +310,37 @@ export async function carregarConversa(
           ),
           leadPerdido: lead.status === "perdido",
         },
+  };
+}
+
+/**
+ * As mensagens ANTERIORES às que já estão na tela. A conversa abre com as
+ * 200 últimas (o que cobre quase tudo); em cliente antigo, é por aqui que
+ * o atendente alcança o começo da história.
+ */
+export async function carregarMensagensAnteriores(
+  leadId: string,
+  antesDeIso: string,
+): Promise<{ mensagens: Mensagem[]; temMais: boolean } | { erro: string }> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada." };
+  if (!leadId || !antesDeIso) return { erro: "Conversa não informada." };
+
+  const LOTE = 100;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("lead_interactions")
+    .select("id, tipo, conteudo, criado_em, metadados, autor:profiles(nome)")
+    .eq("lead_id", leadId)
+    .in("tipo", ["mensagem_recebida", "mensagem_enviada", "nota"])
+    .lt("criado_em", antesDeIso)
+    .order("criado_em", { ascending: false })
+    .limit(LOTE);
+  if (error) return { erro: "Não deu para carregar o histórico." };
+
+  const linhas = (data ?? []) as unknown as LinhaBrutaInteracao[];
+  return {
+    mensagens: linhas.map(paraMensagem).reverse(),
+    temMais: linhas.length === LOTE,
   };
 }

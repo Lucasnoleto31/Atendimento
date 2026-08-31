@@ -30,6 +30,12 @@ export function TempoRealConversas({
   aoMudancaNaLista: () => void;
 }) {
   const timerRef = useRef<number | null>(null);
+  // Pendências SEPARADAS: a conversa aberta só recarrega se chegou mensagem
+  // NELA. Uma pendência só fazia o retorno à aba recarregar a conversa por
+  // causa de mensagem de outro lead — e essa recarga marca lida, desfazendo
+  // o "marcar como não lida" que a equipe tinha acabado de usar.
+  const pendenteListaRef = useRef(false);
+  const pendenteAbertoRef = useRef(false);
   const abertoRef = useRef(leadAbertoId);
   const cbAbertoRef = useRef(aoMensagemDoAberto);
   const cbListaRef = useRef(aoMudancaNaLista);
@@ -44,13 +50,48 @@ export function TempoRealConversas({
   useEffect(() => {
     const supabase = createClient();
 
+    const limparTimer = () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+
     const agendarLista = () => {
       if (timerRef.current !== null) return;
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
+        // Aba oculta não paga recarga: quem volta ressincroniza de uma vez.
+        if (document.visibilityState !== "visible") {
+          pendenteListaRef.current = true;
+          return;
+        }
         cbListaRef.current();
       }, RESPIRO_MS);
     };
+
+    // A aba escondida perde eventos (o navegador congela o socket). Ao
+    // voltar, ressincroniza SEMPRE — depender de "chegou evento" deixava
+    // quem voltou do almoço olhando a fila de duas horas atrás.
+    let estavaOculta = document.visibilityState !== "visible";
+    const aoVoltar = () => {
+      if (document.visibilityState !== "visible") {
+        estavaOculta = true;
+        return;
+      }
+      if (!estavaOculta) return;
+      estavaOculta = false;
+      // O respiro pendente seria uma segunda recarga logo atrás desta.
+      limparTimer();
+      pendenteListaRef.current = false;
+      cbListaRef.current();
+      // A conversa aberta só recarrega se chegou mensagem NELA.
+      if (pendenteAbertoRef.current) {
+        pendenteAbertoRef.current = false;
+        cbAbertoRef.current();
+      }
+    };
+    document.addEventListener("visibilitychange", aoVoltar);
 
     const aoEvento = (linha: LinhaInteracao) => {
       if (!linha.lead_id) return;
@@ -59,8 +100,12 @@ export function TempoRealConversas({
       // compositor por uma mensagem que já está lá.
       if (linha.id && consumirEcoRealtime(linha.id)) return;
       if (linha.lead_id === abertoRef.current) {
-        // A conversa na tela atualiza já — é o que o atendente está olhando.
-        cbAbertoRef.current();
+        if (document.visibilityState === "visible") {
+          // A conversa na tela atualiza já — é o que o atendente olha.
+          cbAbertoRef.current();
+        } else {
+          pendenteAbertoRef.current = true;
+        }
       }
       agendarLista();
     };
@@ -90,7 +135,8 @@ export function TempoRealConversas({
       .subscribe();
 
     return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      document.removeEventListener("visibilitychange", aoVoltar);
+      limparTimer();
       void supabase.removeChannel(canal);
     };
   }, []);

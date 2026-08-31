@@ -209,7 +209,6 @@ export function PainelConversa() {
             mensagensPadrao={dados.mensagensPadrao}
             templates={dados.templates}
             restanteJanela={dados.restanteJanela}
-            urlMaisAntigas={null}
             marketingBloqueado={dados.marketingBloqueado}
             hojeChave={dados.hojeChave}
             ontemChave={dados.ontemChave}

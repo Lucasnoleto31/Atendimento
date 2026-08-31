@@ -29,6 +29,7 @@ import {
   adiarConversa,
   alterarStatusConversaChat,
   marcarChatLido,
+  reativarConversa,
 } from "@/app/(app)/chat/actions";
 import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
 import { resumirConversa, sugerirResposta } from "@/app/(app)/chat/ia";
@@ -61,6 +62,14 @@ const VISOES: { chave: VisaoConversas; rotulo: string; icone: React.ReactNode }[
   { chave: "adiadas", rotulo: "Adiadas", icone: <Timer size={19} strokeWidth={1.7} aria-hidden /> },
   { chave: "tudo", rotulo: "Tudo", icone: <ListFilter size={19} strokeWidth={1.7} aria-hidden /> },
 ];
+
+/** Nome por extenso (o trilho abrevia "Aguard." por falta de espaço). */
+const NOME_DA_VISAO: Record<VisaoConversas, string> = {
+  caixa: "Caixa",
+  aguardando: "Aguardando",
+  adiadas: "Adiadas",
+  tudo: "Tudo",
+};
 
 const ORDENS: Record<VisaoConversas, string> = {
   caixa: "Quem espera mais, primeiro. Adiadas vencidas voltaram para cá.",
@@ -170,6 +179,7 @@ export function AppConversas({
     if (telaLarga && painelAberto) setPainelAberto(false);
   }
   const [sinalContexto, setSinalContexto] = useState(0);
+  const listaRef = useRef<HTMLDivElement>(null);
   // Devolve o foco ao botão que abriu a folha — solto no body, a próxima
   // letra digitada viraria atalho do palco (E resolve a conversa).
   const gatilhoPainelRef = useRef<HTMLButtonElement>(null);
@@ -178,6 +188,15 @@ export function AppConversas({
     setPainelAberto(false);
     gatilhoPainelRef.current?.focus();
   }, []);
+  // Andar na fila (J/K, Próxima) tem de trazer a linha para a vista — o
+  // realce sozinho não serve se ele está fora da área visível.
+  useEffect(() => {
+    if (!aberta) return;
+    listaRef.current
+      ?.querySelector(`[data-lead="${CSS.escape(aberta.leadId)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [aberta]);
+
   // A folha é aria-modal: o foco entra nela ao abrir. Sem isto ele ficava
   // do lado de fora, e as teclas do palco (E resolve, H adia) seguiam vivas
   // por trás do overlay.
@@ -384,8 +403,8 @@ export function AppConversas({
           agendarSugestao(linha.leadId, pedido, ultima.id);
         }
       }
-      // Abrir marca como lida no servidor (carregarConversa cuida); o
-      // reflexo local é imediato.
+      // Quem marca lida no servidor é a Janela, ao montar (marcarChatLido).
+      // Aqui é só o reflexo local, imediato, na linha da fila.
       setCarga((c) => ({
         ...c,
         linhas: c.linhas.map((l) =>
@@ -396,26 +415,36 @@ export function AppConversas({
     [agendarSugestao],
   );
 
-  const proxima = useCallback(() => {
-    const fila = carga.linhas;
-    if (fila.length === 0) return;
-    const i = fila.findIndex((l) => l.leadId === aberta?.leadId);
-    const alvo = fila[(i + 1) % fila.length];
-    if (alvo) void abrirConversa({ leadId: alvo.leadId, nome: alvo.nome });
-  }, [carga.linhas, aberta, abrirConversa]);
+  /**
+   * Anda na fila. Quando a conversa em cena NÃO está na lista (veio de um
+   * deep link, ou saiu ao ser resolvida), o findIndex devolve -1: J tem de
+   * ir para a primeira e K para a ÚLTIMA — a conta com % levava K para a
+   * penúltima.
+   */
+  const andarNaFila = useCallback(
+    (passo: 1 | -1) => {
+      const fila = carga.linhas;
+      if (fila.length === 0) return;
+      const i = fila.findIndex((l) => l.leadId === aberta?.leadId);
+      const alvo =
+        i === -1
+          ? fila[passo === 1 ? 0 : fila.length - 1]
+          : fila[(i + passo + fila.length) % fila.length];
+      // Fila de um item só: a volta cai nela mesma. Reabrir descartaria o
+      // que está no compositor por nada.
+      if (!alvo || alvo.leadId === abertaRef.current?.leadId) return;
+      void abrirConversa({ leadId: alvo.leadId, nome: alvo.nome });
+    },
+    [carga.linhas, aberta, abrirConversa],
+  );
 
-  const anterior = useCallback(() => {
-    const fila = carga.linhas;
-    if (fila.length === 0) return;
-    const i = fila.findIndex((l) => l.leadId === aberta?.leadId);
-    const alvo = fila[(i - 1 + fila.length) % fila.length];
-    if (alvo) void abrirConversa({ leadId: alvo.leadId, nome: alvo.nome });
-  }, [carga.linhas, aberta, abrirConversa]);
+  const proxima = useCallback(() => andarNaFila(1), [andarNaFila]);
+  const anterior = useCallback(() => andarNaFila(-1), [andarNaFila]);
 
   // Resolver/Adiar de 1 clique: a linha some da visão na hora (otimista) e
   // o servidor confirma; erro devolve a linha e avisa.
   const despachar = useCallback(
-    async (leadId: string, acao: "resolver" | "adiar") => {
+    async (leadId: string, acao: "resolver" | "adiar" | "reativar") => {
       // Tecla presa ou E-E em sequência na MESMA conversa: a segunda espera
       // (o repeat duplicava o adiar e inflava as contagens). Outra conversa
       // segue livre.
@@ -426,7 +455,9 @@ export function AppConversas({
         r =
           acao === "resolver"
             ? await alterarStatusConversaChat(leadId, "resolved")
-            : await adiarConversa(leadId, "amanha");
+            : acao === "reativar"
+              ? await reativarConversa(leadId)
+              : await adiarConversa(leadId, "amanha");
       } catch {
         // Rede caiu no meio: sem este catch a promessa rejeitava, o lead
         // ficava preso em "pendente" e resolver/adiar morria em silêncio.
@@ -450,15 +481,30 @@ export function AppConversas({
             : c.linhas.filter((l) => l.leadId !== leadId),
         contagens: {
           ...c.contagens,
-          caixa: Math.max(0, c.contagens.caixa - (visao === "caixa" ? 1 : 0)),
+          // A conversa reativada VOLTA para a caixa; a adiada sai dela.
+          caixa: Math.max(
+            0,
+            c.contagens.caixa +
+              (acao === "reativar" ? 1 : visao === "caixa" ? -1 : 0),
+          ),
           aguardando: Math.max(
             0,
             c.contagens.aguardando - (visao === "aguardando" ? 1 : 0),
           ),
-          adiadas: c.contagens.adiadas + (acao === "adiar" ? 1 : 0),
+          // Adiar já estando na visão Adiadas não soma: a linha só sai da
+          // lista e voltaria a ser contada, ficando duas vezes no badge.
+          adiadas: Math.max(
+            0,
+            c.contagens.adiadas +
+              (acao === "adiar" && visao !== "adiadas"
+                ? 1
+                : acao === "reativar"
+                  ? -1
+                  : 0),
+          ),
         },
       }));
-      if (aberta?.leadId === leadId) proxima();
+      if (aberta?.leadId === leadId && acao !== "reativar") proxima();
     },
     [visao, aberta, proxima, acaoPendente],
   );
@@ -686,9 +732,7 @@ export function AppConversas({
         <div className="px-2 pt-2">
           <div className="flex items-baseline gap-1">
             <h1 className="text-h3 font-semibold text-neutral-900">
-              {VISOES.find((v) => v.chave === visao)?.rotulo === "Aguard."
-                ? "Aguardando"
-                : VISOES.find((v) => v.chave === visao)?.rotulo}
+              {NOME_DA_VISAO[visao]}
             </h1>
             <span className="font-mono text-xs text-neutral-400 tabular-nums">
               {contagemDe(visao) ?? carga.linhas.length}
@@ -734,18 +778,31 @@ export function AppConversas({
               </p>
             </div>
           ) : (
-            carga.linhas.map((l) => (
-              <LinhaLista
-                key={l.leadId}
-                linha={l}
-                aberta={l.leadId === aberta?.leadId}
-                hojeChave={hojeChave}
-                pendente={acaoPendente.has(l.leadId)}
-                aoAbrir={() => void abrirConversa({ leadId: l.leadId, nome: l.nome })}
-                aoResolver={() => void despachar(l.leadId, "resolver")}
-                aoAdiar={() => void despachar(l.leadId, "adiar")}
-              />
-            ))
+            // role="list" de verdade em volta: as linhas são listitem, e
+            // listitem solto o leitor de tela ignora.
+            <div
+              ref={listaRef}
+              role="list"
+              aria-label={`Conversas — ${NOME_DA_VISAO[visao]}`}
+            >
+              {carga.linhas.map((l) => (
+                <LinhaLista
+                  key={l.leadId}
+                  linha={l}
+                  aberta={l.leadId === aberta?.leadId}
+                  hojeChave={hojeChave}
+                  pendente={acaoPendente.has(l.leadId)}
+                  aoAbrir={() => void abrirConversa({ leadId: l.leadId, nome: l.nome })}
+                  aoResolver={() => void despachar(l.leadId, "resolver")}
+                  aoAdiar={() => void despachar(l.leadId, "adiar")}
+                  aoReativar={
+                    visao === "adiadas"
+                      ? () => void despachar(l.leadId, "reativar")
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
           )}
 
           {carga.temMais && !carregandoLista ? (
@@ -937,7 +994,6 @@ export function AppConversas({
                 mensagensPadrao={conversa.mensagensPadrao}
                 templates={conversa.templates}
                 restanteJanela={conversa.restanteJanela}
-                urlMaisAntigas={null}
                 marketingBloqueado={conversa.marketingBloqueado}
                 hojeChave={conversa.hojeChave}
                 ontemChave={conversa.ontemChave}
@@ -1069,6 +1125,21 @@ export function AppConversas({
               },
             ],
           },
+          ...(visao === "adiadas" && aberta
+            ? [
+                {
+                  grupo: "Esta conversa",
+                  itens: [
+                    {
+                      rotulo: "Voltar para a caixa (tirar do adiamento)",
+                      tecla: "",
+                      precisaConversa: true,
+                      acao: () => void despachar(aberta.leadId, "reativar"),
+                    },
+                  ],
+                },
+              ]
+            : []),
           {
             grupo: "Ir para",
             itens: [
@@ -1093,6 +1164,7 @@ function LinhaLista({
   aoAbrir,
   aoResolver,
   aoAdiar,
+  aoReativar,
 }: {
   linha: LinhaConversa;
   aberta: boolean;
@@ -1101,6 +1173,8 @@ function LinhaLista({
   aoAbrir: () => void;
   aoResolver: () => void;
   aoAdiar: () => void;
+  /** Só na visão Adiadas: traz a conversa de volta antes do prazo. */
+  aoReativar?: () => void;
 }) {
   const espera = rotuloEspera(linha.esperaHoras);
   const critica = (linha.esperaHoras ?? 0) >= 24;
@@ -1125,11 +1199,11 @@ function LinhaLista({
     setArrasto(0);
     if (Math.abs(distancia) >= 8) arrastouRef.current = true;
     if (distancia >= LIMIAR) aoResolver();
-    else if (distancia <= -LIMIAR) aoAdiar();
+    else if (distancia <= -LIMIAR) (aoReativar ?? aoAdiar)();
   };
 
   return (
-    <div className="relative overflow-hidden rounded-lg">
+    <div className="relative overflow-hidden rounded-lg" data-lead={linha.leadId}>
       {/* A pista que aparece atrás da linha enquanto o dedo arrasta: verde à
           esquerda (resolver), âmbar à direita (adiar). */}
       {arrasto !== 0 ? (
@@ -1149,8 +1223,12 @@ function LinhaLista({
             </span>
           ) : (
             <span className="inline-flex items-center gap-0.5">
-              {arrasto <= -LIMIAR ? "Adiar" : "Arraste"}
-              <Clock size={16} strokeWidth={1.7} aria-hidden />
+              {arrasto <= -LIMIAR ? (aoReativar ? "Voltar" : "Adiar") : "Arraste"}
+              {aoReativar ? (
+                <RotateCcw size={16} strokeWidth={1.7} aria-hidden />
+              ) : (
+                <Clock size={16} strokeWidth={1.7} aria-hidden />
+              )}
             </span>
           )}
         </div>
@@ -1320,18 +1398,34 @@ function LinhaLista({
         >
           <Check size={15} strokeWidth={2} aria-hidden />
         </button>
-        <button
-          type="button"
-          aria-label={`Adiar conversa com ${linha.nome} até amanhã`}
-          disabled={pendente}
-          onClick={(e) => {
-            e.stopPropagation();
-            aoAdiar();
-          }}
-          className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-        >
-          <Clock size={15} strokeWidth={1.7} aria-hidden />
-        </button>
+        {aoReativar ? (
+          <button
+            type="button"
+            aria-label={`Trazer a conversa com ${linha.nome} de volta para a caixa`}
+            title="Voltar para a caixa agora"
+            disabled={pendente}
+            onClick={(e) => {
+              e.stopPropagation();
+              aoReativar();
+            }}
+            className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-primary-600 hover:bg-primary-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          >
+            <RotateCcw size={15} strokeWidth={1.7} aria-hidden />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label={`Adiar conversa com ${linha.nome} até amanhã`}
+            disabled={pendente}
+            onClick={(e) => {
+              e.stopPropagation();
+              aoAdiar();
+            }}
+            className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          >
+            <Clock size={15} strokeWidth={1.7} aria-hidden />
+          </button>
+        )}
       </div>
     </div>
     </div>
