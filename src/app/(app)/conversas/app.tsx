@@ -33,8 +33,10 @@ import {
   alterarStatusConversaChat,
   marcarChatLido,
   reativarConversa,
+  adiarConversasEmMassa,
   etiquetarEmMassa,
   resolverConversasEmMassa,
+  type PrazoAdiar,
 } from "@/app/(app)/chat/actions";
 import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
 import { resumirConversa, sugerirResposta } from "@/app/(app)/chat/ia";
@@ -982,6 +984,25 @@ export function AppConversas({
                       {e.nome}
                     </option>
                   ))}
+                </select>
+
+                <select
+                  value=""
+                  disabled={massaPendente || selecionadas.size === 0}
+                  onChange={(e) => {
+                    const prazo = e.target.value as PrazoAdiar | "";
+                    if (!prazo) return;
+                    void executarMassa(() =>
+                      adiarConversasEmMassa([...selecionadas], prazo),
+                    );
+                  }}
+                  aria-label="Adiar as conversas selecionadas"
+                  className="h-[30px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-xs text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+                >
+                  <option value="">Adiar…</option>
+                  <option value="amanha">até amanhã</option>
+                  <option value="3dias">por 3 dias</option>
+                  <option value="1semana">por 1 semana</option>
                 </select>
 
                 <button
