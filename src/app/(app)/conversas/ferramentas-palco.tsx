@@ -28,6 +28,7 @@ export function FerramentasPalco({
   ferramentas,
   aoMudar,
   aoMarcarNaoLida,
+  aoSairDaFila,
 }: {
   leadId: string;
   nome: string;
@@ -35,6 +36,10 @@ export function FerramentasPalco({
   aoMudar: () => void;
   /** Avisa a lista para pintar a linha de volta como não lida. */
   aoMarcarNaoLida?: () => void;
+  /** A conversa DEIXOU a fila (perdida ou em stand-by): a linha tem de sair
+   *  na hora, como sai no Resolver — senão fica lá como se nada tivesse
+   *  acontecido até a varredura seguinte. */
+  aoSairDaFila?: () => void;
 }) {
   const [aberto, setAberto] = useState(false);
   const [pendente, iniciar] = useTransition();
@@ -340,7 +345,11 @@ export function FerramentasPalco({
               <button
                 type="button"
                 disabled={pendente}
-                onClick={() => executar(() => marcarStandBy(leadId))}
+                onClick={() =>
+                  executar(() => marcarStandBy(leadId), {
+                    aoConcluir: aoSairDaFila,
+                  })
+                }
                 className="inline-flex h-[40px] items-center rounded-md border border-accent-300 bg-neutral-0 px-1.5 text-sm font-medium text-accent-700 hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:opacity-50"
               >
                 Stand-by — volta em 1 semana
@@ -379,7 +388,9 @@ export function FerramentasPalco({
                 type="button"
                 disabled={pendente || motivo === ""}
                 onClick={() =>
-                  executar(() => marcarPerdidoChat(leadId, motivo, detalhe))
+                  executar(() => marcarPerdidoChat(leadId, motivo, detalhe), {
+                    aoConcluir: aoSairDaFila,
+                  })
                 }
                 className="inline-flex h-[40px] items-center rounded-md bg-danger px-1.5 text-sm font-medium text-neutral-0 hover:brightness-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
               >

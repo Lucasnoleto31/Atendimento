@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { estiloEtiqueta } from "@/lib/etiquetas";
 import { Janela } from "@/app/(app)/chat/janela";
 import {
   adiarConversa,
@@ -726,6 +727,37 @@ export function AppConversas({
     [aberta],
   );
 
+  /**
+   * A conversa saiu da fila por uma ação do menu ⋯ (perdida, stand-by): a
+   * linha some na hora e o palco anda, igual ao Resolver. Sem isto ela
+   * ficava na caixa como se nada tivesse acontecido.
+   */
+  const tirarDaFila = useCallback(
+    (leadId: string) => {
+      setCarga((c) => ({
+        ...c,
+        linhas:
+          visao === "tudo"
+            ? c.linhas
+            : c.linhas.filter((l) => l.leadId !== leadId),
+        contagens: {
+          ...c.contagens,
+          caixa: Math.max(0, c.contagens.caixa - (visao === "caixa" ? 1 : 0)),
+          aguardando: Math.max(
+            0,
+            c.contagens.aguardando - (visao === "aguardando" ? 1 : 0),
+          ),
+          adiadas: Math.max(
+            0,
+            c.contagens.adiadas - (visao === "adiadas" ? 1 : 0),
+          ),
+        },
+      }));
+      if (abertaRef.current?.leadId === leadId) proxima();
+    },
+    [visao, proxima],
+  );
+
   /** O menu ⋯ marcou "não lida": a linha volta a ficar em negrito na hora. */
   const marcarLinhaNaoLida = useCallback((leadId: string) => {
     setCarga((c) => ({
@@ -1019,10 +1051,16 @@ export function AppConversas({
                     leadId={aberta.leadId}
                     nome={aberta.nome}
                     ferramentas={conversa.ferramentas}
-                    aoMudar={() =>
-                      void recarregarConversaAberta({ mudouCadastro: true })
-                    }
+                    aoMudar={() => {
+                      void recarregarConversaAberta({ mudouCadastro: true });
+                      // Etapa, atendente e etiqueta aparecem na LINHA: sem
+                      // esta recarga a fila ficava mostrando o valor velho.
+                      void recarregarLista(visao, escopo, busca, {
+                        silenciosa: true,
+                      });
+                    }}
                     aoMarcarNaoLida={() => marcarLinhaNaoLida(aberta.leadId)}
+                    aoSairDaFila={() => tirarDaFila(aberta.leadId)}
                   />
                 ) : (
                   // Sem o payload de ferramentas (banco sem alguma migração):
@@ -1061,6 +1099,15 @@ export function AppConversas({
                   <X size={14} strokeWidth={2} aria-hidden />
                 </button>
               </div>
+            ) : null}
+
+            {erroLista ? (
+              <p
+                role="alert"
+                className="m-2 rounded-md border border-danger bg-danger-bg px-1.5 py-1 text-sm text-danger md:hidden"
+              >
+                {erroLista}
+              </p>
             ) : null}
 
             {erroConversa ? (
@@ -1445,6 +1492,29 @@ function LinhaLista({
             )}
           </span>
         </div>
+        {/* Etiquetas entre o nome e a prévia: é o que diz de que TIPO é
+            esta conversa antes de abri-la (Stand-by, VIP, Reativação). */}
+        {linha.etiquetas.length > 0 ? (
+          <div className="mt-[2px] flex flex-wrap items-center gap-0.5">
+            {linha.etiquetas.slice(0, 3).map((e) => (
+              <span
+                key={e.nome}
+                className={cn(
+                  "inline-flex h-[18px] max-w-[120px] items-center truncate rounded-sm px-0.5 text-xs font-medium",
+                  estiloEtiqueta(e.cor).chip,
+                )}
+              >
+                {e.nome}
+              </span>
+            ))}
+            {linha.etiquetas.length > 3 ? (
+              <span className="font-mono text-xs text-neutral-600">
+                +{linha.etiquetas.length - 3}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="mt-[1px] flex items-center gap-0.5">
           {linha.vez === "nos" ? (
             <CheckCheck size={14} strokeWidth={1.7} aria-hidden className="shrink-0 text-neutral-400" />

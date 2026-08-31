@@ -41,6 +41,8 @@ export type LinhaConversa = {
   /** Quem está no atendimento — aparece acima do nome do lead na fila. */
   responsavelNome: string | null;
   etiquetaNome: string | null;
+  /** Todas as etiquetas do lead, com a cor cadastrada — vão na linha. */
+  etiquetas: { nome: string; cor: string | null }[];
   sub: string | null;
 };
 
@@ -213,11 +215,20 @@ export async function carregarListaConversas(
   }
 
   const ids = linhasView.map((l) => l.lead_id);
+  // A view devolve os NOMES das etiquetas; a cor mora em tags. Uma consulta
+  // para a lista inteira (são poucas etiquetas), não uma por linha.
 
   // Enriquecimento em paralelo: colunas de leads que a view não expõe,
   // prévia da última mensagem (RPC 0045) e as três contagens do trilho.
-  const [extrasR, previasR, ctCaixaAbertas, ctCaixaVencidas, ctAguardando, ctAdiadas] =
-    await Promise.all([
+  const [
+    extrasR,
+    previasR,
+    ctCaixaAbertas,
+    ctCaixaVencidas,
+    ctAguardando,
+    ctAdiadas,
+    tagsR,
+  ] = await Promise.all([
       ids.length > 0
         ? (async () => {
             const cheio = await supabase
@@ -267,7 +278,17 @@ export async function carregarListaConversas(
         const cheio = await montar(true);
         return cheio.error ? montar(false) : cheio;
       })(),
+      supabase.from("tags").select("nome, cor"),
     ]);
+
+  // Nome → cor. Sem a consulta (RLS, migração), o chip sai neutro: melhor
+  // etiqueta sem cor do que linha sem etiqueta.
+  const coresPorNome = new Map(
+    ((tagsR.data ?? []) as { nome: string; cor: string | null }[]).map((t) => [
+      t.nome,
+      t.cor,
+    ]),
+  );
 
   const extras = new Map(
     ((extrasR.data ?? []) as ExtrasLead[]).map((e) => [e.id, e]),
@@ -313,11 +334,12 @@ export async function carregarListaConversas(
       responsavelIniciais: iniciais(l.responsavel_nome),
       responsavelNome: l.responsavel_nome,
       etiquetaNome: l.etiquetas?.[0] ?? null,
-      sub: adiadaVencida
-        ? "adiada · prazo venceu"
-        : l.etiquetas?.includes("Stand-by")
-          ? "Stand-by"
-          : null,
+      etiquetas: (l.etiquetas ?? []).map((nome) => ({
+        nome,
+        cor: coresPorNome.get(nome) ?? null,
+      })),
+      // Stand-by já aparece como chip de etiqueta na linha.
+      sub: adiadaVencida ? "adiada · prazo venceu" : null,
     };
   });
 
