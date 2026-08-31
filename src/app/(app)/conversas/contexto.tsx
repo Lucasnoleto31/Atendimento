@@ -338,6 +338,36 @@ export function PainelContexto({
               </section>
             ) : null}
 
+            {/* Templates já gastos com este lead */}
+            {dados.templates.total > 0 ? (
+              <section className="flex flex-col gap-1">
+                <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+                  Templates
+                </h3>
+                <Campo rotulo="Já disparados">
+                  <span className="font-mono tabular-nums">
+                    {dados.templates.total}
+                  </span>
+                  {dados.templates.custoCentavos !== null ? (
+                    <span className="text-neutral-600">
+                      {" · "}
+                      <span className="font-mono tabular-nums">
+                        {formatarReais(dados.templates.custoCentavos)}
+                      </span>
+                    </span>
+                  ) : null}
+                </Campo>
+                {dados.templates.ultimoEm ? (
+                  <Campo rotulo="Último">
+                    {formatarData(dados.templates.ultimoEm)}
+                    {dados.templates.ultimoNome
+                      ? ` · ${dados.templates.ultimoNome}`
+                      : ""}
+                  </Campo>
+                ) : null}
+              </section>
+            ) : null}
+
             {/* Tarefas — o que ficou combinado */}
             <section>
               <div className="flex items-center gap-1">

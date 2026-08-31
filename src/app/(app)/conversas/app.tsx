@@ -107,6 +107,10 @@ const lerXl = () => window.matchMedia(CONSULTA_XL).matches;
 // está varrendo a fila com J passa muito mais rápido que isto e não gasta.
 const ESPERA_SUGESTAO_MS = 1_200;
 
+// A partir de quantas mensagens o resumo entra sozinho. Abaixo disso a
+// conversa se lê de um golpe de vista e a chamada seria desperdício.
+const MENSAGENS_PARA_RESUMO_AUTO = 12;
+
 function rotuloEspera(horas: number | null): string | null {
   if (horas === null) return null;
   if (horas < 1) return `${Math.max(1, Math.round(horas * 60))}min`;
@@ -212,6 +216,8 @@ export function AppConversas({
   // já foi sugerido (chave conversa + última mensagem).
   const timerSugestaoRef = useRef<number | null>(null);
   const cacheSugestaoRef = useRef(new Map<string, string>());
+  const timerResumoRef = useRef<number | null>(null);
+  const cacheResumoRef = useRef(new Map<string, string>());
   const acordeGRef = useRef(0);
   // Quem está EM CENA agora. O contador sozinho não basta para a recarga do
   // menu ⋯: ela nasce numa closure do lead antigo e só é chamada depois da
@@ -370,10 +376,57 @@ export function AppConversas({
     [],
   );
 
+  /**
+   * O resumo que entra sozinho na conversa longa. Regras que o tornam
+   * barato e honesto:
+   *  - não anuncia "Resumindo…": ninguém pediu, então ele só aparece PRONTO
+   *    (e falha em silêncio, sem card fantasma piscando a cada abertura);
+   *  - não incrementa o contador de resumo: quem clica no ✦ sempre vence;
+   *  - grava no cache mesmo quando a resposta chega tarde — já foi paga.
+   */
+  const agendarResumo = useCallback(
+    (leadId: string, pedido: number, chaveMensagemId: string) => {
+      if (timerResumoRef.current !== null) {
+        clearTimeout(timerResumoRef.current);
+        timerResumoRef.current = null;
+      }
+      const chave = `${leadId}:${chaveMensagemId}`;
+      const guardado = cacheResumoRef.current.get(chave);
+      if (guardado) {
+        setResumo({ texto: guardado });
+        return;
+      }
+      timerResumoRef.current = window.setTimeout(() => {
+        timerResumoRef.current = null;
+        if (pedido !== pedidoConversaRef.current) return;
+        const marcaResumo = pedidoResumoRef.current;
+        void resumirConversa(leadId)
+          .then((r) => {
+            if (r.resumo) cacheResumoRef.current.set(chave, r.resumo);
+            // Alguém clicou no ✦ ou trocou de conversa: o automático cala.
+            if (marcaResumo !== pedidoResumoRef.current) return;
+            if (pedido !== pedidoConversaRef.current) return;
+            if (r.resumo) setResumo({ texto: r.resumo });
+          })
+          .catch(() => {});
+      }, ESPERA_SUGESTAO_MS);
+    },
+    [],
+  );
+
   const abrirConversa = useCallback(
     async (linha: { leadId: string; nome: string }) => {
       const pedido = ++pedidoConversaRef.current;
       pedidoResumoRef.current++; // resumo em voo era da conversa anterior
+      // Timers da conversa anterior não podem disparar para esta.
+      if (timerSugestaoRef.current !== null) {
+        clearTimeout(timerSugestaoRef.current);
+        timerSugestaoRef.current = null;
+      }
+      if (timerResumoRef.current !== null) {
+        clearTimeout(timerResumoRef.current);
+        timerResumoRef.current = null;
+      }
       abertaRef.current = linha;
       setAberta(linha);
       setConversa(null);
@@ -402,6 +455,21 @@ export function AppConversas({
         if (ultima && ultima.tipo === "mensagem_recebida" && janelaAberta) {
           agendarSugestao(linha.leadId, pedido, ultima.id);
         }
+        // Conversa longa resume sozinha — com o mesmo freio da sugestão.
+        // "Longa" conta só conversa de verdade: nota interna e linha de
+        // sistema (adiei, resolvi) enchiam o número sem nada a resumir. E
+        // só quando o lead falou por último: no acervo, ou logo depois de
+        // eu mesmo escrever, resumo não serve para nada.
+        const reais = r.mensagens.filter(
+          (m) => m.tipo !== "nota" && m.metadados?.sistema !== true,
+        );
+        const ultimaReal = reais[reais.length - 1];
+        if (
+          reais.length >= MENSAGENS_PARA_RESUMO_AUTO &&
+          ultimaReal?.tipo === "mensagem_recebida"
+        ) {
+          agendarResumo(linha.leadId, pedido, ultimaReal.id);
+        }
       }
       // Quem marca lida no servidor é a Janela, ao montar (marcarChatLido).
       // Aqui é só o reflexo local, imediato, na linha da fila.
@@ -412,7 +480,18 @@ export function AppConversas({
         ),
       }));
     },
-    [agendarSugestao],
+    [agendarSugestao, agendarResumo],
+  );
+
+  // Timers de IA pendurados não podem sobreviver à saída da tela.
+  useEffect(
+    () => () => {
+      if (timerSugestaoRef.current !== null) {
+        clearTimeout(timerSugestaoRef.current);
+      }
+      if (timerResumoRef.current !== null) clearTimeout(timerResumoRef.current);
+    },
+    [],
   );
 
   /**
@@ -856,6 +935,10 @@ export function AppConversas({
                 type="button"
                 onClick={() => {
                   abertaRef.current = null;
+                  // Fechar a conversa cancela o que ela agendou de IA.
+                  pedidoConversaRef.current++;
+                  pedidoResumoRef.current++;
+                  setResumo(null);
                   setAberta(null);
                 }}
                 aria-label="Voltar para a lista"
@@ -997,6 +1080,7 @@ export function AppConversas({
                 marketingBloqueado={conversa.marketingBloqueado}
                 hojeChave={conversa.hojeChave}
                 ontemChave={conversa.ontemChave}
+                aoEnviarTemplate={() => setSinalContexto((n) => n + 1)}
                 aoEnviarComSucesso={() => {
                   // Respondeu: a linha sai da fila de espera local na hora.
                   setCarga((c) => ({
@@ -1082,8 +1166,10 @@ export function AppConversas({
         aoMensagemDoAberto={() => {
           void recarregarConversaAberta();
           // A sugestão era resposta para a mensagem ANTERIOR: chegou outra,
-          // ela não serve mais (e o Tab a mandaria assim mesmo).
+          // ela não serve mais (e o Tab a mandaria assim mesmo). O resumo
+          // idem: descrevia a conversa até a mensagem de antes.
           sugestaoStore.limpar();
+          setResumo(null);
           const emCena = abertaRef.current?.leadId;
           // O atendente está com a conversa na tela: o badge do menu não
           // pode contar (nem bipar) por ela.

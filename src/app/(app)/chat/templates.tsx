@@ -5,7 +5,12 @@ import { createPortal, useFormStatus } from "react-dom";
 import { FileText, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TemplateWhatsapp } from "@/lib/whatsapp";
-import { enviarTemplateLead, type ResultadoEnvio } from "./actions";
+import { formatarData } from "@/lib/format";
+import {
+  enviarTemplateLead,
+  historicoTemplatesLead,
+  type ResultadoEnvio,
+} from "./actions";
 
 const ESTADO: ResultadoEnvio = {};
 
@@ -31,18 +36,39 @@ export function BotaoTemplates({
   leadId,
   templates,
   principal = false,
+  aoEnviar,
 }: {
   leadId: string;
   templates: TemplateWhatsapp[];
   /** Janela de 24h fechada: o template é a ÚNICA saída e vira o primário. */
   principal?: boolean;
+  /** Avisa a tela: o contador de templates do painel precisa recontar. */
+  aoEnviar?: () => void;
 }) {
   const [aberto, setAberto] = useState(false);
   const [indice, setIndice] = useState<number | null>(null);
   const [valores, setValores] = useState<Record<string, string>>({});
   const [estado, formAction] = useActionState(enviarTemplateLead, ESTADO);
+  // Quantos templates este lead já custou: aparece ANTES do envio, que é
+  // onde a decisão de gastar mais um é tomada.
+  const [historico, setHistorico] = useState<{
+    total: number;
+    ultimoEm: string | null;
+    ultimoNome: string | null;
+    em30Dias: number;
+    falhou: boolean;
+  } | null>(null);
   const dialogoRef = useRef<HTMLDivElement>(null);
   const gatilhoRef = useRef<HTMLButtonElement>(null);
+
+  // Abrir zera o número anterior (ajuste durante o render, sem efeito):
+  // reabrir depois de enviar mostrava o valor que o próprio envio tornou
+  // falso, enquanto a nova contagem viajava.
+  const [abertoAntes, setAbertoAntes] = useState(aberto);
+  if (aberto !== abertoAntes) {
+    setAbertoAntes(aberto);
+    if (aberto) setHistorico(null);
+  }
 
   // Fecha ao concluir o envio (ajuste durante o render).
   const [estadoAnterior, setEstadoAnterior] = useState(estado);
@@ -52,8 +78,35 @@ export function BotaoTemplates({
       setAberto(false);
       setIndice(null);
       setValores({});
+      setHistorico(null); // o número mudou: a próxima abertura reconta
+      aoEnviar?.();
     }
   }
+
+  useEffect(() => {
+    if (!aberto) return;
+    let vivo = true;
+    void historicoTemplatesLead(leadId)
+      .then((h) => {
+        if (vivo) setHistorico(h);
+      })
+      .catch(() => {
+        // Não some em silêncio: sem o aviso, a tela fica igual à de um lead
+        // que nunca recebeu template — o contrário do que aconteceu.
+        if (vivo) {
+          setHistorico({
+            total: 0,
+            ultimoEm: null,
+            ultimoNome: null,
+            em30Dias: 0,
+            falhou: true,
+          });
+        }
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [aberto, leadId]);
 
   useEffect(() => {
     if (!aberto) return;
@@ -105,6 +158,40 @@ export function BotaoTemplates({
               É o caminho para puxar assunto com lead novo e para falar fora da
               janela de 24h — o WhatsApp só entrega template aprovado.
             </p>
+            {historico?.falhou ? (
+              <p className="mt-1 inline-flex items-center rounded-md bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
+                Não deu para conferir quantos templates este lead já recebeu.
+              </p>
+            ) : historico && (historico.total > 0 || historico.em30Dias > 0) ? (
+              <p
+                className={cn(
+                  "mt-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs font-medium",
+                  historico.em30Dias >= 3
+                    ? "bg-warning-bg text-warning"
+                    : "bg-neutral-100 text-neutral-600",
+                )}
+              >
+                Já foram{" "}
+                <span className="font-mono tabular-nums">
+                  {historico.total}
+                </span>{" "}
+                {historico.total === 1 ? "template" : "templates"} para este
+                lead
+                {historico.em30Dias > 0 ? (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <span className="font-mono tabular-nums">
+                      {historico.em30Dias}
+                    </span>{" "}
+                    nos últimos 30 dias
+                  </>
+                ) : null}
+                {historico.ultimoEm
+                  ? ` · último em ${formatarData(historico.ultimoEm)}`
+                  : ""}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"

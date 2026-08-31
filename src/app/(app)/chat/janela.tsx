@@ -547,6 +547,7 @@ export function Janela({
   ontemChave,
   aoEnviarComSucesso,
   aoRecarregarPeriodico,
+  aoEnviarTemplate,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -562,6 +563,8 @@ export function Janela({
   /** Rede de segurança de 60s da tela que hospeda a janela. Sem isto a
    *  Janela não recarrega nada sozinha — quem tem tempo real não passa. */
   aoRecarregarPeriodico?: () => void;
+  /** Um template saiu: o painel de contexto precisa recontar. */
+  aoEnviarTemplate?: () => void;
 }) {
   const [estado, formAction, enviandoAcao] = useActionState(
     enviarMensagemLead,
@@ -1748,6 +1751,7 @@ export function Janela({
                     leadId={leadId}
                     templates={templates}
                     principal
+                    aoEnviar={aoEnviarTemplate}
                   />
                 ) : (
                   <BotaoEnviar desabilitado nota={false} />
@@ -1755,7 +1759,11 @@ export function Janela({
               ) : (
                 <>
                   {modo === "responder" ? (
-                    <BotaoTemplates leadId={leadId} templates={templates} />
+                    <BotaoTemplates
+                      leadId={leadId}
+                      templates={templates}
+                      aoEnviar={aoEnviarTemplate}
+                    />
                   ) : null}
                   <BotaoEnviar
                     desabilitado={!podeEnviar}
@@ -1778,7 +1786,11 @@ export function Janela({
             Sem canal de envio para este lead (falta telefone ou conversa) —
             o primeiro contato da empresa precisa ser um template aprovado.
           </p>
-          <BotaoTemplates leadId={leadId} templates={templates} />
+          <BotaoTemplates
+            leadId={leadId}
+            templates={templates}
+            aoEnviar={aoEnviarTemplate}
+          />
         </div>
       )}
     </div>

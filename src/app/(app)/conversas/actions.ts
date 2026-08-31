@@ -362,6 +362,14 @@ export type ContextoConversa = {
     receita30dCentavos: number | null;
     ltvCentavos: number | null;
   } | null;
+  /** Templates já disparados a este lead — cada um custa e desgasta. */
+  templates: {
+    total: number;
+    ultimoEm: string | null;
+    ultimoNome: string | null;
+    /** Custo acumulado estimado, quando a taxa está configurada. */
+    custoCentavos: number | null;
+  };
   tarefas: TarefaDoLead[];
   /** false quando a 0013 não está aplicada — o painel avisa em vez de mentir. */
   tarefasDisponiveis: boolean;
@@ -409,7 +417,7 @@ export async function carregarContexto(
 
   // Giro, receita e tarefas em paralelo — e cada uma tolerante: view ou
   // migração ausente vira ausência de cartão, nunca painel quebrado.
-  const [giroR, receitaR, tarefasR] = await Promise.all([
+  const [giroR, receitaR, tarefasR, templatesR, custoR] = await Promise.all([
     l.customer_id
       ? supabase
           .from("v_customer_giro")
@@ -431,6 +439,23 @@ export async function carregarContexto(
       .is("concluida_em", null)
       .order("vence_em")
       .limit(10),
+    // Template disparado deixa metadados.template no histórico: é por aí
+    // que se sabe quantas vezes já se pagou para falar com este lead.
+    supabase
+      .from("lead_interactions")
+      .select("criado_em, metadados", { count: "exact" })
+      .eq("lead_id", leadId)
+      .eq("tipo", "mensagem_enviada")
+      .not("metadados->>template", "is", null)
+      // Recusado pela Meta não chegou e não foi cobrado.
+      .not("metadados->>status_envio", "eq", "failed")
+      .order("criado_em", { ascending: false })
+      .limit(1),
+    supabase
+      .from("settings")
+      .select("valor")
+      .eq("chave", "custo_template_centavos")
+      .maybeSingle(),
   ]);
 
   const giro = giroR.data as {
@@ -465,6 +490,19 @@ export async function carregarContexto(
           ltvCentavos: receita?.ltv_centavos ?? null,
         }
       : null,
+    templates: (() => {
+      const total = templatesR.error ? 0 : (templatesR.count ?? 0);
+      const ultimo = (templatesR.data ?? [])[0] as
+        | { criado_em: string; metadados: { template?: string | null } | null }
+        | undefined;
+      const taxa = Number(custoR.data?.valor ?? 0) || 0;
+      return {
+        total,
+        ultimoEm: ultimo?.criado_em ?? null,
+        ultimoNome: ultimo?.metadados?.template ?? null,
+        custoCentavos: taxa > 0 ? total * taxa : null,
+      };
+    })(),
     tarefas: (
       (tarefasR.data ?? []) as { id: string; titulo: string; vence_em: string }[]
     ).map((t) => ({

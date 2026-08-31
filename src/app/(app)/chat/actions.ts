@@ -529,17 +529,26 @@ export async function enviarTemplateLead(
   );
   const agora = new Date().toISOString();
 
-  await supabase.from("lead_interactions").insert({
-    lead_id: leadId,
-    tipo: "mensagem_enviada",
-    conteudo,
-    autor_id: perfil.id,
-    metadados: {
-      via: "crm",
-      template: template.nome,
-      message_id: mensagemId,
-    },
-  });
+  const { error: erroRegistro } = await supabase
+    .from("lead_interactions")
+    .insert({
+      lead_id: leadId,
+      tipo: "mensagem_enviada",
+      conteudo,
+      autor_id: perfil.id,
+      metadados: {
+        via: "crm",
+        template: template.nome,
+        message_id: mensagemId,
+      },
+    });
+  // A Meta já cobrou; se o registro falhou, a conversa e o contador de
+  // templates ficam sem essa linha — o atendente precisa saber.
+  if (erroRegistro) {
+    return {
+      erro: "O template foi enviado, mas não entrou no histórico. Avise a administração antes de mandar outro.",
+    };
+  }
 
   await supabase
     .from("leads")
@@ -1344,4 +1353,65 @@ export async function atribuirEmMassa(
       ? `Atendimento atribuído a ${nome}`
       : "Atendimento ficou sem atendente",
   );
+}
+
+/**
+ * Quantas vezes já se pagou para falar com este lead por template — o
+ * número que evita queimar mais um (e desgastar o cliente) sem saber que
+ * ontem já foram dois.
+ */
+export async function historicoTemplatesLead(leadId: string): Promise<{
+  total: number;
+  ultimoEm: string | null;
+  ultimoNome: string | null;
+  em30Dias: number;
+  /** A consulta falhou: a tela avisa em vez de fingir que são zero. */
+  falhou: boolean;
+}> {
+  const vazio = {
+    total: 0,
+    ultimoEm: null,
+    ultimoNome: null,
+    em30Dias: 0,
+    falhou: false,
+  };
+  const perfil = await perfilAtual();
+  if (!perfil || !leadId) return { ...vazio, falhou: true };
+
+  const supabase = await createClient();
+  const trintaDias = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const [todos, recentes] = await Promise.all([
+    supabase
+      .from("lead_interactions")
+      .select("criado_em, metadados", { count: "exact" })
+      .eq("lead_id", leadId)
+      .eq("tipo", "mensagem_enviada")
+      .not("metadados->>template", "is", null)
+      // Recusado pela Meta não chegou e não foi cobrado: não é disparo.
+      .not("metadados->>status_envio", "eq", "failed")
+      .order("criado_em", { ascending: false })
+      .limit(1),
+    supabase
+      .from("lead_interactions")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", leadId)
+      .eq("tipo", "mensagem_enviada")
+      .not("metadados->>template", "is", null)
+      .not("metadados->>status_envio", "eq", "failed")
+      .gte("criado_em", trintaDias),
+  ]);
+
+  const ultimo = (todos.data ?? [])[0] as
+    | { criado_em: string; metadados: { template?: string | null } | null }
+    | undefined;
+  // Falha de UMA das consultas contamina o aviso inteiro: com total=0 e
+  // em30Dias=7 a tela não pinta nada — justo o caso mais grave.
+  const falhou = Boolean(todos.error || recentes.error);
+  return {
+    total: todos.count ?? 0,
+    ultimoEm: ultimo?.criado_em ?? null,
+    ultimoNome: ultimo?.metadados?.template ?? null,
+    em30Dias: recentes.count ?? 0,
+    falhou,
+  };
 }
