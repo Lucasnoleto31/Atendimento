@@ -11,6 +11,7 @@ import Link from "next/link";
 import {
   ArrowDown,
   Check,
+  MessageCircle,
   CheckCheck,
   CheckSquare,
   Clock,
@@ -355,11 +356,6 @@ export function AppConversas({
   const trocarVisao = (v: VisaoConversas) => {
     setVisao(v);
     void recarregarLista(v, escopo, busca);
-  };
-  const trocarEscopo = () => {
-    const novo = escopo === "todas" ? "minhas" : "todas";
-    setEscopo(novo);
-    void recarregarLista(visao, novo, busca);
   };
 
   /**
@@ -915,13 +911,39 @@ export function AppConversas({
             <span className="font-mono text-xs text-neutral-400 tabular-nums">
               {contagemDe(visao) ?? carga.linhas.length}
             </span>
-            <button
-              type="button"
-              onClick={trocarEscopo}
-              className="ml-auto inline-flex h-[40px] items-center rounded-md border border-neutral-200 bg-neutral-0 px-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            {/* Dois botões, o ativo aceso: o botão único que alternava
+                deixava a dúvida — o rótulo era o filtro atual ou o destino? */}
+            <div
+              role="group"
+              aria-label="Escopo das conversas"
+              className="ml-auto flex overflow-hidden rounded-md border border-neutral-200"
             >
-              {escopo === "todas" ? "Todas" : "Minhas"}
-            </button>
+              {(
+                [
+                  { chave: "todas", rotulo: "Todas" },
+                  { chave: "minhas", rotulo: "Minhas" },
+                ] as const
+              ).map((op) => (
+                <button
+                  key={op.chave}
+                  type="button"
+                  aria-pressed={escopo === op.chave}
+                  onClick={() => {
+                    if (escopo === op.chave) return;
+                    setEscopo(op.chave);
+                    void recarregarLista(visao, op.chave, busca);
+                  }}
+                  className={cn(
+                    "inline-flex h-[40px] items-center px-1 text-xs font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500",
+                    escopo === op.chave
+                      ? "bg-primary-50 text-primary-900"
+                      : "bg-neutral-0 text-neutral-600 hover:bg-neutral-100",
+                  )}
+                >
+                  {op.rotulo}
+                </button>
+              ))}
+            </div>
           </div>
           <label className="mt-1 flex h-[40px] items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-0 px-1.5">
             <Search size={16} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
@@ -1502,6 +1524,22 @@ function LinhaLista({
   const critica = (linha.esperaHoras ?? 0) >= 24;
   const alta = !critica && (linha.esperaHoras ?? 0) >= 0.25;
 
+  // O estado da conversa, legível de relance (pedido da equipe): em aberto,
+  // adiada, adiada com prazo vencido ou resolvida. Ícone + title — a cor
+  // nunca é o único portador.
+  const estado = linha.resolvida
+    ? { titulo: "Resolvida", icone: Check, cor: "text-success" }
+    : linha.adiadaVencida
+      ? { titulo: "Adiada — prazo venceu", icone: Timer, cor: "text-danger" }
+      : linha.adiadaAte
+        ? { titulo: "Adiada", icone: Timer, cor: "text-neutral-600" }
+        : {
+            titulo: "Em aberto",
+            icone: MessageCircle,
+            cor: "text-primary-600",
+          };
+  const IconeEstado = estado.icone;
+
   // Gesto do celular: arrastar a linha para a direita resolve, para a
   // esquerda adia — os dois gestos que a equipe faz o dia inteiro e que no
   // toque custavam mirar um alvo de 32px. Só com o dedo (pointer coarse);
@@ -1675,6 +1713,18 @@ function LinhaLista({
             )}
           >
             {linha.nome}
+          </span>
+          <span
+            title={estado.titulo}
+            aria-label={estado.titulo}
+            className="shrink-0"
+          >
+            <IconeEstado
+              size={14}
+              strokeWidth={1.7}
+              aria-hidden
+              className={estado.cor}
+            />
           </span>
           <span className="ml-auto shrink-0">
             {linha.adiadaAte && !linha.adiadaVencida ? (
