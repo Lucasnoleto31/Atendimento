@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AlertTriangle, Pause, Pencil, Play, Trash2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import {
+  buscarQualidadeNumero,
   listarTemplatesMeta,
   metaConfigurada,
   type TemplateWhatsapp,
@@ -46,11 +47,22 @@ const COR_STATUS: Record<Campanha["status"], string> = {
   concluida: "bg-primary-50 text-primary-900",
 };
 
-/** Estado gravado pelo webhook da Meta em settings.numero_qualidade. */
+/** Registro de mais de 24h conta como velho e dispara nova consulta. */
+function qualidadeEstaVelha(em?: string | null): boolean {
+  return !em || Date.now() - Date.parse(em) > 24 * 3600_000;
+}
+
+/**
+ * Estado em settings.numero_qualidade — gravado pelo webhook da Meta ou pela
+ * consulta ativa desta página. `em` é DESDE QUANDO a nota vale (o que o
+ * painel mostra); `verificado_em` é a última checagem (só controla as 24h —
+ * o webhook não grava, e aí `em` faz os dois papéis, pois evento é fresco).
+ */
 type QualidadeNumero = {
   rating?: string | null;
   limite?: string | null;
   em?: string | null;
+  verificado_em?: string | null;
 };
 
 // Cor + rótulo textual, nunca só cor: é o que a gestão olha antes de subir
@@ -227,10 +239,85 @@ export default async function CampanhasPage({
   const qualidadeBruta = configuracoes.find(
     (c) => c.chave === "numero_qualidade",
   )?.valor;
-  const qualidade =
+  let qualidade =
     qualidadeBruta && typeof qualidadeBruta === "object"
       ? (qualidadeBruta as QualidadeNumero)
       : null;
+
+  // O webhook só avisa quando a qualidade MUDA — número saudável que nunca
+  // mudou não gera evento, e o painel ficava em "sem dado" para sempre.
+  // Sem evento gravado (ou com checagem de mais de 24h), pergunta direto à
+  // Meta e guarda no mesmo lugar; o webhook segue cobrindo o tempo real.
+  if (
+    metaConfigurada() &&
+    (!qualidade?.rating ||
+      qualidadeEstaVelha(qualidade.verificado_em ?? qualidade.em))
+  ) {
+    const inicioConsulta = new Date().toISOString();
+    try {
+      const aoVivo = await buscarQualidadeNumero();
+      if (aoVivo.rating) {
+        const mesmaNota = qualidade?.rating?.toUpperCase() === aoVivo.rating;
+        qualidade = {
+          rating: aoVivo.rating,
+          // A consulta pode vir sem o tier — não apaga o que o webhook sabia.
+          limite: aoVivo.limite ?? qualidade?.limite ?? null,
+          // "desde" é a mudança de nota, não a checagem: nota igual mantém.
+          em: mesmaNota && qualidade?.em ? qualidade.em : inicioConsulta,
+          verificado_em: inicioConsulta,
+        };
+        const service = createServiceClient();
+        const valor = {
+          ...qualidade,
+          telefone: aoVivo.telefone,
+          evento: "consulta_api",
+        };
+        // Condicional para não atropelar o webhook: se um evento chegou no
+        // meio do render (em >= agora), a escrita não acontece — e aí o
+        // registro dele, mais fresco, é o que vale no painel também.
+        const { data: gravadas, error: erroGravar } = await service
+          .from("settings")
+          .update({ valor, atualizado_em: inicioConsulta })
+          .eq("chave", "numero_qualidade")
+          .lt("valor->>em", inicioConsulta)
+          .select("chave");
+        if (erroGravar) {
+          console.error(
+            "[campanhas] qualidade não persistiu:",
+            erroGravar.message,
+          );
+        } else if (!gravadas?.length) {
+          if (qualidadeBruta) {
+            const { data: relido } = await service
+              .from("settings")
+              .select("valor")
+              .eq("chave", "numero_qualidade")
+              .maybeSingle();
+            if (relido?.valor && typeof relido.valor === "object") {
+              qualidade = relido.valor as QualidadeNumero;
+            }
+          } else {
+            // Primeira gravação de todas; duplicata = webhook chegou antes.
+            const { error: erroInserir } = await service
+              .from("settings")
+              .insert({
+                chave: "numero_qualidade",
+                valor,
+                atualizado_em: inicioConsulta,
+              });
+            if (erroInserir && !erroInserir.message.includes("duplicate")) {
+              console.error(
+                "[campanhas] qualidade não persistiu:",
+                erroInserir.message,
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      // Meta fora do ar: fica o que o webhook tiver gravado (ou "sem dado").
+    }
+  }
   const qualidadeVisual = qualidade?.rating
     ? QUALIDADE[qualidade.rating.toUpperCase()]
     : undefined;
@@ -321,7 +408,9 @@ export default async function CampanhasPage({
               <span className="inline-flex h-[24px] items-center rounded-sm bg-neutral-100 px-1 font-medium">
                 Qualidade do número: sem dado
               </span>
-              <span>o webhook da Meta ainda não mandou o evento de qualidade</span>
+              <span>
+                a Meta não retornou a qualidade agora — recarregue mais tarde
+              </span>
             </p>
           )}
 
@@ -452,8 +541,8 @@ export default async function CampanhasPage({
                         <p className="mt-0.5 font-mono text-xs text-neutral-600">
                           {c.template_nome} · {etiqueta?.nome ?? "sem etiqueta"}{" "}
                           · {c.por_dia}/dia ·{" "}
-                          {c.dias_uteis ? "seg a sex" : "todo dia"}, {c.hora_inicio}h
-                          às {c.hora_fim}h
+                          {c.dias_uteis ? "seg a sex" : "todo dia"},{" "}
+                          {c.hora_inicio}h às {c.hora_fim}h
                         </p>
                       </div>
 
@@ -482,7 +571,11 @@ export default async function CampanhasPage({
                               className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                             >
                               {c.status === "ativa" ? (
-                                <Pause size={18} strokeWidth={1.5} aria-hidden />
+                                <Pause
+                                  size={18}
+                                  strokeWidth={1.5}
+                                  aria-hidden
+                                />
                               ) : (
                                 <Play size={18} strokeWidth={1.5} aria-hidden />
                               )}
@@ -605,8 +698,7 @@ export default async function CampanhasPage({
                       <span className="font-mono tabular-nums text-neutral-800">
                         {entregues}
                       </span>{" "}
-                      de{" "}
-                      <span className="font-mono tabular-nums">{alvo}</span>{" "}
+                      de <span className="font-mono tabular-nums">{alvo}</span>{" "}
                       entregues
                       {dados.falhas > 0 ? (
                         <>
@@ -652,7 +744,10 @@ export default async function CampanhasPage({
                           campanha concluída não volta sozinha — reabra para
                           alcançar essa gente.
                         </span>
-                        <form action={alterarStatusCampanha} className="ml-auto">
+                        <form
+                          action={alterarStatusCampanha}
+                          className="ml-auto"
+                        >
                           <input type="hidden" name="id" value={c.id} />
                           <input type="hidden" name="status" value="ativa" />
                           <button

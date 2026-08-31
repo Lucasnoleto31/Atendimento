@@ -312,3 +312,53 @@ export async function hospedarMidiaMeta(
   const { data } = service.storage.from("midia-whatsapp").getPublicUrl(caminho);
   return { url: data.publicUrl, mime };
 }
+
+/**
+ * A qualidade ATUAL do número, direto da Graph API.
+ *
+ * O webhook phone_number_quality_update só chega quando a qualidade MUDA —
+ * número saudável que nunca mudou não gera evento nenhum, e o painel de
+ * Campanhas ficava em "sem dado" para sempre. Esta busca ativa cobre esse
+ * vazio; o webhook continua valendo para o tempo real entre uma busca e
+ * outra.
+ */
+export type QualidadeAoVivo = {
+  rating: "GREEN" | "YELLOW" | "RED" | null;
+  limite: string | null;
+  telefone: string | null;
+};
+
+// Cache negativo incluído: número novo responde UNKNOWN para sempre até
+// ganhar volume, e sem cache cada carga do painel viraria um GET na Meta.
+let cacheQualidade: { dados: QualidadeAoVivo; expira: number } | null = null;
+
+export async function buscarQualidadeNumero(): Promise<QualidadeAoVivo> {
+  if (cacheQualidade && Date.now() < cacheQualidade.expira) {
+    return cacheQualidade.dados;
+  }
+  const pid = await phoneNumberId();
+  const r = await graph<{
+    quality_rating?: string;
+    messaging_limit_tier?: string;
+    display_phone_number?: string;
+  }>(
+    `/${pid}?fields=quality_rating,messaging_limit_tier,display_phone_number`,
+    {
+      // Sem teto, Meta lenta segura o render do painel inteiro (não há
+      // loading.tsx) — melhor ficar sem o dado do que sem a página.
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
+  // Número novo vem como UNKNOWN/NA — não é uma nota, é ausência de nota;
+  // gravar isso esconderia o painel atrás de um valor que ele não conhece.
+  const bruto = r.quality_rating?.trim().toUpperCase() || null;
+  const rating =
+    bruto === "GREEN" || bruto === "YELLOW" || bruto === "RED" ? bruto : null;
+  const dados: QualidadeAoVivo = {
+    rating,
+    limite: r.messaging_limit_tier ?? null,
+    telefone: r.display_phone_number ?? null,
+  };
+  cacheQualidade = { dados, expira: Date.now() + TTL_CACHE_MS };
+  return dados;
+}
