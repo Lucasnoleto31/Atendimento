@@ -12,6 +12,7 @@ import {
   ArrowDown,
   Check,
   CheckCheck,
+  CheckSquare,
   Clock,
   ExternalLink,
   Inbox,
@@ -20,6 +21,7 @@ import {
   RotateCcw,
   Search,
   Sparkles,
+  Square,
   Timer,
   X,
 } from "lucide-react";
@@ -31,6 +33,8 @@ import {
   alterarStatusConversaChat,
   marcarChatLido,
   reativarConversa,
+  etiquetarEmMassa,
+  resolverConversasEmMassa,
 } from "@/app/(app)/chat/actions";
 import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
 import { resumirConversa, sugerirResposta } from "@/app/(app)/chat/ia";
@@ -61,6 +65,7 @@ const VISOES: { chave: VisaoConversas; rotulo: string; icone: React.ReactNode }[
   { chave: "caixa", rotulo: "Caixa", icone: <Inbox size={19} strokeWidth={1.7} aria-hidden /> },
   { chave: "aguardando", rotulo: "Aguard.", icone: <Clock size={19} strokeWidth={1.7} aria-hidden /> },
   { chave: "adiadas", rotulo: "Adiadas", icone: <Timer size={19} strokeWidth={1.7} aria-hidden /> },
+  { chave: "resolvidas", rotulo: "Resolv.", icone: <CheckCheck size={19} strokeWidth={1.7} aria-hidden /> },
   { chave: "tudo", rotulo: "Tudo", icone: <ListFilter size={19} strokeWidth={1.7} aria-hidden /> },
 ];
 
@@ -69,6 +74,7 @@ const NOME_DA_VISAO: Record<VisaoConversas, string> = {
   caixa: "Caixa",
   aguardando: "Aguardando",
   adiadas: "Adiadas",
+  resolvidas: "Resolvidas",
   tudo: "Tudo",
 };
 
@@ -76,6 +82,7 @@ const ORDENS: Record<VisaoConversas, string> = {
   caixa: "Quem espera mais, primeiro. Adiadas vencidas voltaram para cá.",
   aguardando: "Só quem espera resposta — o relógio manda.",
   adiadas: "Dormindo com hora para acordar. Venceu, volta para a Caixa.",
+  resolvidas: "Fechadas, da mais recente para trás. Reabrir devolve à Caixa.",
   tudo: "O acervo completo, do mais recente para trás.",
 };
 
@@ -150,6 +157,13 @@ export function AppConversas({
 }) {
   const [visao, setVisao] = useState<VisaoConversas>("caixa");
   const [escopo, setEscopo] = useState<"minhas" | "todas">("todas");
+  // Seleção em massa: modo explícito, para as caixas não brigarem com o
+  // arrastar-para-resolver nem com o clique que abre a conversa.
+  const [modoSelecao, setModoSelecao] = useState(false);
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  const [massaPendente, setMassaPendente] = useState(false);
+  const [massaErro, setMassaErro] = useState<string | null>(null);
+  const [etiquetaMassa, setEtiquetaMassa] = useState("");
   const [busca, setBusca] = useState("");
   const [carga, setCarga] = useState<CargaConversas>(inicial);
   const [carregandoLista, setCarregandoLista] = useState(false);
@@ -582,6 +596,13 @@ export function AppConversas({
                   ? -1
                   : 0),
           ),
+          // Mesma regra do adiar: resolver dentro da própria visão só tira
+          // a linha da lista, não engorda o contador.
+          resolvidas: Math.max(
+            0,
+            c.contagens.resolvidas +
+              (acao === "resolver" && visao !== "resolvidas" ? 1 : 0),
+          ),
         },
       }));
       if (aberta?.leadId === leadId && acao !== "reativar") proxima();
@@ -768,6 +789,43 @@ export function AppConversas({
     }));
   }, []);
 
+  const alternarSelecao = useCallback((leadId: string) => {
+    setSelecionadas((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(leadId)) novo.delete(leadId);
+      else novo.add(leadId);
+      return novo;
+    });
+  }, []);
+
+  const sairDaSelecao = useCallback(() => {
+    setModoSelecao(false);
+    setSelecionadas(new Set());
+    setEtiquetaMassa("");
+    setMassaErro(null);
+  }, []);
+
+  /**
+   * Ação em massa. As linhas somem da visão na hora (o mesmo otimismo do
+   * Resolver de um clique) e a lista recarrega em seguida, para os
+   * contadores do trilho voltarem à verdade do banco.
+   */
+  const executarMassa = useCallback(
+    async (acao: () => Promise<{ erro?: string }>) => {
+      setMassaPendente(true);
+      setMassaErro(null);
+      const r = await acao();
+      setMassaPendente(false);
+      if (r.erro) {
+        setMassaErro(r.erro);
+        return;
+      }
+      sairDaSelecao();
+      void recarregarLista(visao, escopo, busca);
+    },
+    [sairDaSelecao, recarregarLista, visao, escopo, busca],
+  );
+
   const contagemDe = (v: VisaoConversas): number | null =>
     v === "caixa"
       ? carga.contagens.caixa
@@ -775,7 +833,9 @@ export function AppConversas({
         ? carga.contagens.aguardando
         : v === "adiadas"
           ? carga.contagens.adiadas
-          : null;
+          : v === "resolvidas"
+            ? carga.contagens.resolvidas
+            : null;
 
   // Quem está no atendimento da conversa aberta. A fonte de verdade é o
   // payload de ferramentas (recém-carregado com a conversa); sem ele —
@@ -876,6 +936,97 @@ export function AppConversas({
           </p>
         ) : null}
 
+        {/* Seleção em massa. Modo explícito: fora dele a lista continua
+            exatamente como era, com o clique que abre e o arrasto que
+            resolve. */}
+        {carga.linhas.length > 0 ? (
+          modoSelecao ? (
+            <div className="mx-1 mb-1 rounded-lg border border-primary-500 bg-primary-50 p-1">
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelecionadas(
+                      selecionadas.size === carga.linhas.length
+                        ? new Set()
+                        : new Set(carga.linhas.map((l) => l.leadId)),
+                    )
+                  }
+                  className="inline-flex h-[30px] items-center gap-0.5 rounded-md px-1 text-xs font-medium text-primary-900 hover:bg-primary-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  {selecionadas.size === carga.linhas.length ? (
+                    <CheckSquare size={14} strokeWidth={1.7} aria-hidden />
+                  ) : (
+                    <Square size={14} strokeWidth={1.7} aria-hidden />
+                  )}
+                  {selecionadas.size} de {carga.linhas.length}
+                </button>
+
+                <select
+                  value={etiquetaMassa}
+                  disabled={massaPendente || selecionadas.size === 0}
+                  onChange={(e) => {
+                    const tagId = e.target.value;
+                    setEtiquetaMassa("");
+                    if (!tagId) return;
+                    void executarMassa(() =>
+                      etiquetarEmMassa([...selecionadas], tagId, true),
+                    );
+                  }}
+                  aria-label="Etiquetar as conversas selecionadas"
+                  className="h-[30px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-xs text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+                >
+                  <option value="">Etiquetar…</option>
+                  {carga.etiquetas.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.nome}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  disabled={massaPendente || selecionadas.size === 0}
+                  onClick={() =>
+                    void executarMassa(() =>
+                      resolverConversasEmMassa([...selecionadas]),
+                    )
+                  }
+                  className="inline-flex h-[30px] items-center gap-0.5 rounded-md px-1.5 text-xs font-medium text-neutral-800 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+                >
+                  <Check size={14} strokeWidth={1.7} aria-hidden />
+                  {massaPendente ? "Aplicando…" : "Resolver"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={sairDaSelecao}
+                  aria-label="Sair da seleção"
+                  className="ml-auto inline-flex h-[30px] w-[30px] items-center justify-center rounded-md text-neutral-600 hover:bg-primary-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  <X size={15} strokeWidth={1.7} aria-hidden />
+                </button>
+              </div>
+              {massaErro ? (
+                <p role="alert" className="mt-0.5 px-1 text-xs text-danger">
+                  {massaErro}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mb-1 flex justify-end px-1">
+              <button
+                type="button"
+                onClick={() => setModoSelecao(true)}
+                className="inline-flex h-[28px] items-center gap-0.5 rounded-md px-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              >
+                <CheckSquare size={14} strokeWidth={1.7} aria-hidden />
+                Selecionar várias
+              </button>
+            </div>
+          )
+        ) : null}
+
         <div className={cn("min-h-0 flex-1 overflow-y-auto px-1 pb-1", carregandoLista && "opacity-50")}>
           {carga.linhas.length === 0 && !carregandoLista ? (
             <div className="px-2 py-4 text-center">
@@ -903,6 +1054,9 @@ export function AppConversas({
                   aberta={l.leadId === aberta?.leadId}
                   hojeChave={hojeChave}
                   pendente={acaoPendente.has(l.leadId)}
+                  selecionando={modoSelecao}
+                  selecionada={selecionadas.has(l.leadId)}
+                  aoAlternarSelecao={() => alternarSelecao(l.leadId)}
                   aoAbrir={() => void abrirConversa({ leadId: l.leadId, nome: l.nome })}
                   aoResolver={() => void despachar(l.leadId, "resolver")}
                   aoAdiar={() => void despachar(l.leadId, "adiar")}
@@ -1279,6 +1433,7 @@ export function AppConversas({
               { rotulo: "Caixa", tecla: "", acao: () => trocarVisao("caixa") },
               { rotulo: "Aguardando", tecla: "", acao: () => trocarVisao("aguardando") },
               { rotulo: "Adiadas", tecla: "", acao: () => trocarVisao("adiadas") },
+              { rotulo: "Resolvidas", tecla: "", acao: () => trocarVisao("resolvidas") },
               { rotulo: "Tudo (acervo e busca)", tecla: "", acao: () => trocarVisao("tudo") },
               { rotulo: "Próxima da fila", tecla: "J", acao: proxima },
             ],
@@ -1294,6 +1449,9 @@ function LinhaLista({
   aberta,
   hojeChave,
   pendente,
+  selecionando,
+  selecionada,
+  aoAlternarSelecao,
   aoAbrir,
   aoResolver,
   aoAdiar,
@@ -1303,6 +1461,10 @@ function LinhaLista({
   aberta: boolean;
   hojeChave: string;
   pendente: boolean;
+  /** Modo seleção em massa: o clique marca em vez de abrir. */
+  selecionando: boolean;
+  selecionada: boolean;
+  aoAlternarSelecao: () => void;
   aoAbrir: () => void;
   aoResolver: () => void;
   aoAdiar: () => void;
@@ -1374,14 +1536,16 @@ function LinhaLista({
         "focus-within:ring-2 focus-within:ring-primary-500",
         // Sem transição durante o arrasto: a linha precisa colar no dedo.
         deslizando ? "" : "transition-colors duration-[120ms]",
-        aberta
-          ? "bg-neutral-0 shadow-sm ring-1 ring-neutral-200"
-          : "hover:bg-neutral-0",
+        selecionada
+          ? "bg-primary-50"
+          : aberta
+            ? "bg-neutral-0 shadow-sm ring-1 ring-neutral-200"
+            : "hover:bg-neutral-0",
         pendente && "opacity-50",
       )}
       style={arrasto !== 0 ? { transform: `translateX(${arrasto}px)` } : undefined}
       onPointerDown={(e) => {
-        if (e.pointerType === "mouse" || pendente) return;
+        if (e.pointerType === "mouse" || pendente || selecionando) return;
         inicioRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
         arrastouRef.current = false;
       }}
@@ -1423,6 +1587,7 @@ function LinhaLista({
       <button
         type="button"
         aria-current={aberta ? "true" : undefined}
+        aria-pressed={selecionando ? selecionada : undefined}
         onClick={() => {
           // Arrastou: o clique que o navegador manda depois do gesto não
           // pode abrir a conversa.
@@ -1430,10 +1595,27 @@ function LinhaLista({
             arrastouRef.current = false;
             return;
           }
+          if (selecionando) {
+            aoAlternarSelecao();
+            return;
+          }
           aoAbrir();
         }}
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left focus-visible:outline-none"
       >
+      {selecionando ? (
+        <span
+          aria-hidden
+          className={cn(
+            "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-sm border",
+            selecionada
+              ? "border-primary-600 bg-primary-600 text-neutral-0"
+              : "border-neutral-300 bg-neutral-0",
+          )}
+        >
+          {selecionada ? <Check size={14} strokeWidth={2.5} /> : null}
+        </span>
+      ) : null}
       <span className="relative shrink-0" aria-hidden>
         <span
           className={cn(

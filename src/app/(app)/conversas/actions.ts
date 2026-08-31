@@ -16,10 +16,17 @@ import { perfilAtual } from "@/lib/auth";
  *                primeiro.
  *   aguardando — só quem espera resposta, em fila de verdade (FIFO).
  *   adiadas    — dormindo com hora para acordar (as no prazo).
+ *   resolvidas — fechadas, mais recente primeiro. Antes só reapareciam
+ *                misturadas em "tudo", e resolver parecia apagar.
  *   tudo       — o acervo, com busca e filtros finos.
  */
 
-export type VisaoConversas = "caixa" | "aguardando" | "adiadas" | "tudo";
+export type VisaoConversas =
+  | "caixa"
+  | "aguardando"
+  | "adiadas"
+  | "resolvidas"
+  | "tudo";
 
 export type LinhaConversa = {
   leadId: string;
@@ -46,12 +53,19 @@ export type LinhaConversa = {
   sub: string | null;
 };
 
-export type Contagens = { caixa: number; aguardando: number; adiadas: number };
+export type Contagens = {
+  caixa: number;
+  aguardando: number;
+  adiadas: number;
+  resolvidas: number;
+};
 
 export type CargaConversas = {
   linhas: LinhaConversa[];
   contagens: Contagens;
   temMais: boolean;
+  /** Etiquetas ativas, para o seletor das ações em massa. */
+  etiquetas: { id: string; nome: string; cor: string | null }[];
 };
 
 const PAGINA = 60;
@@ -211,6 +225,37 @@ export async function carregarListaConversas(
         .filter((l): l is LinhaView => Boolean(l));
     }
     temMais = idsAdiadas.length === PAGINA;
+  } else if (visao === "resolvidas") {
+    // Mesma história das adiadas: `chat_resolvido_em` é coluna de LEADS, a
+    // view não separa. Busca os ids lá e hidrata pela view.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder
+    let q: any = supabase
+      .from("leads")
+      .select("id")
+      .not("chat_resolvido_em", "is", null)
+      .neq("status", "perdido")
+      .order("chat_resolvido_em", { ascending: false });
+    if (opts.escopo === "minhas") q = q.eq("responsavel_id", perfil.id);
+    if (opts.atendenteId) q = q.eq("responsavel_id", opts.atendenteId);
+    if (busca) q = q.or(`nome.ilike.%${busca}%,telefone_e164.ilike.%${busca}%`);
+
+    const { data: brutas, error } = await q.range(offset, offset + PAGINA - 1);
+    if (error) return { erro: error.message };
+    const ids = ((brutas ?? []) as { id: string }[]).map((l) => l.id);
+    if (ids.length > 0) {
+      const { data, error: erroView } = await supabase
+        .from("v_leads_listas")
+        .select(CAMPOS_VIEW)
+        .in("lead_id", ids);
+      if (erroView) return { erro: erroView.message };
+      const porId = new Map(
+        ((data ?? []) as LinhaView[]).map((l) => [l.lead_id, l]),
+      );
+      linhasView = ids
+        .map((id) => porId.get(id))
+        .filter((l): l is LinhaView => Boolean(l));
+    }
+    temMais = ids.length === PAGINA;
   } else {
     const { data, error } = await base()
       .not("ultima_mensagem_em", "is", null)
@@ -234,6 +279,7 @@ export async function carregarListaConversas(
     ctCaixaVencidas,
     ctAguardando,
     ctAdiadas,
+    ctResolvidas,
     tagsR,
   ] = await Promise.all([
       ids.length > 0
@@ -293,17 +339,28 @@ export async function carregarListaConversas(
         const cheio = await montar(true);
         return cheio.error ? montar(false) : cheio;
       })(),
-      supabase.from("tags").select("nome, cor"),
+      (async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder
+        let q: any = supabase
+          .from("leads")
+          .select("id", { count: "exact", head: true })
+          .not("chat_resolvido_em", "is", null)
+          .neq("status", "perdido");
+        if (opts.escopo === "minhas") q = q.eq("responsavel_id", perfil.id);
+        if (opts.atendenteId) q = q.eq("responsavel_id", opts.atendenteId);
+        return q;
+      })(),
+      supabase.from("tags").select("id, nome, cor").order("nome"),
     ]);
 
   // Nome → cor. Sem a consulta (RLS, migração), o chip sai neutro: melhor
   // etiqueta sem cor do que linha sem etiqueta.
-  const coresPorNome = new Map(
-    ((tagsR.data ?? []) as { nome: string; cor: string | null }[]).map((t) => [
-      t.nome,
-      t.cor,
-    ]),
-  );
+  const tags = (tagsR.data ?? []) as {
+    id: string;
+    nome: string;
+    cor: string | null;
+  }[];
+  const coresPorNome = new Map(tags.map((t) => [t.nome, t.cor]));
 
   const extras = new Map(
     ((extrasR.data ?? []) as ExtrasLead[]).map((e) => [e.id, e]),
@@ -364,8 +421,10 @@ export async function carregarListaConversas(
       caixa: (ctCaixaAbertas.count ?? 0) + (ctCaixaVencidas.count ?? 0),
       aguardando: ctAguardando.count ?? 0,
       adiadas: ctAdiadas.count ?? 0,
+      resolvidas: ctResolvidas.count ?? 0,
     },
     temMais,
+    etiquetas: tags,
   };
 }
 

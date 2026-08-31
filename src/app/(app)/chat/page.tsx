@@ -32,7 +32,12 @@ export default async function ChatPage({
 
   const inicial =
     "erro" in (carga as { erro?: string })
-      ? { linhas: [], contagens: { caixa: 0, aguardando: 0, adiadas: 0 }, temMais: false }
+      ? {
+          linhas: [],
+          contagens: { caixa: 0, aguardando: 0, adiadas: 0, resolvidas: 0 },
+          temMais: false,
+          etiquetas: [],
+        }
       : (carga as Exclude<typeof carga, { erro: string }>);
 
   let leadInicial = null;
