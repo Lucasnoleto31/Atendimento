@@ -1111,18 +1111,35 @@ export async function marcarChatLido(leadId: string) {
 }
 
 /** Opções rápidas de prazo ao adiar — o servidor calcula a data. */
-export type PrazoAdiar = "amanha" | "3dias" | "1semana";
+export type PrazoAdiar = "amanha" | "3dias" | "1semana" | "responder";
 
-const DIAS_PRAZO: Record<PrazoAdiar, number> = {
+const DIAS_PRAZO: Record<Exclude<PrazoAdiar, "responder">, number> = {
   amanha: 1,
   "3dias": 3,
   "1semana": 7,
 };
 
+/**
+ * "Até responder" é um prazo que nunca vence sozinho: sentinela no ano 9999.
+ * Assim a view existente já faz tudo certo — fica fora da Caixa enquanto o
+ * prazo não passou — e a volta é o caminho que sempre existiu: o webhook
+ * limpa os carimbos em qualquer mensagem recebida. A tela reconhece o ano
+ * e escreve "até responder" em vez da data.
+ */
+const ATE_RESPONDER_ISO = "9999-12-31T00:00:00.000Z";
+
 /** Data-limite do adiamento (ISO) a partir da opção rápida escolhida. */
 function prazoParaIso(prazo: PrazoAdiar, agoraMs: number): string | null {
+  if (prazo === "responder") return ATE_RESPONDER_ISO;
   const dias = DIAS_PRAZO[prazo];
   return dias ? new Date(agoraMs + dias * 86_400_000).toISOString() : null;
+}
+
+/** Texto da nota no histórico, honesto para os dois tipos de prazo. */
+function notaDeAdiamento(ate: string): string {
+  return ate === ATE_RESPONDER_ISO
+    ? "Conversa adiada até o lead responder"
+    : `Conversa adiada até ${formatarData(ate)}`;
 }
 
 /**
@@ -1169,7 +1186,7 @@ export async function adiarConversa(
     lead_id: leadId,
     tipo: "nota",
     conteudo: comPrazo
-      ? `Conversa adiada até ${formatarData(ate)}`
+      ? notaDeAdiamento(ate)
       : "Conversa adiada até a próxima resposta do lead",
     autor_id: perfil.id,
     metadados: { via: "crm", sistema: true },
@@ -1283,7 +1300,7 @@ export async function adiarConversasEmMassa(
   const resultado = await emMassa(
     leadIds,
     { chat_adiado_em: agora, chat_adiado_ate: ate, chat_lido_em: agora },
-    `Conversa adiada até ${formatarData(ate)}`,
+    notaDeAdiamento(ate),
   );
   // Sem a migração 0042 não existe a coluna do prazo: adia do jeito antigo.
   if (resultado.erro?.includes("chat_adiado_ate")) {

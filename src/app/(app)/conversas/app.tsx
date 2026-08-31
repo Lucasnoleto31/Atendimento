@@ -139,6 +139,11 @@ const FORMATO_DIA_CURTO = new Intl.DateTimeFormat("pt-BR", {
   month: "2-digit",
 });
 const FORMATO_DIA = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" });
+/** Prazo-sentinela do "adiar até responder" (ver chat/actions.ts). */
+function ateResponder(iso: string | null): boolean {
+  return Boolean(iso?.startsWith("9999"));
+}
+
 function horaOuDia(iso: string | null, hojeChave: string): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -1000,6 +1005,7 @@ export function AppConversas({
                   className="h-[30px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-xs text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-400"
                 >
                   <option value="">Adiar…</option>
+                  <option value="responder">até o lead responder</option>
                   <option value="amanha">até amanhã</option>
                   <option value="3dias">por 3 dias</option>
                   <option value="1semana">por 1 semana</option>
@@ -1673,7 +1679,9 @@ function LinhaLista({
           <span className="ml-auto shrink-0">
             {linha.adiadaAte && !linha.adiadaVencida ? (
               <span className="font-mono text-xs text-neutral-600">
-                volta {horaOuDia(linha.adiadaAte, hojeChave)}
+                {ateResponder(linha.adiadaAte)
+                  ? "até responder"
+                  : `volta ${horaOuDia(linha.adiadaAte, hojeChave)}`}
               </span>
             ) : espera ? (
               <span
