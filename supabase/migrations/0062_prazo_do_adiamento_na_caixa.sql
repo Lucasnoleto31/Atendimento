@@ -1,23 +1,30 @@
 -- =============================================================================
--- O prazo do adiamento passa a valer na caixa de entrada
+-- O prazo do adiamento passa a valer em TODAS as filas
 -- =============================================================================
--- A 0042 deu HORA MARCADA ao adiamento (chat_adiado_ate), e o chat já usa
--- essa hora para montar a visão "Adiadas". Mas a view das listas continuou
--- decidindo "adiado_vencido" pela heurística velha — adiado há mais de 3
--- dias — e é ela que devolve a conversa à Caixa. Com as duas regras
--- discordando, o adiamento ficava errado dos dois lados:
+-- A 0042 deu hora marcada ao adiamento (chat_adiado_ate). Só que a coluna
+-- chat_adiado_em NUNCA é limpa quando o prazo vence — ela some só quando o
+-- lead responde ou alguém reativa. E a view continuava tratando "tem
+-- chat_adiado_em" como "está adiado", para sempre. Resultado, com a 0042
+-- aplicada:
 --
---   • Adiei para AMANHÃ: amanhã a conversa sai de "Adiadas" (o prazo venceu)
---     e ainda não entra na Caixa (faltam 2 dias para a heurística) — some da
---     tela por dois dias.
---   • Stand-by de UMA SEMANA: no terceiro dia a heurística devolve a conversa
---     à Caixa, quatro dias antes do combinado.
+--   • A CAIXA DO CHAT decidia por adiado_vencido, que era a heurística velha
+--     dos 3 dias: adiar para AMANHÃ sumia com a conversa por dois dias (saiu
+--     de "Adiadas", ainda não entrou na Caixa), e o stand-by de UMA SEMANA
+--     voltava no terceiro dia, quatro dias antes do combinado.
+--   • O RESTO DO SISTEMA nem isso: /hoje, kanban, listas de /leads,
+--     relatórios, quadro da equipe e resumo do gestor leem em_aberto e
+--     aguardando_resposta, que ignoravam o prazo — a conversa adiada saía
+--     dessas filas e NÃO VOLTAVA NUNCA. O bolsão de stand-by inteiro
+--     desaparecia da fila do dia.
 --
--- Aqui a view passa a respeitar a hora marcada; a heurística de 3 dias fica
--- só para o que foi adiado ANTES da 0042 e não tem prazo gravado.
+-- Aqui a regra passa a ser uma só, nas três expressões: está fora das filas
+-- quem foi adiado E AINDA ESTÁ NO PRAZO. Vencido volta a ser conversa viva.
+-- A heurística de 3 dias sobrevive só para o que foi adiado antes da 0042
+-- sem prazo gravado. De carona, adiado_vencido passa a excluir lead perdido,
+-- como as outras duas expressões sempre fizeram.
 --
--- Só a expressão adiado_vencido muda — o resto da view é a definição da 0037,
--- reproduzida porque "create or replace view" exige o corpo inteiro.
+-- Fora essas três expressões, a view é a definição da 0037, reproduzida
+-- porque "create or replace view" exige o corpo inteiro.
 --
 -- Script reexecutável.
 -- =============================================================================
@@ -44,11 +51,25 @@ select
   g.ultimo_giro_em,
   c.conta_aberta_em,
 
-  -- Conversa viva: não resolvida, não adiada, lead não perdido. Toda lista de
-  -- trabalho parte daqui — o resto é ruído para a fila do dia.
+  -- Conversa viva: não resolvida, não adiada AINDA NO PRAZO, lead não
+  -- perdido. Toda lista de trabalho parte daqui — o resto é ruído para a
+  -- fila do dia.
+  --
+  -- "no prazo" é o que muda com a 0042: antes, adiar tirava a conversa de
+  -- TODAS as filas para sempre, porque chat_adiado_em nunca é limpo quando
+  -- o prazo vence. O chat disfarçava somando adiado_vencido à Caixa; a
+  -- /hoje, o kanban, as listas e os relatórios não — a conversa adiada
+  -- sumia deles e não voltava nunca.
   (
     l.chat_resolvido_em is null
-    and l.chat_adiado_em is null
+    and not (
+      l.chat_adiado_em is not null
+      and (
+        (l.chat_adiado_ate is not null and l.chat_adiado_ate > now())
+        or (l.chat_adiado_ate is null
+            and l.chat_adiado_em >= now() - interval '3 days')
+      )
+    )
     and l.status <> 'perdido'
   ) as em_aberto,
 
@@ -58,10 +79,18 @@ select
   rec.criado_em as ultima_recebida_em,
 
   -- AGUARDANDO NÓS: o cliente mandou a última mensagem e ninguém voltou.
+  -- Mesma regra de prazo do em_aberto: vencido volta a esperar resposta.
   (
     ult.tipo = 'mensagem_recebida'
     and l.chat_resolvido_em is null
-    and l.chat_adiado_em is null
+    and not (
+      l.chat_adiado_em is not null
+      and (
+        (l.chat_adiado_ate is not null and l.chat_adiado_ate > now())
+        or (l.chat_adiado_ate is null
+            and l.chat_adiado_em >= now() - interval '3 days')
+      )
+    )
     and l.status <> 'perdido'
   ) as aguardando_resposta,
 
@@ -131,10 +160,14 @@ select
   (
     l.chat_adiado_em is not null
     and l.chat_resolvido_em is null
-    and (
-      (l.chat_adiado_ate is not null and l.chat_adiado_ate <= now())
-      or (l.chat_adiado_ate is null
-          and l.chat_adiado_em < now() - interval '3 days')
+    and l.status <> 'perdido'
+    and not (
+      l.chat_adiado_em is not null
+      and (
+        (l.chat_adiado_ate is not null and l.chat_adiado_ate > now())
+        or (l.chat_adiado_ate is null
+            and l.chat_adiado_em >= now() - interval '3 days')
+      )
     )
     and (rec.criado_em is null or rec.criado_em < l.chat_adiado_em)
   ) as adiado_vencido,

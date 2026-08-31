@@ -123,6 +123,35 @@ export type ResultadoEnvio = {
   interacao?: InteracaoCriada;
 };
 
+/**
+ * Responder é tratar a conversa: além de marcar lida, ENCERRA o adiamento.
+ *
+ * chat_adiado_em nunca é limpo pelo tempo — só pela resposta do lead. Sem
+ * isto, a conversa que voltou do adiamento e foi respondida continuava
+ * marcada como "adiada · prazo venceu" e sedimentava na Caixa para sempre,
+ * inflando o contador do trilho.
+ */
+async function encerrarAdiamentoAoResponder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  leadId: string,
+  agora: string,
+) {
+  const base = { ultima_interacao_em: agora, chat_lido_em: agora };
+  const { error } = await supabase
+    .from("leads")
+    .update({ ...base, chat_adiado_em: null, chat_adiado_ate: null })
+    .eq("id", leadId);
+  if (!error) return;
+  // Banco sem a 0042 (ou schema cache velho): limpa o que existir.
+  const semPrazo = await supabase
+    .from("leads")
+    .update({ ...base, chat_adiado_em: null })
+    .eq("id", leadId);
+  if (semPrazo.error) {
+    await supabase.from("leads").update(base).eq("id", leadId);
+  }
+}
+
 async function leadComConversa(leadId: string) {
   const supabase = await createClient();
   const { data: lead } = await supabase
@@ -415,10 +444,7 @@ export async function enviarMensagemLead(
     .select("id, criado_em")
     .maybeSingle();
 
-  await supabase
-    .from("leads")
-    .update({ ultima_interacao_em: agora, chat_lido_em: agora })
-    .eq("id", leadId);
+  await encerrarAdiamentoAoResponder(supabase, leadId, agora);
 
   // Template disparado é contato feito: sai de "Novo" para "Em Contato".
   const servico = createServiceClient();
@@ -550,10 +576,7 @@ export async function enviarTemplateLead(
     };
   }
 
-  await supabase
-    .from("leads")
-    .update({ ultima_interacao_em: agora, chat_lido_em: agora })
-    .eq("id", leadId);
+  await encerrarAdiamentoAoResponder(supabase, leadId, agora);
 
   // A carteira mostra "último contato": sem isto ela seguia no valor velho.
   revalidatePath("/carteira");

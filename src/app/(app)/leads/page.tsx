@@ -72,7 +72,7 @@ const GRUPOS: { titulo: string; descricao: string; listas: DefLista[] }[] = [
         rotulo: "Adiados sem volta",
         coluna: "adiado_vencido",
         ajuda:
-          "Foram adiados há mais de 3 dias, sumiram da caixa do chat e ninguém retomou.",
+          "O prazo do adiamento venceu: já voltaram para a caixa do chat e ninguém retomou.",
         vaziaOk: true,
         ordem: { coluna: "ultima_interacao_em", ascendente: true },
       },

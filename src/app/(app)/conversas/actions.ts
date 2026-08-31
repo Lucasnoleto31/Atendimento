@@ -178,9 +178,16 @@ export async function carregarListaConversas(
       if (opts.atendenteId) q = q.eq("responsavel_id", opts.atendenteId);
       if (busca) q = q.or(`nome.ilike.%${busca}%,telefone_e164.ilike.%${busca}%`);
       if (comPrazo) {
+        // Mesma regra da view: no prazo pela hora marcada OU, para o que foi
+        // adiado sem prazo (fallback de um erro passageiro), pela heurística
+        // de 3 dias. Sem o segundo ramo, essa linha sumia de TODAS as visões.
+        const agoraIso = new Date().toISOString();
+        const tresDias = new Date(Date.now() - 3 * 86_400_000).toISOString();
         q = q
-          .gte("chat_adiado_ate", new Date().toISOString())
-          .order("chat_adiado_ate", { ascending: true });
+          .or(
+            `chat_adiado_ate.gte.${agoraIso},and(chat_adiado_ate.is.null,chat_adiado_em.gte.${tresDias})`,
+          )
+          .order("chat_adiado_ate", { ascending: true, nullsFirst: false });
       } else {
         q = q
           .gte("chat_adiado_em", new Date(Date.now() - 3 * 86_400_000).toISOString())
@@ -267,8 +274,16 @@ export async function carregarListaConversas(
             .is("chat_resolvido_em", null)
             .neq("status", "perdido");
           if (opts.escopo === "minhas") q = q.eq("responsavel_id", perfil.id);
-          if (comPrazo) q = q.gte("chat_adiado_ate", new Date().toISOString());
-          else
+          // O contador tem de contar exatamente o que a lista mostra.
+          if (comPrazo) {
+            const agoraIso = new Date().toISOString();
+            const tresDias = new Date(
+              Date.now() - 3 * 86_400_000,
+            ).toISOString();
+            q = q.or(
+              `chat_adiado_ate.gte.${agoraIso},and(chat_adiado_ate.is.null,chat_adiado_em.gte.${tresDias})`,
+            );
+          } else
             q = q.gte(
               "chat_adiado_em",
               new Date(Date.now() - 3 * 86_400_000).toISOString(),
