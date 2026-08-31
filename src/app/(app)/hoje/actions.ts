@@ -96,6 +96,9 @@ export type FerramentasDaConversa = {
   etiquetas: { id: string; nome: string; cor: string | null }[];
   etiquetasLead: string[];
   leadPerdido: boolean;
+  /** Resolver tira a conversa da Caixa; sem isto o palco não tinha como
+   *  oferecer a volta, e o gesto virava um caminho sem retorno. */
+  conversaResolvida: boolean;
 };
 
 export type ConversaDoPainel = {
@@ -178,7 +181,7 @@ export async function carregarConversa(
       const cheio = await supabase
         .from("leads")
         .select(
-          "id, nome, ultima_interacao_em, marketing_bloqueado_em, status, stage_id, responsavel_id",
+          "id, nome, ultima_interacao_em, marketing_bloqueado_em, status, stage_id, responsavel_id, chat_resolvido_em",
         )
         .eq("id", leadId)
         .maybeSingle();
@@ -309,6 +312,9 @@ export async function carregarConversa(
             (v) => v.tag_id,
           ),
           leadPerdido: lead.status === "perdido",
+          conversaResolvida: Boolean(
+            (lead as { chat_resolvido_em?: string | null }).chat_resolvido_em,
+          ),
         },
   };
 }

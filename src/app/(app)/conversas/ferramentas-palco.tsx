@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Ban, Mail, MoreHorizontal, RotateCcw, UserRound } from "lucide-react";
+import { Ban, Mail, MoreHorizontal, RotateCcw, Undo2, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { estiloEtiqueta } from "@/lib/etiquetas";
 import { MOTIVOS_PERDA, type MotivoPerda } from "@/lib/perda";
@@ -13,6 +13,7 @@ import {
   marcarChatNaoLido,
   marcarPerdidoChat,
   marcarStandBy,
+  alterarStatusConversaChat,
   reabrirLeadChat,
 } from "@/app/(app)/chat/actions";
 import type { FerramentasDaConversa } from "@/app/(app)/hoje/actions";
@@ -264,6 +265,19 @@ export function FerramentasPalco({
                 <Mail size={15} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
                 Marcar como não lida
               </button>
+              {ferramentas.conversaResolvida ? (
+                <button
+                  type="button"
+                  disabled={pendente}
+                  onClick={() =>
+                    executar(() => alterarStatusConversaChat(leadId, "open"))
+                  }
+                  className="flex h-[40px] w-full items-center gap-1 rounded-md px-1 text-left text-sm text-neutral-800 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  <Undo2 size={15} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
+                  Reabrir conversa
+                </button>
+              ) : null}
               {ferramentas.leadPerdido ? (
                 <button
                   type="button"
