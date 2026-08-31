@@ -210,6 +210,7 @@ export function PainelConversa() {
             templates={dados.templates}
             restanteJanela={dados.restanteJanela}
             marketingBloqueado={dados.marketingBloqueado}
+            templateBloqueadoAte={dados.templateBloqueadoAte}
             hojeChave={dados.hojeChave}
             ontemChave={dados.ontemChave}
             // Esta tela não tem tempo real próprio: a rede de segurança de

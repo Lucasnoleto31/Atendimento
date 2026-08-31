@@ -37,6 +37,7 @@ export function BotaoTemplates({
   templates,
   principal = false,
   aoEnviar,
+  bloqueadoAte = null,
 }: {
   leadId: string;
   templates: TemplateWhatsapp[];
@@ -44,6 +45,8 @@ export function BotaoTemplates({
   principal?: boolean;
   /** Avisa a tela: o contador de templates do painel precisa recontar. */
   aoEnviar?: () => void;
+  /** Lead perdido há menos de 30 dias: sem template até esta data (ISO). */
+  bloqueadoAte?: string | null;
 }) {
   const [aberto, setAberto] = useState(false);
   const [indice, setIndice] = useState<number | null>(null);
@@ -323,6 +326,23 @@ export function BotaoTemplates({
       </div>
     </div>
   );
+
+  // Perdido há menos de 30 dias: no lugar do botão entra o motivo — cor E
+  // rótulo, para o atendente saber por que o caminho sumiu (a regra de
+  // verdade mora no servidor; isto aqui é o aviso honesto). Depois dos
+  // hooks de propósito: a ordem deles não pode depender da prop.
+  if (bloqueadoAte) {
+    // Bloqueio chegou com o diálogo aberto (colega marcou perdido): fecha —
+    // ajuste durante o render, o mesmo padrão dos hooks lá em cima. Sem
+    // isso o Escape ficava escutando o document e, se o lead fosse
+    // reativado, o diálogo reaparecia sozinho.
+    if (aberto) setAberto(false);
+    return (
+      <span className="inline-flex h-[40px] items-center rounded-md bg-danger-bg px-2 text-xs font-medium text-danger">
+        Lead perdido — sem templates até {formatarData(bloqueadoAte)}
+      </span>
+    );
+  }
 
   return (
     <>

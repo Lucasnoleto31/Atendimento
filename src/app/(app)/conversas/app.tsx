@@ -39,7 +39,10 @@ import {
   resolverConversasEmMassa,
   type PrazoAdiar,
 } from "@/app/(app)/chat/actions";
-import { carregarConversa, type ConversaDoPainel } from "@/app/(app)/hoje/actions";
+import {
+  carregarConversa,
+  type ConversaDoPainel,
+} from "@/app/(app)/hoje/actions";
 import { resumirConversa, sugerirResposta } from "@/app/(app)/chat/ia";
 import { sugestaoStore } from "@/app/(app)/chat/sugestao-store";
 import { FerramentasPalco } from "./ferramentas-palco";
@@ -64,12 +67,36 @@ import {
  * quarta coluna a partir de 1280px e como folha abaixo disso.
  */
 
-const VISOES: { chave: VisaoConversas; rotulo: string; icone: React.ReactNode }[] = [
-  { chave: "caixa", rotulo: "Caixa", icone: <Inbox size={19} strokeWidth={1.7} aria-hidden /> },
-  { chave: "aguardando", rotulo: "Aguard.", icone: <Clock size={19} strokeWidth={1.7} aria-hidden /> },
-  { chave: "adiadas", rotulo: "Adiadas", icone: <Timer size={19} strokeWidth={1.7} aria-hidden /> },
-  { chave: "resolvidas", rotulo: "Resolv.", icone: <CheckCheck size={19} strokeWidth={1.7} aria-hidden /> },
-  { chave: "tudo", rotulo: "Tudo", icone: <ListFilter size={19} strokeWidth={1.7} aria-hidden /> },
+const VISOES: {
+  chave: VisaoConversas;
+  rotulo: string;
+  icone: React.ReactNode;
+}[] = [
+  {
+    chave: "caixa",
+    rotulo: "Caixa",
+    icone: <Inbox size={19} strokeWidth={1.7} aria-hidden />,
+  },
+  {
+    chave: "aguardando",
+    rotulo: "Aguard.",
+    icone: <Clock size={19} strokeWidth={1.7} aria-hidden />,
+  },
+  {
+    chave: "adiadas",
+    rotulo: "Adiadas",
+    icone: <Timer size={19} strokeWidth={1.7} aria-hidden />,
+  },
+  {
+    chave: "resolvidas",
+    rotulo: "Resolv.",
+    icone: <CheckCheck size={19} strokeWidth={1.7} aria-hidden />,
+  },
+  {
+    chave: "tudo",
+    rotulo: "Tudo",
+    icone: <ListFilter size={19} strokeWidth={1.7} aria-hidden />,
+  },
 ];
 
 /** Nome por extenso (o trilho abrevia "Aguard." por falta de espaço). */
@@ -91,8 +118,16 @@ const ORDENS: Record<VisaoConversas, string> = {
 
 /** Cor determinística por nome — identidade visual sem foto (a API oficial não dá a foto). */
 const PALETA_AVATAR = [
-  "#2E6296", "#A96513", "#6B5CA5", "#188652", "#B05A7A",
-  "#3C7C8C", "#5C6BB3", "#398577", "#8A6D3B", "#985B4C",
+  "#2E6296",
+  "#A96513",
+  "#6B5CA5",
+  "#188652",
+  "#B05A7A",
+  "#3C7C8C",
+  "#5C6BB3",
+  "#398577",
+  "#8A6D3B",
+  "#985B4C",
 ];
 function corDe(nome: string): string {
   let h = 0;
@@ -139,7 +174,9 @@ const FORMATO_DIA_CURTO = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
   month: "2-digit",
 });
-const FORMATO_DIA = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" });
+const FORMATO_DIA = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: "America/Sao_Paulo",
+});
 /** Prazo-sentinela do "adiar até responder" (ver chat/actions.ts). */
 function ateResponder(iso: string | null): boolean {
   return Boolean(iso?.startsWith("9999"));
@@ -191,7 +228,10 @@ export function AppConversas({
   const [acaoPendente, setAcaoPendente] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [resumo, setResumo] = useState<{ texto?: string; erro?: string } | null>(null);
+  const [resumo, setResumo] = useState<{
+    texto?: string;
+    erro?: string;
+  } | null>(null);
   const [resumindo, setResumindo] = useState(false);
   const [paletaAberta, setPaletaAberta] = useState(false);
   // Painel de contexto: no desktop é uma coluna fixa (o atendente quer ver
@@ -298,7 +338,12 @@ export function AppConversas({
       void carregarListaConversas(v, { escopo: e, busca: b }).then((r) => {
         // Só aplica se o filtro não mudou enquanto a resposta viajava.
         const atual = estadoListaRef.current;
-        if (atual.visao === v && atual.escopo === e && atual.busca === b && !("erro" in r)) {
+        if (
+          atual.visao === v &&
+          atual.escopo === e &&
+          atual.busca === b &&
+          !("erro" in r)
+        ) {
           setCarga(r);
         }
       });
@@ -622,7 +667,11 @@ export function AppConversas({
       // — nem a paleta, que empilharia por cima dele.
       const temModal = Boolean(document.querySelector('[role="dialog"]'));
       // ⌘K vale até com o foco num campo — é o contrato de toda paleta.
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        e.key.toLowerCase() === "k"
+      ) {
         if (temModal && !paletaAberta) return;
         e.preventDefault();
         setPaletaAberta((v) => !v);
@@ -696,7 +745,18 @@ export function AppConversas({
     };
     window.addEventListener("keydown", aoTeclar);
     return () => window.removeEventListener("keydown", aoTeclar);
-  }, [proxima, anterior, paletaAberta, painelAberto, fecharPainel, aberta, despachar, escopo, busca, recarregarLista]);
+  }, [
+    proxima,
+    anterior,
+    paletaAberta,
+    painelAberto,
+    fecharPainel,
+    aberta,
+    despachar,
+    escopo,
+    busca,
+    recarregarLista,
+  ]);
 
   const pedirResumo = useCallback(async () => {
     if (!aberta || resumindo) return;
@@ -946,7 +1006,12 @@ export function AppConversas({
             </div>
           </div>
           <label className="mt-1 flex h-[40px] items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-0 px-1.5">
-            <Search size={16} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
+            <Search
+              size={16}
+              strokeWidth={1.7}
+              aria-hidden
+              className="text-neutral-400"
+            />
             <input
               value={busca}
               onChange={(e) => aoBuscar(e.target.value)}
@@ -960,7 +1025,10 @@ export function AppConversas({
         </div>
 
         {erroLista ? (
-          <p role="alert" className="mx-2 mb-1 rounded-md bg-danger-bg px-1.5 py-1 text-xs text-danger">
+          <p
+            role="alert"
+            className="mx-2 mb-1 rounded-md bg-danger-bg px-1.5 py-1 text-xs text-danger"
+          >
             {erroLista}
           </p>
         ) : null}
@@ -1076,7 +1144,12 @@ export function AppConversas({
           )
         ) : null}
 
-        <div className={cn("min-h-0 flex-1 overflow-y-auto px-1 pb-1", carregandoLista && "opacity-50")}>
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-1 pb-1",
+            carregandoLista && "opacity-50",
+          )}
+        >
           {carga.linhas.length === 0 && !carregandoLista ? (
             <div className="px-2 py-4 text-center">
               <p className="text-sm font-medium text-neutral-800">
@@ -1106,7 +1179,9 @@ export function AppConversas({
                   selecionando={modoSelecao}
                   selecionada={selecionadas.has(l.leadId)}
                   aoAlternarSelecao={() => alternarSelecao(l.leadId)}
-                  aoAbrir={() => void abrirConversa({ leadId: l.leadId, nome: l.nome })}
+                  aoAbrir={() =>
+                    void abrirConversa({ leadId: l.leadId, nome: l.nome })
+                  }
                   aoResolver={() => void despachar(l.leadId, "resolver")}
                   aoAdiar={() => void despachar(l.leadId, "adiar")}
                   aoReativar={
@@ -1159,7 +1234,11 @@ export function AppConversas({
             <div className="text-center">
               <p className="text-h3 text-neutral-800">Escolha uma conversa</p>
               <p className="mt-0.5 text-sm text-neutral-600">
-                ou aperte <kbd className="rounded-sm border border-neutral-300 bg-neutral-0 px-0.5 font-mono text-xs">J</kbd> para a primeira da fila.
+                ou aperte{" "}
+                <kbd className="rounded-sm border border-neutral-300 bg-neutral-0 px-0.5 font-mono text-xs">
+                  J
+                </kbd>{" "}
+                para a primeira da fila.
               </p>
             </div>
           </div>
@@ -1179,7 +1258,12 @@ export function AppConversas({
                 aria-label="Voltar para a lista"
                 className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 md:hidden"
               >
-                <RotateCcw size={18} strokeWidth={1.7} aria-hidden className="rotate-90" />
+                <RotateCcw
+                  size={18}
+                  strokeWidth={1.7}
+                  aria-hidden
+                  className="rotate-90"
+                />
               </button>
               <span
                 aria-hidden
@@ -1195,7 +1279,9 @@ export function AppConversas({
                 <p
                   className={cn(
                     "truncate text-xs",
-                    responsavelDaAberta ? "text-neutral-600" : "text-accent-700",
+                    responsavelDaAberta
+                      ? "text-neutral-600"
+                      : "text-accent-700",
                   )}
                 >
                   {responsavelDaAberta ?? "sem dono"}
@@ -1288,7 +1374,12 @@ export function AppConversas({
                   aria-hidden
                   className="mt-0.5 shrink-0 text-primary-600"
                 />
-                <p className={cn("min-w-0", resumo?.erro ? "text-danger" : "text-neutral-800")}>
+                <p
+                  className={cn(
+                    "min-w-0",
+                    resumo?.erro ? "text-danger" : "text-neutral-800",
+                  )}
+                >
                   {resumindo
                     ? "Resumindo a conversa…"
                     : (resumo?.texto ?? resumo?.erro)}
@@ -1314,11 +1405,16 @@ export function AppConversas({
             ) : null}
 
             {erroConversa ? (
-              <p role="alert" className="m-2 rounded-md border border-danger bg-danger-bg px-1.5 py-1 text-sm text-danger">
+              <p
+                role="alert"
+                className="m-2 rounded-md border border-danger bg-danger-bg px-1.5 py-1 text-sm text-danger"
+              >
                 {erroConversa}
               </p>
             ) : carregandoConversa || !conversa ? (
-              <p className="m-2 text-sm text-neutral-600">Abrindo a conversa…</p>
+              <p className="m-2 text-sm text-neutral-600">
+                Abrindo a conversa…
+              </p>
             ) : (
               <Janela
                 leadId={aberta.leadId}
@@ -1328,6 +1424,7 @@ export function AppConversas({
                 templates={conversa.templates}
                 restanteJanela={conversa.restanteJanela}
                 marketingBloqueado={conversa.marketingBloqueado}
+                templateBloqueadoAte={conversa.templateBloqueadoAte}
                 hojeChave={conversa.hojeChave}
                 ontemChave={conversa.ontemChave}
                 aoEnviarTemplate={() => setSinalContexto((n) => n + 1)}
@@ -1378,7 +1475,7 @@ export function AppConversas({
                 const foco = folhaRef.current;
                 if (!foco) return;
                 const alvos = foco.querySelectorAll<HTMLElement>(
-                  'a[href], button:not([disabled]), input, select, textarea',
+                  "a[href], button:not([disabled]), input, select, textarea",
                 );
                 if (alvos.length === 0) return;
                 const primeiro = alvos[0];
@@ -1480,10 +1577,26 @@ export function AppConversas({
             grupo: "Ir para",
             itens: [
               { rotulo: "Caixa", tecla: "", acao: () => trocarVisao("caixa") },
-              { rotulo: "Aguardando", tecla: "", acao: () => trocarVisao("aguardando") },
-              { rotulo: "Adiadas", tecla: "", acao: () => trocarVisao("adiadas") },
-              { rotulo: "Resolvidas", tecla: "", acao: () => trocarVisao("resolvidas") },
-              { rotulo: "Tudo (acervo e busca)", tecla: "", acao: () => trocarVisao("tudo") },
+              {
+                rotulo: "Aguardando",
+                tecla: "",
+                acao: () => trocarVisao("aguardando"),
+              },
+              {
+                rotulo: "Adiadas",
+                tecla: "",
+                acao: () => trocarVisao("adiadas"),
+              },
+              {
+                rotulo: "Resolvidas",
+                tecla: "",
+                acao: () => trocarVisao("resolvidas"),
+              },
+              {
+                rotulo: "Tudo (acervo e busca)",
+                tecla: "",
+                acao: () => trocarVisao("tudo"),
+              },
               { rotulo: "Próxima da fila", tecla: "J", acao: proxima },
             ],
           },
@@ -1563,7 +1676,10 @@ function LinhaLista({
   };
 
   return (
-    <div className="relative overflow-hidden rounded-lg" data-lead={linha.leadId}>
+    <div
+      className="relative overflow-hidden rounded-lg"
+      data-lead={linha.leadId}
+    >
       {/* A pista que aparece atrás da linha enquanto o dedo arrasta: verde à
           esquerda (resolver), âmbar à direita (adiar). */}
       {arrasto !== 0 ? (
@@ -1583,7 +1699,11 @@ function LinhaLista({
             </span>
           ) : (
             <span className="inline-flex items-center gap-0.5">
-              {arrasto <= -LIMIAR ? (aoReativar ? "Voltar" : "Adiar") : "Arraste"}
+              {arrasto <= -LIMIAR
+                ? aoReativar
+                  ? "Voltar"
+                  : "Adiar"
+                : "Arraste"}
               {aoReativar ? (
                 <RotateCcw size={16} strokeWidth={1.7} aria-hidden />
               ) : (
@@ -1593,258 +1713,274 @@ function LinhaLista({
           )}
         </div>
       ) : null}
-    <div
-      className={cn(
-        "group relative flex cursor-pointer touch-pan-y items-center gap-1.5 rounded-lg px-1 py-1",
-        // ring por dentro, não outline: o wrapper do gesto tem
-        // overflow-hidden e recortaria o anel do navegador.
-        "focus-within:ring-2 focus-within:ring-primary-500",
-        // Sem transição durante o arrasto: a linha precisa colar no dedo.
-        deslizando ? "" : "transition-colors duration-[120ms]",
-        selecionada
-          ? "bg-primary-50"
-          : aberta
-            ? "bg-neutral-0 shadow-sm ring-1 ring-neutral-200"
-            : "hover:bg-neutral-0",
-        pendente && "opacity-50",
-      )}
-      style={arrasto !== 0 ? { transform: `translateX(${arrasto}px)` } : undefined}
-      onPointerDown={(e) => {
-        if (e.pointerType === "mouse" || pendente || selecionando) return;
-        inicioRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
-        arrastouRef.current = false;
-      }}
-      onPointerMove={(e) => {
-        const inicio = inicioRef.current;
-        if (!inicio || inicio.id !== e.pointerId) return;
-        const dx = e.clientX - inicio.x;
-        const dy = e.clientY - inicio.y;
-        // Rolagem vertical vence: o dedo desce a lista muito mais do que
-        // arrasta a linha.
-        if (arrasto === 0 && Math.abs(dy) > Math.abs(dx)) {
-          inicioRef.current = null;
-          return;
+      <div
+        className={cn(
+          "group relative flex cursor-pointer touch-pan-y items-center gap-1.5 rounded-lg px-1 py-1",
+          // ring por dentro, não outline: o wrapper do gesto tem
+          // overflow-hidden e recortaria o anel do navegador.
+          "focus-within:ring-2 focus-within:ring-primary-500",
+          // Sem transição durante o arrasto: a linha precisa colar no dedo.
+          deslizando ? "" : "transition-colors duration-[120ms]",
+          selecionada
+            ? "bg-primary-50"
+            : aberta
+              ? "bg-neutral-0 shadow-sm ring-1 ring-neutral-200"
+              : "hover:bg-neutral-0",
+          pendente && "opacity-50",
+        )}
+        style={
+          arrasto !== 0 ? { transform: `translateX(${arrasto}px)` } : undefined
         }
-        if (arrasto === 0 && Math.abs(dx) < 8) return;
-        if (arrasto === 0) {
-          // Captura só AQUI, quando já se sabe que o gesto é horizontal:
-          // capturar no pointerdown atrapalharia a rolagem da lista. Sem
-          // ela, o dedo que sai da linha leva o pointerup embora e a linha
-          // fica travada deslocada.
-          try {
-            e.currentTarget.setPointerCapture(e.pointerId);
-          } catch {
-            // navegador sem captura: o gesto ainda vale dentro da linha
+        onPointerDown={(e) => {
+          if (e.pointerType === "mouse" || pendente || selecionando) return;
+          inicioRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+          arrastouRef.current = false;
+        }}
+        onPointerMove={(e) => {
+          const inicio = inicioRef.current;
+          if (!inicio || inicio.id !== e.pointerId) return;
+          const dx = e.clientX - inicio.x;
+          const dy = e.clientY - inicio.y;
+          // Rolagem vertical vence: o dedo desce a lista muito mais do que
+          // arrasta a linha.
+          if (arrasto === 0 && Math.abs(dy) > Math.abs(dx)) {
+            inicioRef.current = null;
+            return;
           }
-        }
-        setArrasto(Math.max(-140, Math.min(140, dx)));
-      }}
-      onPointerUp={aoSoltar}
-      onPointerCancel={() => {
-        inicioRef.current = null;
-        setArrasto(0);
-      }}
-      role="listitem"
-    >
-      {/* O conteúdo é um BOTÃO — alcançável por Tab e anunciado pelo leitor
+          if (arrasto === 0 && Math.abs(dx) < 8) return;
+          if (arrasto === 0) {
+            // Captura só AQUI, quando já se sabe que o gesto é horizontal:
+            // capturar no pointerdown atrapalharia a rolagem da lista. Sem
+            // ela, o dedo que sai da linha leva o pointerup embora e a linha
+            // fica travada deslocada.
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              // navegador sem captura: o gesto ainda vale dentro da linha
+            }
+          }
+          setArrasto(Math.max(-140, Math.min(140, dx)));
+        }}
+        onPointerUp={aoSoltar}
+        onPointerCancel={() => {
+          inicioRef.current = null;
+          setArrasto(0);
+        }}
+        role="listitem"
+      >
+        {/* O conteúdo é um BOTÃO — alcançável por Tab e anunciado pelo leitor
           de tela. Os de resolver/adiar são irmãos, não filhos: botão dentro
           de botão é HTML inválido e some para quem navega por teclado. */}
-      <button
-        type="button"
-        aria-current={aberta ? "true" : undefined}
-        aria-pressed={selecionando ? selecionada : undefined}
-        onClick={() => {
-          // Arrastou: o clique que o navegador manda depois do gesto não
-          // pode abrir a conversa.
-          if (arrastouRef.current) {
-            arrastouRef.current = false;
-            return;
-          }
-          if (selecionando) {
-            aoAlternarSelecao();
-            return;
-          }
-          aoAbrir();
-        }}
-        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left focus-visible:outline-none"
-      >
-      {selecionando ? (
-        <span
-          aria-hidden
-          className={cn(
-            "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-sm border",
-            selecionada
-              ? "border-primary-600 bg-primary-600 text-neutral-0"
-              : "border-neutral-300 bg-neutral-0",
-          )}
-        >
-          {selecionada ? <Check size={14} strokeWidth={2.5} /> : null}
-        </span>
-      ) : null}
-      <span className="relative shrink-0" aria-hidden>
-        <span
-          className={cn(
-            "flex h-[44px] w-[44px] items-center justify-center rounded-full text-sm font-semibold text-neutral-0 ring-2 ring-offset-2 ring-offset-neutral-50",
-            linha.janelaAberta ? "ring-success" : "ring-accent-500",
-          )}
-          style={{ backgroundColor: corDe(linha.nome) }}
-          title={linha.janelaAberta ? "Janela de 24h aberta" : "Janela fechada — só template"}
-        >
-          {iniciaisDe(linha.nome)}
-        </span>
-      </span>
-      <div className="min-w-0 flex-1">
-        {/* Quem está no atendimento, ACIMA do nome: numa fila que todo mundo
-            enxerga, saber de quem é a conversa antes de abri-la evita dois
-            atendentes na mesma pessoa. */}
-        <p
-          className={cn(
-            "truncate text-xs",
-            linha.responsavelNome ? "text-neutral-600" : "text-accent-700",
-          )}
-        >
-          {linha.responsavelNome ?? "sem dono"}
-        </p>
-        <div className="flex items-baseline gap-1">
-          <span
-            className={cn(
-              "truncate text-sm text-neutral-900",
-              linha.naoLida ? "font-semibold" : "font-medium",
-            )}
-          >
-            {linha.nome}
-          </span>
-          <span
-            title={estado.titulo}
-            aria-label={estado.titulo}
-            className="shrink-0"
-          >
-            <IconeEstado
-              size={14}
-              strokeWidth={1.7}
-              aria-hidden
-              className={estado.cor}
-            />
-          </span>
-          <span className="ml-auto shrink-0">
-            {linha.adiadaAte && !linha.adiadaVencida ? (
-              <span className="font-mono text-xs text-neutral-600">
-                {ateResponder(linha.adiadaAte)
-                  ? "até responder"
-                  : `volta ${horaOuDia(linha.adiadaAte, hojeChave)}`}
-              </span>
-            ) : espera ? (
-              <span
-                className={cn(
-                  "rounded-full px-1 py-0.5 font-mono text-xs font-semibold tabular-nums",
-                  critica
-                    ? "bg-danger-bg text-danger"
-                    : alta
-                      ? "bg-accent-100 text-accent-700"
-                      : "bg-primary-50 text-primary-600",
-                )}
-              >
-                {espera}
-              </span>
-            ) : (
-              <span className="font-mono text-xs text-neutral-600">
-                {horaOuDia(linha.ultimaEm, hojeChave)}
-              </span>
-            )}
-          </span>
-        </div>
-        {/* Etiquetas entre o nome e a prévia: é o que diz de que TIPO é
-            esta conversa antes de abri-la (Stand-by, VIP, Reativação). */}
-        {linha.etiquetas.length > 0 ? (
-          <div className="mt-[2px] flex flex-wrap items-center gap-0.5">
-            {linha.etiquetas.slice(0, 3).map((e) => (
-              <span
-                key={e.nome}
-                className={cn(
-                  "inline-flex h-[18px] max-w-[120px] items-center truncate rounded-sm px-0.5 text-xs font-medium",
-                  estiloEtiqueta(e.cor).chip,
-                )}
-              >
-                {e.nome}
-              </span>
-            ))}
-            {linha.etiquetas.length > 3 ? (
-              <span className="font-mono text-xs text-neutral-600">
-                +{linha.etiquetas.length - 3}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="mt-[1px] flex items-center gap-0.5">
-          {linha.vez === "nos" ? (
-            <CheckCheck size={14} strokeWidth={1.7} aria-hidden className="shrink-0 text-neutral-400" />
-          ) : null}
-          <span
-            className={cn(
-              "truncate text-sm",
-              linha.naoLida ? "text-neutral-800" : "text-neutral-600",
-            )}
-          >
-            {linha.previa ?? (linha.telefone ? "" : linha.instagram ? `@${linha.instagram}` : "")}
-          </span>
-          {linha.naoLida ? (
-            <span className="ml-auto inline-flex h-[20px] min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary-600 px-0.5 font-mono text-xs font-semibold text-neutral-0">
-              1
-            </span>
-          ) : null}
-        </div>
-        {linha.sub ? (
-          <p className="text-xs text-neutral-600">{linha.sub}</p>
-        ) : null}
-      </div>
-      </button>
-
-      {/* Aparece no hover E no foco: escondido só no hover, o teclado nunca
-          alcançava resolver e adiar. */}
-      <div className="absolute top-1/2 right-1 hidden -translate-y-1/2 gap-0.5 rounded-lg border border-neutral-200 bg-neutral-0 p-0.5 shadow-sm group-hover:flex group-focus-within:flex">
         <button
           type="button"
-          aria-label={`Resolver conversa com ${linha.nome}`}
-          disabled={pendente}
-          onClick={(e) => {
-            e.stopPropagation();
-            aoResolver();
+          aria-current={aberta ? "true" : undefined}
+          aria-pressed={selecionando ? selecionada : undefined}
+          onClick={() => {
+            // Arrastou: o clique que o navegador manda depois do gesto não
+            // pode abrir a conversa.
+            if (arrastouRef.current) {
+              arrastouRef.current = false;
+              return;
+            }
+            if (selecionando) {
+              aoAlternarSelecao();
+              return;
+            }
+            aoAbrir();
           }}
-          className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-success hover:bg-success-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left focus-visible:outline-none"
         >
-          <Check size={15} strokeWidth={2} aria-hidden />
+          {selecionando ? (
+            <span
+              aria-hidden
+              className={cn(
+                "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-sm border",
+                selecionada
+                  ? "border-primary-600 bg-primary-600 text-neutral-0"
+                  : "border-neutral-300 bg-neutral-0",
+              )}
+            >
+              {selecionada ? <Check size={14} strokeWidth={2.5} /> : null}
+            </span>
+          ) : null}
+          <span className="relative shrink-0" aria-hidden>
+            <span
+              className={cn(
+                "flex h-[44px] w-[44px] items-center justify-center rounded-full text-sm font-semibold text-neutral-0 ring-2 ring-offset-2 ring-offset-neutral-50",
+                linha.janelaAberta ? "ring-success" : "ring-accent-500",
+              )}
+              style={{ backgroundColor: corDe(linha.nome) }}
+              title={
+                linha.janelaAberta
+                  ? "Janela de 24h aberta"
+                  : "Janela fechada — só template"
+              }
+            >
+              {iniciaisDe(linha.nome)}
+            </span>
+          </span>
+          <div className="min-w-0 flex-1">
+            {/* Quem está no atendimento, ACIMA do nome: numa fila que todo mundo
+            enxerga, saber de quem é a conversa antes de abri-la evita dois
+            atendentes na mesma pessoa. */}
+            <p
+              className={cn(
+                "truncate text-xs",
+                linha.responsavelNome ? "text-neutral-600" : "text-accent-700",
+              )}
+            >
+              {linha.responsavelNome ?? "sem dono"}
+            </p>
+            <div className="flex items-baseline gap-1">
+              <span
+                className={cn(
+                  "truncate text-sm text-neutral-900",
+                  linha.naoLida ? "font-semibold" : "font-medium",
+                )}
+              >
+                {linha.nome}
+              </span>
+              <span
+                title={estado.titulo}
+                aria-label={estado.titulo}
+                className="shrink-0"
+              >
+                <IconeEstado
+                  size={14}
+                  strokeWidth={1.7}
+                  aria-hidden
+                  className={estado.cor}
+                />
+              </span>
+              <span className="ml-auto shrink-0">
+                {linha.adiadaAte && !linha.adiadaVencida ? (
+                  <span className="font-mono text-xs text-neutral-600">
+                    {ateResponder(linha.adiadaAte)
+                      ? "até responder"
+                      : `volta ${horaOuDia(linha.adiadaAte, hojeChave)}`}
+                  </span>
+                ) : espera ? (
+                  <span
+                    className={cn(
+                      "rounded-full px-1 py-0.5 font-mono text-xs font-semibold tabular-nums",
+                      critica
+                        ? "bg-danger-bg text-danger"
+                        : alta
+                          ? "bg-accent-100 text-accent-700"
+                          : "bg-primary-50 text-primary-600",
+                    )}
+                  >
+                    {espera}
+                  </span>
+                ) : (
+                  <span className="font-mono text-xs text-neutral-600">
+                    {horaOuDia(linha.ultimaEm, hojeChave)}
+                  </span>
+                )}
+              </span>
+            </div>
+            {/* Etiquetas entre o nome e a prévia: é o que diz de que TIPO é
+            esta conversa antes de abri-la (Stand-by, VIP, Reativação). */}
+            {linha.etiquetas.length > 0 ? (
+              <div className="mt-[2px] flex flex-wrap items-center gap-0.5">
+                {linha.etiquetas.slice(0, 3).map((e) => (
+                  <span
+                    key={e.nome}
+                    className={cn(
+                      "inline-flex h-[18px] max-w-[120px] items-center truncate rounded-sm px-0.5 text-xs font-medium",
+                      estiloEtiqueta(e.cor).chip,
+                    )}
+                  >
+                    {e.nome}
+                  </span>
+                ))}
+                {linha.etiquetas.length > 3 ? (
+                  <span className="font-mono text-xs text-neutral-600">
+                    +{linha.etiquetas.length - 3}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="mt-[1px] flex items-center gap-0.5">
+              {linha.vez === "nos" ? (
+                <CheckCheck
+                  size={14}
+                  strokeWidth={1.7}
+                  aria-hidden
+                  className="shrink-0 text-neutral-400"
+                />
+              ) : null}
+              <span
+                className={cn(
+                  "truncate text-sm",
+                  linha.naoLida ? "text-neutral-800" : "text-neutral-600",
+                )}
+              >
+                {linha.previa ??
+                  (linha.telefone
+                    ? ""
+                    : linha.instagram
+                      ? `@${linha.instagram}`
+                      : "")}
+              </span>
+              {linha.naoLida ? (
+                <span className="ml-auto inline-flex h-[20px] min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary-600 px-0.5 font-mono text-xs font-semibold text-neutral-0">
+                  1
+                </span>
+              ) : null}
+            </div>
+            {linha.sub ? (
+              <p className="text-xs text-neutral-600">{linha.sub}</p>
+            ) : null}
+          </div>
         </button>
-        {aoReativar ? (
+
+        {/* Aparece no hover E no foco: escondido só no hover, o teclado nunca
+          alcançava resolver e adiar. */}
+        <div className="absolute top-1/2 right-1 hidden -translate-y-1/2 gap-0.5 rounded-lg border border-neutral-200 bg-neutral-0 p-0.5 shadow-sm group-hover:flex group-focus-within:flex">
           <button
             type="button"
-            aria-label={`Trazer a conversa com ${linha.nome} de volta para a caixa`}
-            title="Voltar para a caixa agora"
+            aria-label={`Resolver conversa com ${linha.nome}`}
             disabled={pendente}
             onClick={(e) => {
               e.stopPropagation();
-              aoReativar();
+              aoResolver();
             }}
-            className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-primary-600 hover:bg-primary-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-success hover:bg-success-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
           >
-            <RotateCcw size={15} strokeWidth={1.7} aria-hidden />
+            <Check size={15} strokeWidth={2} aria-hidden />
           </button>
-        ) : (
-          <button
-            type="button"
-            aria-label={`Adiar conversa com ${linha.nome} até amanhã`}
-            disabled={pendente}
-            onClick={(e) => {
-              e.stopPropagation();
-              aoAdiar();
-            }}
-            className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
-          >
-            <Clock size={15} strokeWidth={1.7} aria-hidden />
-          </button>
-        )}
+          {aoReativar ? (
+            <button
+              type="button"
+              aria-label={`Trazer a conversa com ${linha.nome} de volta para a caixa`}
+              title="Voltar para a caixa agora"
+              disabled={pendente}
+              onClick={(e) => {
+                e.stopPropagation();
+                aoReativar();
+              }}
+              className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-primary-600 hover:bg-primary-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            >
+              <RotateCcw size={15} strokeWidth={1.7} aria-hidden />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label={`Adiar conversa com ${linha.nome} até amanhã`}
+              disabled={pendente}
+              onClick={(e) => {
+                e.stopPropagation();
+                aoAdiar();
+              }}
+              className="inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+            >
+              <Clock size={15} strokeWidth={1.7} aria-hidden />
+            </button>
+          )}
+        </div>
       </div>
-    </div>
     </div>
   );
 }

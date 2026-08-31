@@ -5,7 +5,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { avancarAposDisparo } from "@/lib/kanban";
 import { marcarRoteiroEnviado } from "@/lib/ativacao";
 import { perfilAtual } from "@/lib/auth";
-import { ehMotivoPerda } from "@/lib/perda";
+import { ehMotivoPerda, templateBloqueadoAte } from "@/lib/perda";
 import { formatarData } from "@/lib/format";
 import {
   enviarMidiaMeta,
@@ -154,17 +154,34 @@ async function encerrarAdiamentoAoResponder(
 
 async function leadComConversa(leadId: string) {
   const supabase = await createClient();
-  const { data: lead } = await supabase
+  const cheio = await supabase
     .from("leads")
-    .select("id, nome, telefone_e164, instagram_id, instagram_usuario")
+    .select(
+      "id, nome, telefone_e164, instagram_id, instagram_usuario, status, perdido_em",
+    )
     .eq("id", leadId)
     .maybeSingle();
+  // Banco ainda sem a 0038 (perdido_em ausente): sem o fallback, TODO envio
+  // do chat viraria "Lead não encontrado" — o bloqueio de perdido fica
+  // inativo, o resto do chat segue de pé.
+  const lead =
+    cheio.error?.code === "42703" || cheio.error?.code === "PGRST204"
+      ? (
+          await supabase
+            .from("leads")
+            .select("id, nome, telefone_e164, instagram_id, instagram_usuario")
+            .eq("id", leadId)
+            .maybeSingle()
+        ).data
+      : cheio.data;
   return lead as {
     id: string;
     nome: string;
     telefone_e164: string | null;
     instagram_id: string | null;
     instagram_usuario: string | null;
+    status?: string | null;
+    perdido_em?: string | null;
   } | null;
 }
 
@@ -249,7 +266,7 @@ export async function enviarMensagemLead(
     // Sem revalidatePath("/chat"): a Janela recebe a nota criada e coloca no
     // histórico local — a página não re-renderiza inteira por causa disso.
     // Se o insert não devolveu a linha (não deveria), revalida como antes.
-    if (!notaCriada)    revalidatePath(`/leads/${leadId}`);
+    if (!notaCriada) revalidatePath(`/leads/${leadId}`);
     return {
       ok: true,
       ...(notaCriada
@@ -399,7 +416,8 @@ export async function enviarMensagemLead(
     anexos = anexosRemotos.slice(0, wamids.length).map((a) => ({
       tipo: tipoDoArquivo(a.tipo || ""),
       nome: a.nome,
-      url: service.storage.from(BUCKET_MIDIA).getPublicUrl(a.caminho).data.publicUrl,
+      url: service.storage.from(BUCKET_MIDIA).getPublicUrl(a.caminho).data
+        .publicUrl,
     }));
   }
 
@@ -456,8 +474,9 @@ export async function enviarMensagemLead(
   // render duplo de cada envio — revalidate + eco 3s depois — deixa de
   // existir. Se o insert não devolveu a linha (não deveria), revalida como
   // antes para a mensagem não sumir da tela.
-  if (!criada)  // A carteira mostra "último contato": sem isto ela seguia no valor velho.
-  revalidatePath("/carteira");
+  if (!criada)
+    // A carteira mostra "último contato": sem isto ela seguia no valor velho.
+    revalidatePath("/carteira");
   revalidatePath("/atendimento");
   revalidatePath(`/leads/${leadId}`);
 
@@ -527,6 +546,15 @@ export async function enviarTemplateLead(
 
   const lead = await leadComConversa(leadId);
   if (!lead) return { erro: "Lead não encontrado." };
+
+  // Perdido não recebe template por 30 dias — a regra vale aqui no servidor
+  // porque a UI pode estar defasada (aba antiga, status mudado por colega).
+  const bloqueadoAte = templateBloqueadoAte(lead.status, lead.perdido_em);
+  if (bloqueadoAte) {
+    return {
+      erro: `Este lead foi marcado como perdido — sem envio de template até ${formatarData(bloqueadoAte)}. Se ele voltou a ter interesse, reative o lead (aí destrava na hora).`,
+    };
+  }
 
   const supabase = await createClient();
   let mensagemId: string | null = null;
@@ -921,7 +949,9 @@ export async function marcarStandBy(leadId: string): Promise<ResultadoEnvio> {
         .select("id")
         .maybeSingle();
       if (semCor.error) {
-        return { erro: `Não deu para criar a etiqueta: ${semCor.error.message}` };
+        return {
+          erro: `Não deu para criar a etiqueta: ${semCor.error.message}`,
+        };
       }
       tag = semCor.data;
     } else if (criada.error?.code === "23505") {
@@ -1164,7 +1194,11 @@ export async function adiarConversa(
   let comPrazo = true;
   let { error } = await supabase
     .from("leads")
-    .update({ chat_adiado_em: agora, chat_adiado_ate: ate, chat_lido_em: agora })
+    .update({
+      chat_adiado_em: agora,
+      chat_adiado_ate: ate,
+      chat_lido_em: agora,
+    })
     .eq("id", leadId);
   if (error && error.message.includes("chat_adiado_ate")) {
     // Sem a coluna da 0042 a conversa ainda adia — só sem prazo de retorno.
@@ -1348,12 +1382,10 @@ export async function etiquetarEmMassa(
 
   if (marcar) {
     // upsert: quem já tinha a etiqueta não vira erro de duplicidade.
-    const { error } = await supabase
-      .from("lead_tags")
-      .upsert(
-        ids.map((lead_id) => ({ lead_id, tag_id: tagId })),
-        { onConflict: "lead_id,tag_id" },
-      );
+    const { error } = await supabase.from("lead_tags").upsert(
+      ids.map((lead_id) => ({ lead_id, tag_id: tagId })),
+      { onConflict: "lead_id,tag_id" },
+    );
     if (error) return { erro: error.message };
   } else {
     const { error } = await supabase

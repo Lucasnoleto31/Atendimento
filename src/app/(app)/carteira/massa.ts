@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { templateBloqueadoAte } from "@/lib/perda";
 import { variantesTelefone } from "@/lib/csv";
 import { listarTemplatesMeta, metaConfigurada } from "@/lib/whatsapp";
 import { dispararTemplate } from "@/lib/cadencia";
@@ -27,6 +28,8 @@ type LeadDoCliente = {
   telefone_e164: string | null;
   marketing_bloqueado_em: string | null;
   ultima_interacao_em: string | null;
+  status?: string | null;
+  perdido_em?: string | null;
 };
 
 type ClienteAlvo = {
@@ -38,8 +41,16 @@ type ClienteAlvo = {
 
 type Servico = ReturnType<typeof createServiceClient>;
 
-const CAMPOS_LEAD =
+const CAMPOS_LEAD_BASE =
   "id, nome, telefone_e164, marketing_bloqueado_em, ultima_interacao_em";
+const CAMPOS_LEAD = `${CAMPOS_LEAD_BASE}, status, perdido_em`;
+
+/** Banco ainda sem a 0038 (coluna perdido_em ausente): refaz sem as colunas
+ *  novas e o bloqueio de perdido fica inativo — melhor do que engolir o erro
+ *  e tratar cliente com lead como "sem lead". */
+function faltaColuna(erro: { code?: string } | null): boolean {
+  return erro?.code === "42703" || erro?.code === "PGRST204";
+}
 
 export type ResultadoMassa = { ok?: boolean; erro?: string; aviso?: string };
 
@@ -49,7 +60,9 @@ function maisVivo(linhas: LeadDoCliente[]): LeadDoCliente | null {
     linhas
       .slice()
       .sort((a, b) =>
-        (b.ultima_interacao_em ?? "").localeCompare(a.ultima_interacao_em ?? ""),
+        (b.ultima_interacao_em ?? "").localeCompare(
+          a.ultima_interacao_em ?? "",
+        ),
       )[0] ?? null
   );
 }
@@ -81,10 +94,18 @@ async function resolverLeadDoCliente(
   padroes: { canalId: string | null; etapaId: string | null },
   autorId: string,
 ): Promise<{ lead: LeadDoCliente | null; criado: boolean }> {
-  const { data: vinculados } = await service
+  const vinculadosCheio = await service
     .from("leads")
     .select(CAMPOS_LEAD)
     .eq("customer_id", cliente.id);
+  const vinculados = faltaColuna(vinculadosCheio.error)
+    ? (
+        await service
+          .from("leads")
+          .select(CAMPOS_LEAD_BASE)
+          .eq("customer_id", cliente.id)
+      ).data
+    : vinculadosCheio.data;
 
   const existente = maisVivo((vinculados ?? []) as LeadDoCliente[]);
   if (existente) return { lead: existente, criado: false };
@@ -93,10 +114,18 @@ async function resolverLeadDoCliente(
 
   // Pode haver lead com esse número ainda sem vínculo — as duas grafias do
   // nono dígito, porque o WhatsApp registra sem o 9 e o cadastro vem com.
-  const { data: soltos } = await service
+  const soltosCheio = await service
     .from("leads")
     .select(CAMPOS_LEAD)
     .in("telefone_e164", variantesTelefone(cliente.telefone_e164));
+  const soltos = faltaColuna(soltosCheio.error)
+    ? (
+        await service
+          .from("leads")
+          .select(CAMPOS_LEAD_BASE)
+          .in("telefone_e164", variantesTelefone(cliente.telefone_e164))
+      ).data
+    : soltosCheio.data;
 
   const solto = maisVivo((soltos ?? []) as LeadDoCliente[]);
   if (solto) {
@@ -110,21 +139,32 @@ async function resolverLeadDoCliente(
     return { lead: solto, criado: false };
   }
 
-  const { data: novo } = await service
+  const dadosNovoLead = {
+    nome: cliente.nome_completo,
+    telefone_e164: cliente.telefone_e164,
+    customer_id: cliente.id,
+    cliente_confirmado_em: new Date().toISOString(),
+    channel_id: padroes.canalId,
+    stage_id: padroes.etapaId,
+    status: "em_atendimento",
+    entrada_motivo: "importacao",
+    responsavel_id: cliente.responsavel_id ?? autorId,
+  };
+  // RETURNING com coluna ausente falha ANTES de inserir — dá para repetir.
+  const novoCheio = await service
     .from("leads")
-    .insert({
-      nome: cliente.nome_completo,
-      telefone_e164: cliente.telefone_e164,
-      customer_id: cliente.id,
-      cliente_confirmado_em: new Date().toISOString(),
-      channel_id: padroes.canalId,
-      stage_id: padroes.etapaId,
-      status: "em_atendimento",
-      entrada_motivo: "importacao",
-      responsavel_id: cliente.responsavel_id ?? autorId,
-    })
+    .insert(dadosNovoLead)
     .select(CAMPOS_LEAD)
     .single();
+  const novo = faltaColuna(novoCheio.error)
+    ? (
+        await service
+          .from("leads")
+          .insert(dadosNovoLead)
+          .select(CAMPOS_LEAD_BASE)
+          .single()
+      ).data
+    : novoCheio.data;
 
   return { lead: (novo as LeadDoCliente) ?? null, criado: Boolean(novo) };
 }
@@ -229,17 +269,13 @@ async function aplicarEtiqueta(
 
     // Dois clientes com o mesmo telefone podem cair no mesmo lead; linha
     // repetida no mesmo upsert não tem por que ir ao banco duas vezes.
-    const unicos = [
-      ...new Map(vinculos.map((v) => [v.lead_id, v])).values(),
-    ];
+    const unicos = [...new Map(vinculos.map((v) => [v.lead_id, v])).values()];
 
     if (unicos.length > 0) {
-      const { error } = await service
-        .from("lead_tags")
-        .upsert(unicos, {
-          onConflict: "lead_id,tag_id",
-          ignoreDuplicates: true,
-        });
+      const { error } = await service.from("lead_tags").upsert(unicos, {
+        onConflict: "lead_id,tag_id",
+        ignoreDuplicates: true,
+      });
       if (!error) conta.etiquetados += unicos.length;
     }
   }
@@ -413,6 +449,7 @@ export async function dispararTemplateEmMassa(
 
   let enviados = 0;
   let bloqueados = 0;
+  let perdidos = 0;
   let semTelefone = 0;
   const falhas: string[] = [];
 
@@ -429,6 +466,13 @@ export async function dispararTemplateEmMassa(
     }
     if (lead.marketing_bloqueado_em) {
       bloqueados++;
+      continue;
+    }
+    // Perdido há menos de 30 dias não recebe template nem pela carteira —
+    // mesma régua do chat; reativar o lead destrava. Contador separado do
+    // descadastro: quarentena de 30 dias não é opt-out.
+    if (templateBloqueadoAte(lead.status, lead.perdido_em)) {
+      perdidos++;
       continue;
     }
 
@@ -497,7 +541,10 @@ export async function dispararTemplateEmMassa(
 
   const partes = [`${enviados} template(s) enviado(s)`];
   if (bloqueados > 0) partes.push(`${bloqueados} pediram descadastro`);
+  if (perdidos > 0)
+    partes.push(`${perdidos} perdido(s) há menos de 30 dias (fora por regra)`);
   if (semTelefone > 0) partes.push(`${semTelefone} sem telefone`);
-  if (falhas.length > 0) partes.push(`${falhas.length} falharam (${falhas[0]})`);
+  if (falhas.length > 0)
+    partes.push(`${falhas.length} falharam (${falhas[0]})`);
   return { ok: true, aviso: `${partes.join(" · ")}.` };
 }

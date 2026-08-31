@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { templateBloqueadoAte } from "@/lib/perda";
 
 export type ResultadoAcao = { ok?: boolean; erro?: string };
 
@@ -109,6 +110,8 @@ export type ConversaDoPainel = {
   templates: TemplateWhatsapp[];
   restanteJanela: number | null;
   marketingBloqueado: boolean;
+  /** Lead perdido há menos de 30 dias: sem template até esta data (ISO). */
+  templateBloqueadoAte: string | null;
   hojeChave: string;
   ontemChave: string;
   /** O que o menu "⋯" do palco (/conversas, Bloco B) precisa. Opcional:
@@ -123,7 +126,11 @@ type LinhaBrutaInteracao = {
   conteudo: string | null;
   criado_em: string;
   metadados: {
-    anexos?: { tipo?: string | null; nome?: string | null; url?: string | null }[];
+    anexos?: {
+      tipo?: string | null;
+      nome?: string | null;
+      url?: string | null;
+    }[];
     status_envio?: string | null;
     erro_envio?: string | null;
     sistema?: boolean | null;
@@ -142,7 +149,9 @@ function paraMensagem(m: LinhaBrutaInteracao): Mensagem {
     criado_em: m.criado_em,
     autor: m.autor?.nome ?? null,
     anexos: (m.metadados?.anexos ?? []).flatMap((a) =>
-      a.url ? [{ tipo: a.tipo ?? "file", nome: a.nome ?? null, url: a.url }] : [],
+      a.url
+        ? [{ tipo: a.tipo ?? "file", nome: a.nome ?? null, url: a.url }]
+        : [],
     ),
     statusEnvio: m.metadados?.status_envio ?? null,
     erroEnvio: m.metadados?.erro_envio ?? null,
@@ -181,7 +190,7 @@ export async function carregarConversa(
       const cheio = await supabase
         .from("leads")
         .select(
-          "id, nome, ultima_interacao_em, marketing_bloqueado_em, status, stage_id, responsavel_id, chat_resolvido_em",
+          "id, nome, ultima_interacao_em, marketing_bloqueado_em, status, perdido_em, stage_id, responsavel_id, chat_resolvido_em",
         )
         .eq("id", leadId)
         .maybeSingle();
@@ -200,9 +209,7 @@ export async function carregarConversa(
     })(),
     supabase
       .from("lead_interactions")
-      .select(
-        "id, tipo, conteudo, criado_em, metadados, autor:profiles(nome)",
-      )
+      .select("id, tipo, conteudo, criado_em, metadados, autor:profiles(nome)")
       .eq("lead_id", leadId)
       .in("tipo", ["mensagem_recebida", "mensagem_enviada", "nota"])
       .order("criado_em", { ascending: false })
@@ -232,21 +239,28 @@ export async function carregarConversa(
       .select("id, nome, pipeline:pipelines!inner(padrao)")
       .eq("pipeline.padrao", true)
       .order("ordem"),
-    supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome"),
-    supabase.from("tags").select("id, nome, cor").eq("ativo", true).order("nome"),
+    supabase
+      .from("profiles")
+      .select("id, nome")
+      .eq("ativo", true)
+      .order("nome"),
+    supabase
+      .from("tags")
+      .select("id, nome, cor")
+      .eq("ativo", true)
+      .order("nome"),
     supabase.from("lead_tags").select("tag_id").eq("lead_id", leadId),
   ]);
-  const lead = leadR.data as
-    | {
-        id: string;
-        nome: string;
-        ultima_interacao_em: string | null;
-        marketing_bloqueado_em: string | null;
-        status?: string;
-        stage_id?: string | null;
-        responsavel_id?: string | null;
-      }
-    | null;
+  const lead = leadR.data as {
+    id: string;
+    nome: string;
+    ultima_interacao_em: string | null;
+    marketing_bloqueado_em: string | null;
+    status?: string;
+    perdido_em?: string | null;
+    stage_id?: string | null;
+    responsavel_id?: string | null;
+  } | null;
   const padroes = padroesR.data;
 
   // O menu "⋯" só aparece se TODAS as consultas que o alimentam vieram —
@@ -275,7 +289,9 @@ export async function carregarConversa(
     .reverse()
     .find((m) => m.tipo === "mensagem_recebida");
   const restanteJanela = ultimaRecebida
-    ? new Date(ultimaRecebida.criado_em).getTime() + 24 * 3600 * 1000 - Date.now()
+    ? new Date(ultimaRecebida.criado_em).getTime() +
+      24 * 3600 * 1000 -
+      Date.now()
     : null;
 
   const formatoDia = new Intl.DateTimeFormat("pt-BR", {
@@ -290,6 +306,7 @@ export async function carregarConversa(
     templates,
     restanteJanela,
     marketingBloqueado: lead.marketing_bloqueado_em !== null,
+    templateBloqueadoAte: templateBloqueadoAte(lead.status, lead.perdido_em),
     hojeChave: formatoDia.format(new Date()),
     ontemChave: formatoDia.format(new Date(Date.now() - 86_400_000)),
     // Sem os dados completos o menu "⋯" não tem como dizer a verdade sobre

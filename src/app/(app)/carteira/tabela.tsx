@@ -2,7 +2,14 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { CheckSquare, MessageSquare, Square, Tag, UserRound, X } from "lucide-react";
+import {
+  CheckSquare,
+  MessageSquare,
+  Square,
+  Tag,
+  UserRound,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatarData, formatarReais, formatarTelefone } from "@/lib/format";
 import type { TemplateWhatsapp } from "@/lib/whatsapp";
@@ -289,8 +296,8 @@ export function TabelaCarteira({
                 </button>
               </div>
               <p className="text-xs text-neutral-600 sm:col-span-3">
-                Cliente da importação que ainda não tem conversa ganha uma
-                agora — sem isso a campanha não teria para onde mandar.
+                Cliente da importação que ainda não tem conversa ganha uma agora
+                — sem isso a campanha não teria para onde mandar.
               </p>
             </div>
           ) : null}
@@ -363,8 +370,9 @@ export function TabelaCarteira({
                     : `Enviar para ${marcados.size} cliente(s)`}
                 </button>
                 <p className="text-xs text-neutral-600">
-                  Sai na hora, até 50 por vez. Quem pediu descadastro fica de
-                  fora. Para uma lista maior, etiquete e crie uma campanha.
+                  Sai na hora, até 50 por vez. Quem pediu descadastro — ou virou
+                  perdido há menos de 30 dias — fica de fora. Para uma lista
+                  maior, etiquete e crie uma campanha.
                 </p>
               </div>
             </div>

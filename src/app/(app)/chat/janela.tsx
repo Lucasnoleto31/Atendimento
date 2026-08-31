@@ -144,136 +144,137 @@ const Bolhas = memo(function Bolhas({
 }) {
   const rotuloDia = (iso: string) => {
     const chave = FORMATO_DIA.format(new Date(iso));
-    return chave === hojeChave ? "Hoje" : chave === ontemChave ? "Ontem" : chave;
+    return chave === hojeChave
+      ? "Hoje"
+      : chave === ontemChave
+        ? "Ontem"
+        : chave;
   };
   return (
     <>
       {mensagens.map((mensagem, i) => {
-              const enviada = mensagem.tipo === "mensagem_enviada";
-              const nota = mensagem.tipo === "nota";
-              const anexos = mensagem.anexos ?? [];
-              // O placeholder "[imagem]" só faz sentido quando o anexo não é exibido.
-              const soPlaceholder =
-                anexos.length > 0 && /^\[.+\]$/.test(mensagem.conteudo ?? "");
-              const dia = rotuloDia(mensagem.criado_em);
-              const mostraDia =
-                i === 0 || rotuloDia(mensagens[i - 1].criado_em) !== dia;
-              // Log de sistema não é conversa: vira uma linha fina no meio do
-              // fluxo — a bolha âmbar fica só para nota escrita por gente.
-              if (ehNotaSistema(mensagem)) {
-                return (
-                  <Fragment key={mensagem.id}>
-                    {mostraDia ? (
-                      <span className="self-center rounded-sm bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
-                        {dia}
-                      </span>
+        const enviada = mensagem.tipo === "mensagem_enviada";
+        const nota = mensagem.tipo === "nota";
+        const anexos = mensagem.anexos ?? [];
+        // O placeholder "[imagem]" só faz sentido quando o anexo não é exibido.
+        const soPlaceholder =
+          anexos.length > 0 && /^\[.+\]$/.test(mensagem.conteudo ?? "");
+        const dia = rotuloDia(mensagem.criado_em);
+        const mostraDia =
+          i === 0 || rotuloDia(mensagens[i - 1].criado_em) !== dia;
+        // Log de sistema não é conversa: vira uma linha fina no meio do
+        // fluxo — a bolha âmbar fica só para nota escrita por gente.
+        if (ehNotaSistema(mensagem)) {
+          return (
+            <Fragment key={mensagem.id}>
+              {mostraDia ? (
+                <span className="self-center rounded-sm bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
+                  {dia}
+                </span>
+              ) : null}
+              <p className="max-w-[75%] self-center px-1 text-center text-xs text-neutral-400">
+                {mensagem.conteudo}
+                {mensagem.autor ? ` — ${mensagem.autor}` : ""}
+                <span className="font-mono tabular-nums">
+                  {" · "}
+                  {horario(mensagem.criado_em)}
+                </span>
+              </p>
+            </Fragment>
+          );
+        }
+        const automatica =
+          enviada && VIAS_AUTOMACAO.has(mensagem.metadados?.via ?? "");
+        return (
+          <Fragment key={mensagem.id}>
+            {mostraDia ? (
+              <span className="self-center rounded-sm bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
+                {dia}
+              </span>
+            ) : null}
+            <div
+              className={cn(
+                "max-w-[75%] px-1.5 py-1 shadow-sm",
+                nota
+                  ? "self-end rounded-[16px] rounded-br-[4px] border border-accent-300 bg-accent-100"
+                  : enviada
+                    ? cn(
+                        "self-end rounded-[16px] rounded-br-[4px]",
+                        // Pendente clareia UM passo (não opacity: 70%
+                        // sobre o azul derrubava o texto abaixo de AA).
+                        mensagem.pendente ? "bg-primary-500" : "bg-primary-600",
+                      )
+                    : "self-start rounded-[16px] rounded-bl-[4px] border border-neutral-200 bg-neutral-0",
+                mensagem.pendente && !enviada ? "opacity-70" : "",
+              )}
+            >
+              {nota ? (
+                <p className="text-xs font-medium tracking-[0.06em] text-accent-700 uppercase">
+                  Nota privada
+                </p>
+              ) : null}
+              {automatica ? (
+                <p className="text-xs text-primary-100">
+                  automático
+                  {mensagem.metadados?.campanha
+                    ? ` · ${mensagem.metadados.campanha}`
+                    : ""}
+                </p>
+              ) : null}
+              {anexos.length > 0 ? (
+                <div className="mb-0.5 flex flex-col gap-0.5">
+                  {anexos.map((anexo, j) => (
+                    <AnexoMensagem
+                      key={j}
+                      anexo={anexo}
+                      sobreEscuro={enviada}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {!soPlaceholder ? (
+                <p
+                  className={cn(
+                    "text-sm break-words whitespace-pre-wrap",
+                    enviada ? "text-neutral-0" : "text-neutral-800",
+                  )}
+                >
+                  {mensagem.conteudo}
+                </p>
+              ) : null}
+              <p
+                className={cn(
+                  "mt-0.5 flex items-center justify-end gap-0.5 text-right font-mono text-xs tabular-nums",
+                  enviada
+                    ? // Sobre primary-500 (pendente) o primary-100 cai
+                      // para 4,4:1 — o branco segura AA nos dois temas.
+                      mensagem.pendente
+                      ? "text-neutral-0"
+                      : "text-primary-100"
+                    : "text-neutral-400",
+                )}
+              >
+                {(enviada || nota) && mensagem.autor
+                  ? `${mensagem.autor} · `
+                  : ""}
+                {mensagem.pendente ? (
+                  "enviando…"
+                ) : (
+                  <>
+                    {horario(mensagem.criado_em)}
+                    {enviada ? (
+                      <ReciboEnvio
+                        status={mensagem.statusEnvio}
+                        erro={mensagem.erroEnvio}
+                      />
                     ) : null}
-                    <p className="max-w-[75%] self-center px-1 text-center text-xs text-neutral-400">
-                      {mensagem.conteudo}
-                      {mensagem.autor ? ` — ${mensagem.autor}` : ""}
-                      <span className="font-mono tabular-nums">
-                        {" · "}
-                        {horario(mensagem.criado_em)}
-                      </span>
-                    </p>
-                  </Fragment>
-                );
-              }
-              const automatica =
-                enviada &&
-                VIAS_AUTOMACAO.has(mensagem.metadados?.via ?? "");
-              return (
-                <Fragment key={mensagem.id}>
-                  {mostraDia ? (
-                    <span className="self-center rounded-sm bg-neutral-100 px-1 py-0.5 text-xs font-medium text-neutral-600">
-                      {dia}
-                    </span>
-                  ) : null}
-                  <div
-                    className={cn(
-                      "max-w-[75%] px-1.5 py-1 shadow-sm",
-                      nota
-                        ? "self-end rounded-[16px] rounded-br-[4px] border border-accent-300 bg-accent-100"
-                        : enviada
-                          ? cn(
-                              "self-end rounded-[16px] rounded-br-[4px]",
-                              // Pendente clareia UM passo (não opacity: 70%
-                              // sobre o azul derrubava o texto abaixo de AA).
-                              mensagem.pendente
-                                ? "bg-primary-500"
-                                : "bg-primary-600",
-                            )
-                          : "self-start rounded-[16px] rounded-bl-[4px] border border-neutral-200 bg-neutral-0",
-                      mensagem.pendente && !enviada ? "opacity-70" : "",
-                    )}
-                  >
-                    {nota ? (
-                      <p className="text-xs font-medium tracking-[0.06em] text-accent-700 uppercase">
-                        Nota privada
-                      </p>
-                    ) : null}
-                    {automatica ? (
-                      <p className="text-xs text-primary-100">
-                        automático
-                        {mensagem.metadados?.campanha
-                          ? ` · ${mensagem.metadados.campanha}`
-                          : ""}
-                      </p>
-                    ) : null}
-                    {anexos.length > 0 ? (
-                      <div className="mb-0.5 flex flex-col gap-0.5">
-                        {anexos.map((anexo, j) => (
-                          <AnexoMensagem
-                            key={j}
-                            anexo={anexo}
-                            sobreEscuro={enviada}
-                          />
-                        ))}
-                      </div>
-                    ) : null}
-                    {!soPlaceholder ? (
-                      <p
-                        className={cn(
-                          "text-sm break-words whitespace-pre-wrap",
-                          enviada ? "text-neutral-0" : "text-neutral-800",
-                        )}
-                      >
-                        {mensagem.conteudo}
-                      </p>
-                    ) : null}
-                    <p
-                      className={cn(
-                        "mt-0.5 flex items-center justify-end gap-0.5 text-right font-mono text-xs tabular-nums",
-                        enviada
-                          ? // Sobre primary-500 (pendente) o primary-100 cai
-                            // para 4,4:1 — o branco segura AA nos dois temas.
-                            mensagem.pendente
-                            ? "text-neutral-0"
-                            : "text-primary-100"
-                          : "text-neutral-400",
-                      )}
-                    >
-                      {(enviada || nota) && mensagem.autor
-                        ? `${mensagem.autor} · `
-                        : ""}
-                      {mensagem.pendente ? (
-                        "enviando…"
-                      ) : (
-                        <>
-                          {horario(mensagem.criado_em)}
-                          {enviada ? (
-                            <ReciboEnvio
-                              status={mensagem.statusEnvio}
-                              erro={mensagem.erroEnvio}
-                            />
-                          ) : null}
-                        </>
-                      )}
-                    </p>
-                  </div>
-                </Fragment>
-              );
-            })}
+                  </>
+                )}
+              </p>
+            </div>
+          </Fragment>
+        );
+      })}
     </>
   );
 });
@@ -348,7 +349,9 @@ function AnexoMensagem({
   // Players nativos também recebem foco por Tab — sem o anel da casa sobra
   // só o do navegador, que sobre o azul da bolha some.
   if (anexo.tipo === "audio") {
-    return <audio controls src={anexo.url} className={cn("max-w-full", anel)} />;
+    return (
+      <audio controls src={anexo.url} className={cn("max-w-full", anel)} />
+    );
   }
   if (anexo.tipo === "video") {
     return (
@@ -548,6 +551,7 @@ export function Janela({
   aoEnviarComSucesso,
   aoRecarregarPeriodico,
   aoEnviarTemplate,
+  templateBloqueadoAte = null,
 }: {
   leadId: string;
   temConversa: boolean;
@@ -556,6 +560,8 @@ export function Janela({
   templates: TemplateWhatsapp[];
   restanteJanela: number | null;
   marketingBloqueado: boolean;
+  /** Lead perdido há menos de 30 dias: sem template até esta data (ISO). */
+  templateBloqueadoAte?: string | null;
   hojeChave: string;
   ontemChave: string;
   /** Chamado quando um envio conclui com sucesso (painel da /hoje usa). */
@@ -911,7 +917,9 @@ export function Janela({
         if (r.erro) setErroIa(r.erro);
         else if (r.sugestao) aplicarTextoIa(r.sugestao);
       })
-      .catch(() => setErroIa("Não deu para falar com a IA agora — tente de novo."))
+      .catch(() =>
+        setErroIa("Não deu para falar com a IA agora — tente de novo."),
+      )
       .finally(() => setIaOcupada(null));
   };
 
@@ -924,7 +932,9 @@ export function Janela({
         if (r.erro) setErroIa(r.erro);
         else if (r.corrigido) aplicarTextoIa(r.corrigido);
       })
-      .catch(() => setErroIa("Não deu para falar com a IA agora — tente de novo."))
+      .catch(() =>
+        setErroIa("Não deu para falar com a IA agora — tente de novo."),
+      )
       .finally(() => setIaOcupada(null));
   };
 
@@ -1104,8 +1114,7 @@ export function Janela({
       // Em paralelo: cinco anexos custavam dez idas em série (preparo +
       // upload de cada um); agora custam o tempo do mais lento.
       type ResultadoUpload =
-        | { erro: string }
-        | { erro?: undefined; remoto: AnexoRemotoEnvio };
+        { erro: string } | { erro?: undefined; remoto: AnexoRemotoEnvio };
       const resultados: ResultadoUpload[] = await Promise.all(
         arquivos.map(async (arquivo): Promise<ResultadoUpload> => {
           const preparo = await prepararUploadAnexo(arquivo.name);
@@ -1118,7 +1127,9 @@ export function Janela({
             arquivo,
           );
           if (error) {
-            return { erro: `Falha ao subir "${arquivo.name}": ${error.message}` };
+            return {
+              erro: `Falha ao subir "${arquivo.name}": ${error.message}`,
+            };
           }
           return {
             remoto: {
@@ -1188,7 +1199,6 @@ export function Janela({
               hojeChave={hojeChave}
               ontemChave={ontemChave}
             />
-          
           )}
         </div>
 
@@ -1266,8 +1276,8 @@ export function Janela({
                 aria-hidden
                 className="h-[8px] w-[8px] shrink-0 rounded-full bg-danger"
               />
-              Cliente bloqueou marketing no WhatsApp — use template de
-              utilidade ou responda na janela de 24h.
+              Cliente bloqueou marketing no WhatsApp — use template de utilidade
+              ou responda na janela de 24h.
             </p>
           ) : null}
 
@@ -1373,7 +1383,11 @@ export function Janela({
                           <span className="truncate">{pronta.titulo}</span>
                           {(pronta.anexos?.length ?? 0) > 0 ? (
                             <span className="inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-sm bg-neutral-100 px-0.5 font-mono text-xs font-normal text-neutral-600 tabular-nums">
-                              <Paperclip size={11} strokeWidth={1.5} aria-hidden />
+                              <Paperclip
+                                size={11}
+                                strokeWidth={1.5}
+                                aria-hidden
+                              />
                               {pronta.anexos!.length}
                             </span>
                           ) : null}
@@ -1518,7 +1532,12 @@ export function Janela({
               // No teclado do iPhone não existe Shift+Enter: lá o return
               // quebra linha e o envio é só pelo botão. Envio pendente
               // segura o Enter — segurar a tecla duplicava a mensagem.
-              if (e.key === "Enter" && !e.shiftKey && !ehToque && !enviandoAcao) {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !ehToque &&
+                !enviandoAcao
+              ) {
                 e.preventDefault();
                 if (podeEnviar) formRef.current?.requestSubmit();
               }
@@ -1752,6 +1771,7 @@ export function Janela({
                     templates={templates}
                     principal
                     aoEnviar={aoEnviarTemplate}
+                    bloqueadoAte={templateBloqueadoAte}
                   />
                 ) : (
                   <BotaoEnviar desabilitado nota={false} />
@@ -1763,6 +1783,7 @@ export function Janela({
                       leadId={leadId}
                       templates={templates}
                       aoEnviar={aoEnviarTemplate}
+                      bloqueadoAte={templateBloqueadoAte}
                     />
                   ) : null}
                   <BotaoEnviar
@@ -1783,13 +1804,14 @@ export function Janela({
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-1 border-t border-neutral-200 bg-neutral-50 px-2 py-1.5">
           <p className="text-sm text-neutral-600">
-            Sem canal de envio para este lead (falta telefone ou conversa) —
-            o primeiro contato da empresa precisa ser um template aprovado.
+            Sem canal de envio para este lead (falta telefone ou conversa) — o
+            primeiro contato da empresa precisa ser um template aprovado.
           </p>
           <BotaoTemplates
             leadId={leadId}
             templates={templates}
             aoEnviar={aoEnviarTemplate}
+            bloqueadoAte={templateBloqueadoAte}
           />
         </div>
       )}
