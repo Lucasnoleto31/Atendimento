@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { ehPassoAtivacao, PASSOS_ATIVACAO } from "@/lib/ativacao-passos";
 
 /**
  * A camada de dados do chat novo (/conversas). A mudança que importa é de
@@ -22,11 +23,7 @@ import { perfilAtual } from "@/lib/auth";
  */
 
 export type VisaoConversas =
-  | "caixa"
-  | "aguardando"
-  | "adiadas"
-  | "resolvidas"
-  | "tudo";
+  "caixa" | "aguardando" | "adiadas" | "resolvidas" | "tudo";
 
 export type LinhaConversa = {
   leadId: string;
@@ -98,7 +95,9 @@ type ExtrasLead = {
 function iniciais(nome: string | null): string | null {
   if (!nome) return null;
   const partes = nome.trim().split(/\s+/);
-  return ((partes[0]?.[0] ?? "") + (partes[1]?.[0] ?? "")).toUpperCase() || null;
+  return (
+    ((partes[0]?.[0] ?? "") + (partes[1]?.[0] ?? "")).toUpperCase() || null
+  );
 }
 
 const CAMPOS_VIEW =
@@ -173,7 +172,9 @@ export async function carregarListaConversas(
       const ea = a.horas_esperando ?? -1;
       const eb = b.horas_esperando ?? -1;
       if (ea !== eb) return eb - ea;
-      return (b.ultima_mensagem_em ?? "").localeCompare(a.ultima_mensagem_em ?? "");
+      return (b.ultima_mensagem_em ?? "").localeCompare(
+        a.ultima_mensagem_em ?? "",
+      );
     });
   } else if (visao === "adiadas") {
     // Adiada é estado de LEADS (a view não separa adiada de resolvida):
@@ -190,7 +191,8 @@ export async function carregarListaConversas(
         .neq("status", "perdido");
       if (opts.escopo === "minhas") q = q.eq("responsavel_id", perfil.id);
       if (opts.atendenteId) q = q.eq("responsavel_id", opts.atendenteId);
-      if (busca) q = q.or(`nome.ilike.%${busca}%,telefone_e164.ilike.%${busca}%`);
+      if (busca)
+        q = q.or(`nome.ilike.%${busca}%,telefone_e164.ilike.%${busca}%`);
       if (comPrazo) {
         // Mesma regra da view: no prazo pela hora marcada OU, para o que foi
         // adiado sem prazo (fallback de um erro passageiro), pela heurística
@@ -204,7 +206,10 @@ export async function carregarListaConversas(
           .order("chat_adiado_ate", { ascending: true, nullsFirst: false });
       } else {
         q = q
-          .gte("chat_adiado_em", new Date(Date.now() - 3 * 86_400_000).toISOString())
+          .gte(
+            "chat_adiado_em",
+            new Date(Date.now() - 3 * 86_400_000).toISOString(),
+          )
           .order("chat_adiado_em", { ascending: false });
       }
       return q.range(offset, offset + PAGINA - 1);
@@ -212,14 +217,18 @@ export async function carregarListaConversas(
     let adiadasR = await montarAdiadas(true);
     if (adiadasR.error) adiadasR = await montarAdiadas(false);
     if (adiadasR.error) return { erro: adiadasR.error.message };
-    const idsAdiadas = ((adiadasR.data ?? []) as { id: string }[]).map((l) => l.id);
+    const idsAdiadas = ((adiadasR.data ?? []) as { id: string }[]).map(
+      (l) => l.id,
+    );
     if (idsAdiadas.length > 0) {
       const { data, error } = await supabase
         .from("v_leads_listas")
         .select(CAMPOS_VIEW)
         .in("lead_id", idsAdiadas);
       if (error) return { erro: error.message };
-      const porId = new Map(((data ?? []) as LinhaView[]).map((l) => [l.lead_id, l]));
+      const porId = new Map(
+        ((data ?? []) as LinhaView[]).map((l) => [l.lead_id, l]),
+      );
       linhasView = idsAdiadas
         .map((id) => porId.get(id))
         .filter((l): l is LinhaView => Boolean(l));
@@ -282,76 +291,81 @@ export async function carregarListaConversas(
     ctResolvidas,
     tagsR,
   ] = await Promise.all([
-      ids.length > 0
-        ? (async () => {
-            const cheio = await supabase
+    ids.length > 0
+      ? (async () => {
+          const cheio = await supabase
+            .from("leads")
+            .select(
+              "id, instagram_usuario, chat_lido_em, chat_adiado_em, chat_adiado_ate, chat_resolvido_em",
+            )
+            .in("id", ids);
+          if (cheio.error) {
+            // Sem a 0042 (chat_adiado_ate) ou 0017/0018: pede o que der.
+            return supabase
               .from("leads")
               .select(
-                "id, instagram_usuario, chat_lido_em, chat_adiado_em, chat_adiado_ate, chat_resolvido_em",
+                "id, instagram_usuario, chat_lido_em, chat_adiado_em, chat_resolvido_em",
               )
               .in("id", ids);
-            if (cheio.error) {
-              // Sem a 0042 (chat_adiado_ate) ou 0017/0018: pede o que der.
-              return supabase
-                .from("leads")
-                .select("id, instagram_usuario, chat_lido_em, chat_adiado_em, chat_resolvido_em")
-                .in("id", ids);
-            }
-            return cheio;
-          })()
-        : Promise.resolve({ data: [] as ExtrasLead[], error: null }),
-      ids.length > 0
-        ? supabase.rpc("previas_conversas", { p_lead_ids: ids })
-        : Promise.resolve({ data: [], error: null }),
-      base().select("lead_id", { count: "exact", head: true })
-        .eq("em_aberto", true)
-        .not("ultima_mensagem_em", "is", null),
-      base().select("lead_id", { count: "exact", head: true }).eq("adiado_vencido", true),
-      base().select("lead_id", { count: "exact", head: true }).eq("aguardando_resposta", true),
-      (async () => {
-        // Conta as adiadas na fonte certa (leads), com o mesmo fallback.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder
-        const montar = (comPrazo: boolean): any => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
-          let q: any = supabase
-            .from("leads")
-            .select("id", { count: "exact", head: true })
-            .not("chat_adiado_em", "is", null)
-            .is("chat_resolvido_em", null)
-            .neq("status", "perdido");
-          if (opts.escopo === "minhas") q = q.eq("responsavel_id", perfil.id);
-          // O contador tem de contar exatamente o que a lista mostra.
-          if (comPrazo) {
-            const agoraIso = new Date().toISOString();
-            const tresDias = new Date(
-              Date.now() - 3 * 86_400_000,
-            ).toISOString();
-            q = q.or(
-              `chat_adiado_ate.gte.${agoraIso},and(chat_adiado_ate.is.null,chat_adiado_em.gte.${tresDias})`,
-            );
-          } else
-            q = q.gte(
-              "chat_adiado_em",
-              new Date(Date.now() - 3 * 86_400_000).toISOString(),
-            );
-          return q;
-        };
-        const cheio = await montar(true);
-        return cheio.error ? montar(false) : cheio;
-      })(),
-      (async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder
+          }
+          return cheio;
+        })()
+      : Promise.resolve({ data: [] as ExtrasLead[], error: null }),
+    ids.length > 0
+      ? supabase.rpc("previas_conversas", { p_lead_ids: ids })
+      : Promise.resolve({ data: [], error: null }),
+    base()
+      .select("lead_id", { count: "exact", head: true })
+      .eq("em_aberto", true)
+      .not("ultima_mensagem_em", "is", null),
+    base()
+      .select("lead_id", { count: "exact", head: true })
+      .eq("adiado_vencido", true),
+    base()
+      .select("lead_id", { count: "exact", head: true })
+      .eq("aguardando_resposta", true),
+    (async () => {
+      // Conta as adiadas na fonte certa (leads), com o mesmo fallback.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder
+      const montar = (comPrazo: boolean): any => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
         let q: any = supabase
           .from("leads")
           .select("id", { count: "exact", head: true })
-          .not("chat_resolvido_em", "is", null)
+          .not("chat_adiado_em", "is", null)
+          .is("chat_resolvido_em", null)
           .neq("status", "perdido");
         if (opts.escopo === "minhas") q = q.eq("responsavel_id", perfil.id);
-        if (opts.atendenteId) q = q.eq("responsavel_id", opts.atendenteId);
+        // O contador tem de contar exatamente o que a lista mostra.
+        if (comPrazo) {
+          const agoraIso = new Date().toISOString();
+          const tresDias = new Date(Date.now() - 3 * 86_400_000).toISOString();
+          q = q.or(
+            `chat_adiado_ate.gte.${agoraIso},and(chat_adiado_ate.is.null,chat_adiado_em.gte.${tresDias})`,
+          );
+        } else
+          q = q.gte(
+            "chat_adiado_em",
+            new Date(Date.now() - 3 * 86_400_000).toISOString(),
+          );
         return q;
-      })(),
-      supabase.from("tags").select("id, nome, cor").order("nome"),
-    ]);
+      };
+      const cheio = await montar(true);
+      return cheio.error ? montar(false) : cheio;
+    })(),
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder
+      let q: any = supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .not("chat_resolvido_em", "is", null)
+        .neq("status", "perdido");
+      if (opts.escopo === "minhas") q = q.eq("responsavel_id", perfil.id);
+      if (opts.atendenteId) q = q.eq("responsavel_id", opts.atendenteId);
+      return q;
+    })(),
+    supabase.from("tags").select("id, nome, cor").order("nome"),
+  ]);
 
   // Nome → cor. Sem a consulta (RLS, migração), o chip sai neutro: melhor
   // etiqueta sem cor do que linha sem etiqueta.
@@ -469,6 +483,18 @@ export type ContextoConversa = {
   tarefas: TarefaDoLead[];
   /** false quando a 0013 não está aplicada — o painel avisa em vez de mentir. */
   tarefasDisponiveis: boolean;
+  /** Roteiro de ativação — null quando não se aplica (lead fora da
+   *  ativação e sem nenhum passo marcado) ou quando a 0065 não rodou. */
+  ativacao:
+    | {
+        passo: string;
+        rotulo: string;
+        feitoEm: string | null;
+        autor: string | null;
+        /** Veio dos fatos (Genial): não dá para desmarcar à mão. */
+        automatico: boolean;
+      }[]
+    | null;
 };
 
 /**
@@ -486,7 +512,7 @@ export async function carregarContexto(
   const { data: lead, error } = await supabase
     .from("leads")
     .select(
-      "telefone_e164, email, criado_em, primeira_resposta_em, entrada_motivo, campanha, utm_campaign, observacao, customer_id, responsavel:profiles(nome), etapa:pipeline_stages(nome), canal:channels(nome), customer:customers(nome_completo, conta_aberta_em)",
+      "telefone_e164, email, criado_em, primeira_resposta_em, entrada_motivo, campanha, utm_campaign, observacao, customer_id, status, responsavel:profiles(nome), etapa:pipeline_stages(nome), canal:channels(nome), customer:customers(nome_completo, conta_aberta_em)",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -503,6 +529,7 @@ export async function carregarContexto(
     utm_campaign: string | null;
     observacao: string | null;
     customer_id: string | null;
+    status: string | null;
     responsavel: { nome: string } | null;
     etapa: { nome: string } | null;
     canal: { nome: string } | null;
@@ -513,46 +540,63 @@ export async function carregarContexto(
 
   // Giro, receita e tarefas em paralelo — e cada uma tolerante: view ou
   // migração ausente vira ausência de cartão, nunca painel quebrado.
-  const [giroR, receitaR, tarefasR, templatesR, custoR] = await Promise.all([
-    l.customer_id
-      ? supabase
-          .from("v_customer_giro")
-          .select("lotes_30d, lotes_30d_anterior, ultimo_giro_em")
-          .eq("customer_id", l.customer_id)
-          .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    l.customer_id
-      ? supabase
-          .from("v_customer_receita")
-          .select("receita_30d_centavos, ltv_centavos")
-          .eq("customer_id", l.customer_id)
-          .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    supabase
-      .from("lead_tasks")
-      .select("id, titulo, vence_em")
-      .eq("lead_id", leadId)
-      .is("concluida_em", null)
-      .order("vence_em")
-      .limit(10),
-    // Template disparado deixa metadados.template no histórico: é por aí
-    // que se sabe quantas vezes já se pagou para falar com este lead.
-    supabase
-      .from("lead_interactions")
-      .select("criado_em, metadados", { count: "exact" })
-      .eq("lead_id", leadId)
-      .eq("tipo", "mensagem_enviada")
-      .not("metadados->>template", "is", null)
-      // Recusado pela Meta não chegou e não foi cobrado.
-      .not("metadados->>status_envio", "eq", "failed")
-      .order("criado_em", { ascending: false })
-      .limit(1),
-    supabase
-      .from("settings")
-      .select("valor")
-      .eq("chave", "custo_template_centavos")
-      .maybeSingle(),
-  ]);
+  const [giroR, receitaR, tarefasR, templatesR, custoR, checklistR, loteR] =
+    await Promise.all([
+      l.customer_id
+        ? supabase
+            .from("v_customer_giro")
+            .select("lotes_30d, lotes_30d_anterior, ultimo_giro_em")
+            .eq("customer_id", l.customer_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      l.customer_id
+        ? supabase
+            .from("v_customer_receita")
+            .select("receita_30d_centavos, ltv_centavos")
+            .eq("customer_id", l.customer_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      supabase
+        .from("lead_tasks")
+        .select("id, titulo, vence_em")
+        .eq("lead_id", leadId)
+        .is("concluida_em", null)
+        .order("vence_em")
+        .limit(10),
+      // Template disparado deixa metadados.template no histórico: é por aí
+      // que se sabe quantas vezes já se pagou para falar com este lead.
+      supabase
+        .from("lead_interactions")
+        .select("criado_em, metadados", { count: "exact" })
+        .eq("lead_id", leadId)
+        .eq("tipo", "mensagem_enviada")
+        .not("metadados->>template", "is", null)
+        // Recusado pela Meta não chegou e não foi cobrado.
+        .not("metadados->>status_envio", "eq", "failed")
+        .order("criado_em", { ascending: false })
+        .limit(1),
+      supabase
+        .from("settings")
+        .select("valor")
+        .eq("chave", "custo_template_centavos")
+        .maybeSingle(),
+      // Passos marcados à mão do roteiro de ativação (0065). Tolerante:
+      // sem a migração, a seção some do painel em vez de quebrá-lo.
+      supabase
+        .from("ativacao_checklist")
+        .select("passo, feito_em, autor:profiles(nome)")
+        .eq("lead_id", leadId),
+      // 1ª operação = primeiro lote da vida (definição canônica da Fase 2).
+      l.customer_id
+        ? supabase
+            .from("customer_lots")
+            .select("referencia_data")
+            .eq("customer_id", l.customer_id)
+            .order("referencia_data", { ascending: true })
+            .limit(1)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
 
   const giro = giroR.data as {
     lotes_30d: number | null;
@@ -600,7 +644,11 @@ export async function carregarContexto(
       };
     })(),
     tarefas: (
-      (tarefasR.data ?? []) as { id: string; titulo: string; vence_em: string }[]
+      (tarefasR.data ?? []) as {
+        id: string;
+        titulo: string;
+        vence_em: string;
+      }[]
     ).map((t) => ({
       id: t.id,
       titulo: t.titulo,
@@ -608,5 +656,99 @@ export async function carregarContexto(
       vencida: Date.parse(t.vence_em) < agora,
     })),
     tarefasDisponiveis: tarefasR.error === null,
+    ativacao: (() => {
+      if (checklistR.error) return null; // banco ainda sem a 0065
+      const marcados = new Map(
+        (
+          (checklistR.data ?? []) as unknown as {
+            passo: string;
+            feito_em: string;
+            autor: { nome: string } | null;
+          }[]
+        ).map((m) => [m.passo, m]),
+      );
+      // Mostra para quem está no funil de ativação — cliente vinculado,
+      // etapa Ativação, ganho, ou qualquer passo já marcado. Lead da caixa
+      // comum não precisa de mais um cartão.
+      const seAplica =
+        l.customer_id !== null ||
+        l.status === "ganho" ||
+        l.etapa?.nome === "Ativação" ||
+        marcados.size > 0;
+      if (!seAplica) return null;
+
+      const primeiroLote =
+        (loteR.data as { referencia_data: string } | null)?.referencia_data ??
+        null;
+      return PASSOS_ATIVACAO.map((def) => {
+        // Os automáticos vêm dos fatos e vencem qualquer marcação manual.
+        const fato =
+          def.passo === "conta_aprovada"
+            ? (l.customer?.conta_aberta_em ?? null)
+            : def.passo === "primeira_operacao"
+              ? primeiroLote
+              : null;
+        // Automático SÓ acredita no fato: linha manual (inserida por fora)
+        // não pode pintar de feito o que a Genial ainda não confirmou.
+        const manual = def.auto ? undefined : marcados.get(def.passo);
+        return {
+          passo: def.passo,
+          rotulo: def.rotulo,
+          feitoEm: def.auto ? fato : (manual?.feito_em ?? null),
+          autor: def.auto
+            ? fato
+              ? "Genial"
+              : null
+            : (manual?.autor?.nome ?? null),
+          automatico: def.auto,
+        };
+      });
+    })(),
   };
+}
+
+/**
+ * Marca ou desmarca um passo do roteiro de ativação. Os passos automáticos
+ * (conta aprovada, 1ª operação) não passam por aqui — nascem dos fatos.
+ */
+export async function alternarPassoAtivacao(
+  leadId: string,
+  passo: string,
+  feito: boolean,
+): Promise<{ ok?: true; erro?: string }> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!ehPassoAtivacao(passo)) return { erro: "Passo desconhecido." };
+  const def = PASSOS_ATIVACAO.find((d) => d.passo === passo);
+  if (def?.auto) {
+    return { erro: "Este passo é marcado pela importação da Genial." };
+  }
+
+  const supabase = await createClient();
+  if (feito) {
+    const { error } = await supabase.from("ativacao_checklist").upsert({
+      lead_id: leadId,
+      passo,
+      feito_em: new Date().toISOString(),
+      autor_id: perfil.id,
+    });
+    if (error) {
+      return {
+        erro:
+          // O PostgREST atual devolve PGRST205 (schema cache) para tabela
+          // ausente — o 42P01 clássico só chega em corrida de cache.
+          error.code === "42P01" || error.code === "PGRST205"
+            ? "Banco ainda sem a 0065 — rode a migração do checklist."
+            : "Não deu para marcar o passo. Tente de novo.",
+      };
+    }
+  } else {
+    const { error } = await supabase
+      .from("ativacao_checklist")
+      .delete()
+      .eq("lead_id", leadId)
+      .eq("passo", passo);
+    if (error) return { erro: "Não deu para desmarcar o passo." };
+  }
+  return { ok: true };
 }

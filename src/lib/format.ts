@@ -72,7 +72,7 @@ const diaHora = new Intl.DateTimeFormat("pt-BR", {
  * Aceita instante (timestamptz) e data pura ("2026-08-18").
  * Data pura vira meio-dia: em qualquer fuso continua o mesmo dia.
  */
-function instante(valor: string | Date): Date {
+export function instante(valor: string | Date): Date {
   if (valor instanceof Date) return valor;
   return /^\d{4}-\d{2}-\d{2}$/.test(valor.trim())
     ? new Date(`${valor.trim()}T12:00:00`)

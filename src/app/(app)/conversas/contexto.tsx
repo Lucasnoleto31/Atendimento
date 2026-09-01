@@ -4,6 +4,9 @@ import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Check,
+  CheckCircle2,
+  Circle,
+  Clock,
   Copy,
   ExternalLink,
   Plus,
@@ -18,13 +21,18 @@ import {
   formatarDataHora,
   formatarReais,
   formatarTelefone,
+  instante,
 } from "@/lib/format";
 import {
   concluirTarefaLead,
   criarTarefaLead,
   type ResultadoEnvio,
 } from "@/app/(app)/chat/actions";
-import { carregarContexto, type ContextoConversa } from "./actions";
+import {
+  alternarPassoAtivacao,
+  carregarContexto,
+  type ContextoConversa,
+} from "./actions";
 
 const ESTADO: ResultadoEnvio = {};
 
@@ -39,7 +47,24 @@ const ROTULO_MOTIVO: Record<string, string> = {
 };
 
 /** Um dado do painel: rótulo curto em cima, valor legível embaixo. */
-function Campo({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
+/** Dias inteiros desde um instante — fora do componente (regra de pureza). */
+function diasDesde(instante: number): number {
+  return Math.floor((Date.now() - instante) / 86_400_000);
+}
+
+/** "João Freitas" → "JF": quem marcou, no espaço de um selo. */
+function iniciais(nome: string) {
+  const partes = nome.trim().split(/\s+/);
+  return ((partes[0]?.[0] ?? "") + (partes[1]?.[0] ?? "")).toUpperCase();
+}
+
+function Campo({
+  rotulo,
+  children,
+}: {
+  rotulo: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="min-w-0">
       <p className="text-xs text-neutral-600">{rotulo}</p>
@@ -152,6 +177,40 @@ export function PainelContexto({
     }
   }
 
+  // Marca/desmarca um passo do checklist com resposta imediata na tela;
+  // o servidor é a verdade — erro recarrega e desfaz.
+  const [passoEnviando, setPassoEnviando] = useState<string | null>(null);
+  const alternarPasso = (passo: string, feito: boolean) => {
+    setPassoEnviando(passo);
+    setDados((d) =>
+      d && d.ativacao
+        ? {
+            ...d,
+            ativacao: d.ativacao.map((i) =>
+              i.passo === passo
+                ? {
+                    ...i,
+                    feitoEm: feito ? new Date().toISOString() : null,
+                    autor: feito ? null : i.autor,
+                  }
+                : i,
+            ),
+          }
+        : d,
+    );
+    void alternarPassoAtivacao(leadId, passo, feito)
+      .catch(() => ({
+        erro: "Sem resposta do servidor — o checklist voltou ao que está no banco.",
+      }))
+      .then((r) => {
+        setPassoEnviando((p) => (p === passo ? null : p));
+        if (r && "erro" in r && r.erro) setErro(r.erro);
+        // Sucesso também recarrega: traz as iniciais de quem marcou e
+        // desfaz qualquer resposta velha que tenha atropelado o otimismo.
+        setRecarga((n) => n + 1);
+      });
+  };
+
   const concluir = (tarefaId: string) => {
     // Some da lista na hora; erro devolve (a recarga traz a verdade).
     setDados((d) =>
@@ -211,7 +270,10 @@ export function PainelContexto({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {erro ? (
-          <p role="alert" className="rounded-md bg-danger-bg px-1.5 py-1 text-sm text-danger">
+          <p
+            role="alert"
+            className="rounded-md bg-danger-bg px-1.5 py-1 text-sm text-danger"
+          >
             {erro}
           </p>
         ) : null}
@@ -335,6 +397,146 @@ export function PainelContexto({
                     </Campo>
                   ) : null}
                 </div>
+              </section>
+            ) : null}
+
+            {/* Roteiro de ativação: onde este cliente está no caminho */}
+            {dados.ativacao ? (
+              <section className="rounded-lg border border-neutral-200 bg-neutral-50 p-1.5">
+                <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+                  Ativação
+                </h3>
+                <ul className="mt-0.5 flex flex-col">
+                  {(() => {
+                    const itens = dados.ativacao;
+                    const atualIdx = itens.findIndex((i) => !i.feitoEm);
+                    const feitos = itens
+                      .filter((i) => i.feitoEm)
+                      .map((i) => instante(i.feitoEm as string).getTime())
+                      .sort((a, b) => a - b);
+                    // Sem passo feito, a âncora honesta é a abertura da
+                    // conta; a idade do LEAD mediria a nutrição, não a
+                    // ativação — melhor "pendente" seco do que 240 dias.
+                    const referencia =
+                      feitos.length > 0
+                        ? feitos[feitos.length - 1]
+                        : dados.cliente?.contaAbertaEm
+                          ? instante(dados.cliente.contaAbertaEm).getTime()
+                          : null;
+                    const diasParado =
+                      referencia !== null ? diasDesde(referencia) : null;
+                    return itens.map((item, idx) => {
+                      const feito = item.feitoEm !== null;
+                      const atual = idx === atualIdx;
+                      const travado =
+                        item.automatico || passoEnviando === item.passo;
+                      return (
+                        <li key={item.passo}>
+                          <button
+                            type="button"
+                            disabled={travado}
+                            aria-pressed={feito}
+                            title={
+                              item.automatico
+                                ? `${item.rotulo} — ${feito ? "marcado" : "será marcado"} pela importação da Genial`
+                                : `${item.rotulo} — ${feito ? "desmarcar" : "marcar como feito"}`
+                            }
+                            onClick={
+                              item.automatico
+                                ? undefined
+                                : () => alternarPasso(item.passo, !feito)
+                            }
+                            className={cn(
+                              "flex h-[40px] w-full items-center gap-1 rounded-md px-0.5 text-left text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                              item.automatico
+                                ? "cursor-default"
+                                : "hover:bg-neutral-100",
+                            )}
+                          >
+                            {feito ? (
+                              <CheckCircle2
+                                size={16}
+                                strokeWidth={1.5}
+                                aria-hidden
+                                className="shrink-0 text-success"
+                              />
+                            ) : (
+                              <Circle
+                                size={16}
+                                strokeWidth={1.5}
+                                aria-hidden
+                                className={cn(
+                                  "shrink-0",
+                                  atual ? "text-warning" : "text-neutral-300",
+                                )}
+                              />
+                            )}
+                            <span
+                              className={cn(
+                                "min-w-0 flex-1 truncate",
+                                feito ? "text-neutral-800" : "text-neutral-600",
+                              )}
+                            >
+                              {item.rotulo}
+                            </span>
+                            <span
+                              className={cn(
+                                "shrink-0 font-mono text-xs tabular-nums",
+                                atual
+                                  ? "font-medium text-warning"
+                                  : "text-neutral-400",
+                              )}
+                            >
+                              {feito
+                                ? `${formatarData(item.feitoEm as string)}${
+                                    item.autor
+                                      ? ` · ${
+                                          item.autor === "Genial"
+                                            ? "Genial"
+                                            : iniciais(item.autor)
+                                        }`
+                                      : ""
+                                  }`
+                                : atual
+                                  ? diasParado !== null && diasParado > 0
+                                    ? `pendente há ${diasParado} dia${diasParado > 1 ? "s" : ""}`
+                                    : diasParado === 0
+                                      ? "pendente desde hoje"
+                                      : "pendente"
+                                  : "pendente"}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    });
+                  })()}
+                </ul>
+                {(() => {
+                  const datas = dados.ativacao
+                    .filter((i) => i.feitoEm)
+                    .map((i) => instante(i.feitoEm as string).getTime())
+                    .sort((a, b) => a - b);
+                  if (datas.length < 2) return null;
+                  const media =
+                    (datas[datas.length - 1] - datas[0]) /
+                    (datas.length - 1) /
+                    86_400_000;
+                  // Histórico preenchido de uma vez dá média ~0 — esconder
+                  // é mais honesto do que anunciar "0,0 dia".
+                  if (media < 0.1) return null;
+                  return (
+                    <p className="mt-1 flex items-center gap-0.5 border-t border-neutral-200 pt-1 text-xs text-neutral-600">
+                      <Clock size={12} strokeWidth={1.5} aria-hidden />
+                      tempo médio por etapa:{" "}
+                      <span className="font-mono tabular-nums">
+                        {media.toLocaleString("pt-BR", {
+                          maximumFractionDigits: 1,
+                        })}
+                      </span>{" "}
+                      dia{media >= 2 ? "s" : ""}
+                    </p>
+                  );
+                })()}
               </section>
             ) : null}
 
@@ -495,7 +697,9 @@ export function PainelContexto({
               {dados.campanha ? (
                 <Campo rotulo="Campanha">{dados.campanha}</Campo>
               ) : null}
-              <Campo rotulo="Na base desde">{formatarData(dados.criadoEm)}</Campo>
+              <Campo rotulo="Na base desde">
+                {formatarData(dados.criadoEm)}
+              </Campo>
               <Campo rotulo="Primeira resposta">
                 {dados.primeiraRespostaEm
                   ? formatarData(dados.primeiraRespostaEm)
