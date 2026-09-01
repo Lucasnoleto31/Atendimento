@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -49,7 +50,8 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           <p className="mt-1 text-sm text-neutral-600">
             Sua conta existe na autenticação, mas não tem perfil na tabela{" "}
             <code className="font-mono text-xs">profiles</code>. Peça à
-            administração para recriar o usuário ou inserir o perfil manualmente.
+            administração para recriar o usuário ou inserir o perfil
+            manualmente.
           </p>
         </div>
       </main>
@@ -71,5 +73,14 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     await processarResumoGestor().catch(() => {});
   });
 
-  return <AppShell perfil={perfil as Perfil}>{children}</AppShell>;
+  // Preferência "menu cheio no chat" no cookie (padrão do tema): o SSR já
+  // pinta a largura certa e a sidebar não pula depois da hidratação.
+  const jarro = await cookies();
+  const menuChatExpandido = jarro.get("menu-chat")?.value === "expandido";
+
+  return (
+    <AppShell perfil={perfil as Perfil} menuChatExpandido={menuChatExpandido}>
+      {children}
+    </AppShell>
+  );
 }

@@ -11,6 +11,8 @@ import {
   LogOut,
   Menu,
   Megaphone,
+  PanelLeftClose,
+  PanelLeftOpen,
   MessageSquare,
   Settings,
   ShieldCheck,
@@ -36,7 +38,12 @@ export const MODULOS = [
   { href: "/pagamentos", label: "Pagamentos", icon: CreditCard },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { href: "/admin", label: "Administração", icon: ShieldCheck, gestor: true },
-  { href: "/configuracoes", label: "Configurações", icon: Settings, gestor: true },
+  {
+    href: "/configuracoes",
+    label: "Configurações",
+    icon: Settings,
+    gestor: true,
+  },
 ];
 
 export type Perfil = {
@@ -47,22 +54,78 @@ export type Perfil = {
 
 export function AppShell({
   perfil,
+  menuChatExpandido = false,
   children,
 }: {
   perfil: Perfil;
+  /** Cookie "menu-chat" lido no SSR: o primeiro paint já vem na largura certa. */
+  menuChatExpandido?: boolean;
   children: React.ReactNode;
 }) {
   const [menuAberto, setMenuAberto] = useState(false);
   const reduceMotion = useReducedMotion();
+  const pathname = usePathname();
   const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
   const itens = MODULOS.filter((m) => !m.gestor || ehGestor);
 
+  // No chat a conversa é quem precisa do espaço: o menu recolhe sozinho e
+  // vira régua de ícones. Quem preferir o menu cheio expande pelo botão —
+  // a escolha fica no navegador (e vale só para o chat).
+  const noChat = pathname.startsWith("/chat");
+  // Estado em memória (o toggle funciona mesmo sem cookie/armazenamento);
+  // o cookie é a persistência — no padrão do tema (alternador-tema.tsx).
+  const [expandidoNoChat, setExpandidoNoChat] = useState(menuChatExpandido);
+  const recolhido = noChat && !expandidoNoChat;
+  const alternarLargura = () => {
+    const novo = !expandidoNoChat;
+    setExpandidoNoChat(novo);
+    document.cookie = `menu-chat=${novo ? "expandido" : "recolhido"}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+  };
+
   return (
     <div className="flex min-h-full flex-1">
-      <aside className="sticky top-0 hidden h-dvh w-[240px] shrink-0 self-start border-r border-neutral-200 bg-neutral-0 lg:flex lg:flex-col">
-        <Marca />
-        <Navegacao itens={itens} />
-        <RodapeUsuario perfil={perfil} />
+      <aside
+        className={cn(
+          "sticky top-0 hidden h-dvh shrink-0 self-start border-r border-neutral-200 bg-neutral-0 lg:flex lg:flex-col",
+          "motion-safe:transition-[width] motion-safe:duration-[180ms]",
+          recolhido ? "w-[64px]" : "w-[240px]",
+        )}
+      >
+        <Marca recolhido={recolhido} />
+        <Navegacao itens={itens} recolhido={recolhido} />
+        {noChat ? (
+          <div className="shrink-0 p-1">
+            <button
+              type="button"
+              onClick={alternarLargura}
+              className={cn(
+                "flex h-[40px] w-full items-center rounded-md text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                recolhido ? "justify-center" : "gap-1 px-1.5",
+              )}
+              title={recolhido ? "Expandir o menu" : "Recolher o menu"}
+            >
+              {recolhido ? (
+                <PanelLeftOpen
+                  size={18}
+                  strokeWidth={1.5}
+                  className="text-neutral-400"
+                  aria-hidden
+                />
+              ) : (
+                <PanelLeftClose
+                  size={18}
+                  strokeWidth={1.5}
+                  className="text-neutral-400"
+                  aria-hidden
+                />
+              )}
+              <span className={cn("whitespace-nowrap", recolhido && "sr-only")}>
+                {recolhido ? "Expandir menu" : "Recolher menu"}
+              </span>
+            </button>
+          </div>
+        ) : null}
+        <RodapeUsuario perfil={perfil} recolhido={recolhido} />
       </aside>
 
       <div className="relative flex min-w-0 flex-1 flex-col">
@@ -111,36 +174,72 @@ export function AppShell({
   );
 }
 
-function Marca({ compacto = false }: { compacto?: boolean }) {
+function Marca({
+  compacto = false,
+  recolhido = false,
+}: {
+  compacto?: boolean;
+  recolhido?: boolean;
+}) {
   return (
-    <div className={cn("flex shrink-0 items-center gap-1", compacto ? "" : "h-[64px] border-b border-neutral-200 px-2")}>
+    <div
+      className={cn(
+        "flex shrink-0 items-center gap-1",
+        compacto ? "" : "h-[64px] border-b border-neutral-200",
+        compacto ? "" : recolhido ? "justify-center" : "px-2",
+      )}
+    >
       <span
         aria-hidden
         className="flex h-[28px] w-[28px] items-center justify-center rounded-md bg-primary-600 font-mono text-sm text-neutral-0"
       >
         Z
       </span>
-      <span className="text-base font-semibold text-neutral-900">Zeve CRM</span>
+      <span
+        className={cn(
+          "whitespace-nowrap text-base font-semibold text-neutral-900",
+          recolhido && "sr-only",
+        )}
+      >
+        Zeve CRM
+      </span>
     </div>
   );
 }
 
-function Navegacao({ itens }: { itens: typeof MODULOS }) {
+function Navegacao({
+  itens,
+  recolhido = false,
+}: {
+  itens: typeof MODULOS;
+  recolhido?: boolean;
+}) {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Módulos" className="relative min-h-0 flex-1 overflow-y-auto p-1">
+    <nav
+      aria-label="Módulos"
+      className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1"
+    >
       <ul className="flex flex-col gap-0.5">
         {itens.map((item) => {
           const Icon = item.icon;
           const ativo = pathname.startsWith(item.href);
+          const badge =
+            item.href === "/chat" ? (
+              <ContadorNaoLidas />
+            ) : item.href === "/hoje" ? (
+              <ContadorNaoLidas mostrar="tarefas" />
+            ) : null;
           return (
             <li key={item.href}>
               <Link
                 href={item.href}
                 aria-current={ativo ? "page" : undefined}
+                title={recolhido ? item.label : undefined}
                 className={cn(
-                  "flex h-[40px] items-center gap-1 rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                  "flex h-[40px] items-center rounded-md text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
+                  recolhido ? "relative justify-center" : "gap-1 px-1.5",
                   ativo
                     ? "bg-primary-50 font-medium text-primary-900"
                     : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800",
@@ -152,10 +251,24 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
                   aria-hidden
                   className={ativo ? "text-primary-600" : "text-neutral-400"}
                 />
-                {item.label}
-                {item.href === "/chat" ? <ContadorNaoLidas /> : null}
-                {item.href === "/hoje" ? (
-                  <ContadorNaoLidas mostrar="tarefas" />
+                <span
+                  className={cn("whitespace-nowrap", recolhido && "sr-only")}
+                >
+                  {item.label}
+                </span>
+                {badge ? (
+                  // O invólucro NUNCA muda de tipo entre os modos: trocar a
+                  // árvore remontaria o contador — que religa o canal de
+                  // tempo real e toca o bip como se fosse mensagem nova.
+                  <span
+                    className={
+                      recolhido
+                        ? "pointer-events-none absolute right-0 top-0 scale-90"
+                        : "contents"
+                    }
+                  >
+                    {badge}
+                  </span>
                 ) : null}
               </Link>
             </li>
@@ -166,7 +279,46 @@ function Navegacao({ itens }: { itens: typeof MODULOS }) {
   );
 }
 
-function RodapeUsuario({ perfil }: { perfil: Perfil }) {
+function RodapeUsuario({
+  perfil,
+  recolhido = false,
+}: {
+  perfil: Perfil;
+  recolhido?: boolean;
+}) {
+  if (recolhido) {
+    return (
+      <div className="flex shrink-0 flex-col items-center gap-0.5 border-t border-neutral-200 p-1">
+        <span title={`${perfil.nome} (${perfil.papel})`}>
+          <span
+            aria-hidden
+            className="flex h-[32px] w-[32px] items-center justify-center rounded-md bg-neutral-100 font-mono text-sm text-neutral-600"
+          >
+            {perfil.nome.slice(0, 2).toUpperCase()}
+          </span>
+          <span className="sr-only">
+            {perfil.nome} ({perfil.papel})
+          </span>
+        </span>
+        <AlternadorTema />
+        <form action={sair}>
+          <button
+            type="submit"
+            aria-label="Sair"
+            title="Sair"
+            className="flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+          >
+            <LogOut
+              size={18}
+              strokeWidth={1.5}
+              className="text-neutral-400"
+              aria-hidden
+            />
+          </button>
+        </form>
+      </div>
+    );
+  }
   return (
     <div className="shrink-0 border-t border-neutral-200 p-1">
       <div className="flex items-center gap-1 px-1.5 py-1">
@@ -191,7 +343,12 @@ function RodapeUsuario({ perfil }: { perfil: Perfil }) {
           type="submit"
           className="flex h-[40px] w-full items-center gap-1 rounded-md px-1.5 text-sm text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         >
-          <LogOut size={18} strokeWidth={1.5} className="text-neutral-400" aria-hidden />
+          <LogOut
+            size={18}
+            strokeWidth={1.5}
+            className="text-neutral-400"
+            aria-hidden
+          />
           Sair
         </button>
       </form>
