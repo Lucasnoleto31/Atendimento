@@ -52,18 +52,29 @@ export default async function EditarLeadPage({
   const [{ data: lead }, { data: canais }, { data: etapas }, { data: equipe }] =
     await Promise.all([
       buscarLead(),
-      supabase.from("channels").select("id, nome").eq("ativo", true).order("nome"),
+      supabase
+        .from("channels")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome"),
       supabase
         .from("pipeline_stages")
         .select("id, nome, ordem, pipeline:pipelines(nome, criado_em)")
         .order("ordem"),
-      supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome"),
+      supabase
+        .from("profiles")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome"),
     ]);
 
   if (!lead) notFound();
 
   // Agrupa as etapas por kanban para o select.
-  const grupos = new Map<string, { id: string; nome: string; ordem: number }[]>();
+  const grupos = new Map<
+    string,
+    { id: string; nome: string; ordem: number }[]
+  >();
   for (const etapa of (etapas ?? []) as unknown as {
     id: string;
     nome: string;
@@ -101,10 +112,19 @@ export default async function EditarLeadPage({
         </p>
       ) : null}
 
-      <form action={atualizarLead} className="mt-3 flex max-w-[480px] flex-col gap-2">
+      <form
+        action={atualizarLead}
+        className="mt-3 flex max-w-[480px] flex-col gap-2"
+      >
         <input type="hidden" name="id" value={lead.id} />
 
-        <Field id="nome" name="nome" label="Nome" required defaultValue={lead.nome} />
+        <Field
+          id="nome"
+          name="nome"
+          label="Nome"
+          required
+          defaultValue={lead.nome}
+        />
 
         <Field
           id="telefone"
@@ -118,7 +138,10 @@ export default async function EditarLeadPage({
         />
 
         <div className="flex flex-col gap-1">
-          <label htmlFor="channel_id" className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor="channel_id"
+            className="text-sm font-medium text-neutral-800"
+          >
             Canal de origem
           </label>
           <select
@@ -144,7 +167,10 @@ export default async function EditarLeadPage({
         />
 
         <div className="flex flex-col gap-1">
-          <label htmlFor="stage_id" className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor="stage_id"
+            className="text-sm font-medium text-neutral-800"
+          >
             Etapa
           </label>
           <select
@@ -166,7 +192,10 @@ export default async function EditarLeadPage({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label htmlFor="status" className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor="status"
+            className="text-sm font-medium text-neutral-800"
+          >
             Status
           </label>
           <select
@@ -242,7 +271,10 @@ export default async function EditarLeadPage({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label htmlFor="observacao" className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor="observacao"
+            className="text-sm font-medium text-neutral-800"
+          >
             Observação
           </label>
           <textarea

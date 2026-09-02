@@ -41,11 +41,7 @@ export function EtiquetaLista({
       </select>
 
       {/* O servidor continua recebendo os mesmos dois campos de sempre. */}
-      <input
-        type="hidden"
-        name="etiqueta_id"
-        value={ehNova ? "" : escolha}
-      />
+      <input type="hidden" name="etiqueta_id" value={ehNova ? "" : escolha} />
 
       {ehNova ? (
         <input

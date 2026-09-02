@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Download, MessageSquare, Plus, Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 import { formatarData, formatarTelefone, tempoDesde } from "@/lib/format";
 import {
   listarTemplatesMeta,
@@ -187,8 +188,9 @@ const TODAS_LISTAS = GRUPOS.flatMap((g) => g.listas);
 // foi o último contato. Mostrar as três colunas sempre só empurraria a tabela
 // para a rolagem lateral.
 const LISTAS_COM_GIRO = new Set(
-  GRUPOS.filter((g) =>
-    g.titulo === "Abrir o primeiro giro" || g.titulo === "Manter girando",
+  GRUPOS.filter(
+    (g) =>
+      g.titulo === "Abrir o primeiro giro" || g.titulo === "Manter girando",
   ).flatMap((g) => g.listas.map((l) => l.chave)),
 );
 
@@ -227,12 +229,7 @@ type Linha = {
  * lista não pode derrubar a etiqueta escolhida, senão medir uma campanha ao
  * longo do funil vira reescolher o filtro a cada clique.
  */
-function urlLeads(
-  lista: string,
-  busca: string,
-  etiqueta: string,
-  pagina = 1,
-) {
+function urlLeads(lista: string, busca: string, etiqueta: string, pagina = 1) {
   const p = new URLSearchParams();
   if (lista !== "todos") p.set("lista", lista);
   if (busca) p.set("busca", busca);
@@ -253,13 +250,15 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
     TODAS_LISTAS.find((l) => l.chave === listaAtiva) ?? TODAS_LISTAS[0];
   const busca = typeof params.busca === "string" ? params.busca.trim() : "";
   const etiqueta =
-    typeof params.etiqueta === "string" && params.etiqueta ? params.etiqueta : "";
+    typeof params.etiqueta === "string" && params.etiqueta
+      ? params.etiqueta
+      : "";
   const pagina = Math.max(1, Number(params.pagina) || 1);
   const aviso = typeof params.aviso === "string" ? params.aviso : null;
 
   const supabase = await createClient();
   const perfil = await perfilAtual();
-  const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
+  const ehGestor = veTudo(perfil?.papel);
 
   /**
    * Toda lista é o mesmo desenho: a view v_leads_listas com um filtro
@@ -273,7 +272,9 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
         ? supabase
             .from("v_leads_listas")
             .select("lead_id", { count: "exact", head: true })
-        : supabase.from("v_leads_listas").select(CAMPOS_VIEW, { count: "exact" });
+        : supabase
+            .from("v_leads_listas")
+            .select(CAMPOS_VIEW, { count: "exact" });
 
     if (alvo?.coluna) q = q.eq(alvo.coluna, true);
 
@@ -331,9 +332,10 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
 
   const templatesDisparo =
     ehGestor && LISTAS_DISPARO.has(listaAtiva)
-      ? await (metaConfigurada()
-          ? listarTemplatesMeta()
-          : Promise.resolve([] as TemplateWhatsapp[])
+      ? await (
+          metaConfigurada()
+            ? listarTemplatesMeta()
+            : Promise.resolve([] as TemplateWhatsapp[])
         ).catch(() => [] as TemplateWhatsapp[])
       : [];
 
@@ -341,7 +343,11 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const total = count ?? 0;
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const totalPorLista = new Map(contagens.map((c) => [c.chave, c.total]));
-  const etiquetas = (tags ?? []) as { id: string; nome: string; leads: number }[];
+  const etiquetas = (tags ?? []) as {
+    id: string;
+    nome: string;
+    leads: number;
+  }[];
   const etiquetaAtiva = etiquetas.find((t) => t.id === etiqueta) ?? null;
 
   return (
@@ -350,7 +356,8 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
         <div>
           <h1 className="text-h1 text-neutral-900">Leads</h1>
           <p className="mt-1 text-sm text-neutral-600">
-            As listas que a equipe trabalha, cruzadas com o giro de lotes da base.
+            As listas que a equipe trabalha, cruzadas com o giro de lotes da
+            base.
           </p>
         </div>
         <div className="flex flex-wrap items-start gap-1">
@@ -562,7 +569,10 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
               </thead>
               <tbody className="divide-y divide-neutral-200">
                 {linhas.map((linha) => (
-                  <tr key={linha.lead_id} className="h-[48px] hover:bg-neutral-50">
+                  <tr
+                    key={linha.lead_id}
+                    className="h-[48px] hover:bg-neutral-50"
+                  >
                     <td className="px-2">
                       <Link
                         href={`/leads/${linha.lead_id}`}
@@ -626,7 +636,11 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                         title="Abrir no chat"
                         className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                       >
-                        <MessageSquare size={16} strokeWidth={1.5} aria-hidden />
+                        <MessageSquare
+                          size={16}
+                          strokeWidth={1.5}
+                          aria-hidden
+                        />
                       </Link>
                     </td>
                   </tr>

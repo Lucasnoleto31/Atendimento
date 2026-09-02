@@ -3,7 +3,7 @@
  *
  *   node --env-file=.env.local scripts/usuario.mjs <email> "<Nome>" <papel>
  *
- * Papéis: admin | gestor | vendedor
+ * Papéis: admin | gestor | vendedor (assessor) | atendente | compliance
  *
  * Se o usuário não existir, cria com senha aleatória e imprime a senha UMA vez.
  * Se já existir, apenas atualiza o papel.
@@ -22,8 +22,8 @@ if (!email || !nome) {
   process.exit(1);
 }
 
-if (!["admin", "gestor", "vendedor"].includes(papel)) {
-  console.error(`Papel inválido: ${papel}. Use admin, gestor ou vendedor.`);
+if (!["admin", "gestor", "vendedor", "atendente", "compliance"].includes(papel)) {
+  console.error(`Papel inválido: ${papel}. Use admin, gestor, vendedor (assessor), atendente ou compliance.`);
   process.exit(1);
 }
 

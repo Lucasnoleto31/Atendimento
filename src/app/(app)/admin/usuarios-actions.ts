@@ -3,8 +3,10 @@
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { PAPEIS } from "@/lib/papeis";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { registrarAcesso } from "@/lib/auditoria";
 
 export type ResultadoUsuario = {
   ok?: boolean;
@@ -13,7 +15,7 @@ export type ResultadoUsuario = {
   email?: string;
 };
 
-const PAPEIS = new Set(["admin", "gestor", "vendedor"]);
+const PAPEIS_VALIDOS = new Set<string>(PAPEIS.map((p) => p.papel));
 
 async function exigirAdmin() {
   const perfil = await perfilAtual();
@@ -30,11 +32,13 @@ export async function criarUsuario(
   if (!admin) return { erro: "Só o admin cria usuários." };
 
   const nome = String(formData.get("nome") ?? "").trim();
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const email = String(formData.get("email") ?? "")
+    .trim()
+    .toLowerCase();
   const papel = String(formData.get("papel") ?? "vendedor");
 
   if (!nome || !email) return { erro: "Nome e e-mail são obrigatórios." };
-  if (!PAPEIS.has(papel)) return { erro: "Papel inválido." };
+  if (!PAPEIS_VALIDOS.has(papel)) return { erro: "Papel inválido." };
 
   const senha = randomBytes(9).toString("base64url");
   const service = createServiceClient();
@@ -93,7 +97,7 @@ export async function mudarPapel(formData: FormData) {
     redirect(aviso ? `/admin?aviso=${encodeURIComponent(aviso)}` : "/admin");
   }
 
-  if (!id || !PAPEIS.has(papel)) terminar("Papel inválido.");
+  if (!id || !PAPEIS_VALIDOS.has(papel)) terminar("Papel inválido.");
   if (id === admin.id && papel !== "admin") {
     terminar("Você não pode rebaixar o próprio papel.");
   }
@@ -169,4 +173,26 @@ export async function alternarUsuarioAtivo(formData: FormData) {
 
   if (error) terminar(`Não deu para alterar: ${error.message}`);
   terminar();
+}
+
+/**
+ * Apaga os fatores de 2FA de alguém que perdeu o aparelho. No próximo login
+ * a pessoa cadastra de novo — e o reset fica no log de acesso.
+ */
+export async function resetar2fa(formData: FormData) {
+  const admin = await exigirAdmin();
+  if (!admin) redirect("/hoje");
+  const id = String(formData.get("id") ?? "");
+  if (!id) redirect("/admin");
+
+  const service = createServiceClient();
+  const { data } = await service.auth.admin.mfa.listFactors({ userId: id });
+  for (const fator of data?.factors ?? []) {
+    await service.auth.admin.mfa.deleteFactor({ id: fator.id, userId: id });
+  }
+  registrarAcesso(admin.id, "resetou_2fa", { usuario_id: id });
+  revalidatePath("/admin");
+  redirect(
+    `/admin?aviso=${encodeURIComponent("Segundo fator resetado — a pessoa cadastra de novo no próximo login.")}`,
+  );
 }

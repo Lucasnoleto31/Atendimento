@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve } from "@/lib/auth";
 import { garantirClienteDoLead } from "@/lib/clientes";
 
 /**
@@ -11,7 +11,7 @@ import { garantirClienteDoLead } from "@/lib/clientes";
  * produto no momento do registro — reajustes futuros não mexem no histórico.
  */
 export async function registrarVenda(formData: FormData) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil) redirect("/entrar");
 
   const leadId = String(formData.get("lead_id") ?? "");
@@ -30,7 +30,8 @@ export async function registrarVenda(formData: FormData) {
 
   const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
   // Vendedor só lança venda no próprio nome (mesma regra do RLS).
-  const vendedorId = ehGestor && vendedorEscolhido ? vendedorEscolhido : perfil.id;
+  const vendedorId =
+    ehGestor && vendedorEscolhido ? vendedorEscolhido : perfil.id;
 
   // Ganho vira cliente na hora: cria/encontra o registro na base e grava a
   // conta — é ela que liga os lotes das próximas importações a este cliente.
@@ -47,11 +48,7 @@ export async function registrarVenda(formData: FormData) {
       .select("valor_comissao_centavos, ativo, nome")
       .eq("id", productId)
       .maybeSingle(),
-    supabase
-      .from("leads")
-      .select("customer_id")
-      .eq("id", leadId)
-      .maybeSingle(),
+    supabase.from("leads").select("customer_id").eq("id", leadId).maybeSingle(),
   ]);
 
   if (!produto) falhar("Produto não encontrado.");
@@ -83,7 +80,7 @@ export async function registrarVenda(formData: FormData) {
 
 /** Cancela (não apaga): a operação sai dos totais mas fica no histórico. */
 export async function cancelarVenda(formData: FormData) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil) redirect("/entrar");
 
   const id = String(formData.get("id") ?? "");
@@ -109,7 +106,7 @@ export async function cancelarVenda(formData: FormData) {
  * nas próprias; gestão em qualquer uma. Data vazia limpa a previsão.
  */
 export async function definirPrevista(formData: FormData) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil) redirect("/entrar");
 
   const id = String(formData.get("id") ?? "");

@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 import { createServiceClient } from "@/lib/supabase/server";
 
 /**
@@ -27,7 +28,9 @@ type Linha = {
 
 function celula(valor: unknown): string {
   const texto = valor === null || valor === undefined ? "" : String(valor);
-  return `"${texto.replaceAll('"', '""')}"`;
+  // Nome vindo do WhatsApp pode começar com "=": no Excel viraria fórmula.
+  const seguro = /^[=+\-@\t\r]/.test(texto) ? `'${texto}` : texto;
+  return `"${seguro.replaceAll('"', '""')}"`;
 }
 
 const reais = (centavos: number | null) =>
@@ -37,7 +40,7 @@ export async function GET(request: NextRequest) {
   const perfil = await perfilAtual();
   if (!perfil) return new Response("Forbidden", { status: 403 });
 
-  const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
+  const ehGestor = veTudo(perfil.papel);
 
   const params = request.nextUrl.searchParams;
   // Vendedor só exporta a PRÓPRIA carteira, mesmo forjando ?f=todas na URL —
@@ -116,11 +119,13 @@ export async function GET(request: NextRequest) {
       .map((linha) => linha.map(celula).join(";"))
       .join("\r\n");
 
-  await createServiceClient().from("auditoria").insert({
-    quem: perfil.id,
-    acao: "exportar_carteira",
-    detalhes: { papel: perfil.papel },
-  });
+  await createServiceClient()
+    .from("auditoria")
+    .insert({
+      quem: perfil.id,
+      acao: "exportar_carteira",
+      detalhes: { papel: perfil.papel },
+    });
 
   return new Response(csv, {
     headers: {

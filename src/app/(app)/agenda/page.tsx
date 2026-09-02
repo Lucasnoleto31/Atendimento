@@ -69,7 +69,10 @@ export default async function AgendaPage({
       "id, titulo, vence_em, concluida_em, responsavel_id, lead:leads(id, nome), responsavel:profiles!responsavel_id(nome)",
     )
     .gte("vence_em", `${mesParam}-01T00:00:00-03:00`)
-    .lt("vence_em", `${mesParam}-${String(diasNoMes).padStart(2, "0")}T23:59:59-03:00`)
+    .lt(
+      "vence_em",
+      `${mesParam}-${String(diasNoMes).padStart(2, "0")}T23:59:59-03:00`,
+    )
     .order("vence_em")
     .limit(500);
   if (soMinhas && perfil) {
@@ -341,7 +344,10 @@ export default async function AgendaPage({
 
             {/* Dia selecionado */}
             <section aria-labelledby="dia-titulo">
-              <h2 id="dia-titulo" className="text-h3 text-neutral-900 capitalize">
+              <h2
+                id="dia-titulo"
+                className="text-h3 text-neutral-900 capitalize"
+              >
                 {dataLonga}
               </h2>
 

@@ -123,16 +123,13 @@ export function ImportForm({
               <> · {estado.mesclados} duplicado(s) mesclado(s)</>
             ) : null}
             {estado.telefonesPreenchidos ? (
-              <>
-                {" "}
-                · {estado.telefonesPreenchidos} lead(s) ganharam telefone
-              </>
+              <> · {estado.telefonesPreenchidos} lead(s) ganharam telefone</>
             ) : null}
             {estado.leadsNovos !== undefined ? (
               <>
                 {" "}
-                · {estado.leadsNovos} novo(s),{" "}
-                {estado.leadsAtualizados ?? 0} já existiam
+                · {estado.leadsNovos} novo(s), {estado.leadsAtualizados ?? 0} já
+                existiam
                 {estado.leadsIntactos ? " e ficaram intactos" : ""}
                 {estado.jaEramClientes
                   ? ` · ${estado.jaEramClientes} já eram cliente e ficaram de fora`

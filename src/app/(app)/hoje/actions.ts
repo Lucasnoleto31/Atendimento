@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve, perfilAtual } from "@/lib/auth";
+import { registrarAcesso } from "@/lib/auditoria";
 import { templateBloqueadoAte } from "@/lib/perda";
 
 export type ResultadoAcao = { ok?: boolean; erro?: string };
@@ -16,8 +17,11 @@ export async function concluirTarefaHoje(
   tarefaId: string,
   leadId: string,
 ): Promise<ResultadoAcao> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!tarefaId) return { erro: "Tarefa não informada." };
 
   const supabase = await createClient();
@@ -171,6 +175,7 @@ function paraMensagem(m: LinhaBrutaInteracao): Mensagem {
  */
 export async function carregarConversa(
   leadId: string,
+  opcoes: { registrarAcesso?: boolean } = {},
 ): Promise<ConversaDoPainel | { erro: string }> {
   const perfil = await perfilAtual();
   if (!perfil) return { erro: "Sessão expirada." };
@@ -278,6 +283,15 @@ export async function carregarConversa(
   const vinculos = vinculosR.data;
 
   if (!lead) return { erro: "Lead não encontrado." };
+  // Só a ABERTURA da conversa entra no log — recarga periódica e volta de
+  // aba não são "alguém olhou". E só depois de o RLS confirmar que a
+  // pessoa enxerga o lead: tentativa fora do alcance não vira "abriu".
+  if (opcoes.registrarAcesso) {
+    registrarAcesso(perfil.id, "abriu_conversa", {
+      lead_id: leadId,
+      nome: lead.nome,
+    });
+  }
 
   const mensagens: Mensagem[] = (
     (interacoes ?? []) as unknown as LinhaBrutaInteracao[]

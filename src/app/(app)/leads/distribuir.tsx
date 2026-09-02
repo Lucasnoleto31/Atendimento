@@ -49,7 +49,11 @@ export function DistribuirLeads({
 
   if (!confirmando) {
     return (
-      <Button variant="secondary" size="md" onClick={() => setConfirmando(true)}>
+      <Button
+        variant="secondary"
+        size="md"
+        onClick={() => setConfirmando(true)}
+      >
         <Shuffle size={18} strokeWidth={1.5} aria-hidden />
         Distribuir {semResponsavel.toLocaleString("pt-BR")}
       </Button>

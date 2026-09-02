@@ -13,6 +13,7 @@ import {
   Megaphone,
   PanelLeftClose,
   PanelLeftOpen,
+  ScrollText,
   MessageSquare,
   Settings,
   ShieldCheck,
@@ -23,33 +24,66 @@ import {
 } from "lucide-react";
 import { sair } from "@/app/entrar/actions";
 import { cn } from "@/lib/utils";
+import { rotuloPapel, type Papel } from "@/lib/papeis";
 import { AlternadorTema } from "./alternador-tema";
 import { ContadorNaoLidas } from "./nao-lidas";
 
 // Agenda saiu do menu (6.3): a visão-dia mora na /hoje e o calendário abre
 // pelo botão "Ver calendário" — a rota /agenda continua existindo.
-export const MODULOS = [
+export const MODULOS: {
+  href: string;
+  label: string;
+  icon: typeof Sun;
+  /** Sem lista = todo mundo vê. */
+  papeis?: Papel[];
+}[] = [
   { href: "/hoje", label: "Hoje", icon: Sun },
   { href: "/atendimento", label: "Atendimento", icon: Columns3 },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/carteira", label: "Carteira", icon: Wallet },
+  {
+    href: "/carteira",
+    label: "Carteira",
+    icon: Wallet,
+    papeis: ["admin", "gestor", "vendedor", "compliance"],
+  },
   { href: "/leads", label: "Leads", icon: Users },
-  { href: "/campanhas", label: "Campanhas", icon: Megaphone, gestor: true },
+  {
+    href: "/campanhas",
+    label: "Campanhas",
+    icon: Megaphone,
+    papeis: ["admin", "gestor"],
+  },
   { href: "/pagamentos", label: "Pagamentos", icon: CreditCard },
-  { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
-  { href: "/admin", label: "Administração", icon: ShieldCheck, gestor: true },
+  {
+    href: "/relatorios",
+    label: "Relatórios",
+    icon: BarChart3,
+    papeis: ["admin", "gestor", "compliance"],
+  },
+  {
+    href: "/admin/acessos",
+    label: "Log de acesso",
+    icon: ScrollText,
+    papeis: ["admin", "gestor", "compliance"],
+  },
+  {
+    href: "/admin",
+    label: "Administração",
+    icon: ShieldCheck,
+    papeis: ["admin", "gestor"],
+  },
   {
     href: "/configuracoes",
     label: "Configurações",
     icon: Settings,
-    gestor: true,
+    papeis: ["admin", "gestor"],
   },
 ];
 
 export type Perfil = {
   nome: string;
   email: string;
-  papel: "admin" | "gestor" | "vendedor";
+  papel: Papel;
 };
 
 export function AppShell({
@@ -65,8 +99,9 @@ export function AppShell({
   const [menuAberto, setMenuAberto] = useState(false);
   const reduceMotion = useReducedMotion();
   const pathname = usePathname();
-  const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
-  const itens = MODULOS.filter((m) => !m.gestor || ehGestor);
+  const itens = MODULOS.filter(
+    (m) => !m.papeis || m.papeis.includes(perfil.papel),
+  );
 
   // No chat a conversa é quem precisa do espaço: o menu recolhe sozinho e
   // vira régua de ícones. Quem preferir o menu cheio expande pelo botão —
@@ -166,6 +201,15 @@ export function AppShell({
           ) : null}
         </AnimatePresence>
 
+        {perfil.papel === "compliance" ? (
+          <p
+            role="status"
+            className="flex h-[40px] shrink-0 items-center gap-1 border-b border-neutral-200 bg-info-bg px-2 text-sm text-info"
+          >
+            Modo somente leitura — você vê tudo e pode exportar, mas nenhuma
+            alteração é gravada.
+          </p>
+        ) : null}
         <main id="conteudo" className="min-w-0 flex-1">
           {children}
         </main>
@@ -224,7 +268,12 @@ function Navegacao({
       <ul className="flex flex-col gap-0.5">
         {itens.map((item) => {
           const Icon = item.icon;
-          const ativo = pathname.startsWith(item.href);
+          const ativo =
+            item.href === "/admin"
+              ? pathname === "/admin" ||
+                (pathname.startsWith("/admin/") &&
+                  !pathname.startsWith("/admin/acessos"))
+              : pathname.startsWith(item.href);
           const badge =
             item.href === "/chat" ? (
               <ContadorNaoLidas />
@@ -289,7 +338,7 @@ function RodapeUsuario({
   if (recolhido) {
     return (
       <div className="flex shrink-0 flex-col items-center gap-0.5 border-t border-neutral-200 p-1">
-        <span title={`${perfil.nome} (${perfil.papel})`}>
+        <span title={`${perfil.nome} (${rotuloPapel(perfil.papel)})`}>
           <span
             aria-hidden
             className="flex h-[32px] w-[32px] items-center justify-center rounded-md bg-neutral-100 font-mono text-sm text-neutral-600"
@@ -297,7 +346,7 @@ function RodapeUsuario({
             {perfil.nome.slice(0, 2).toUpperCase()}
           </span>
           <span className="sr-only">
-            {perfil.nome} ({perfil.papel})
+            {perfil.nome} ({rotuloPapel(perfil.papel)})
           </span>
         </span>
         <AlternadorTema />
@@ -332,8 +381,8 @@ function RodapeUsuario({
           <span className="block truncate text-sm font-medium text-neutral-800">
             {perfil.nome}
           </span>
-          <span className="block truncate text-xs text-neutral-600 capitalize">
-            {perfil.papel}
+          <span className="block truncate text-xs text-neutral-600">
+            {rotuloPapel(perfil.papel)}
           </span>
         </span>
         <AlternadorTema />

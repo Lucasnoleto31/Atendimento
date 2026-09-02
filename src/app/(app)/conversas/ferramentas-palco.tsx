@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Ban, Mail, MoreHorizontal, RotateCcw, Undo2, UserRound } from "lucide-react";
+import {
+  Ban,
+  Mail,
+  MoreHorizontal,
+  RotateCcw,
+  Undo2,
+  UserRound,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { estiloEtiqueta } from "@/lib/etiquetas";
 import { MOTIVOS_PERDA, type MotivoPerda } from "@/lib/perda";
@@ -212,7 +219,9 @@ export function FerramentasPalco({
 
             {ferramentas.etiquetas.length > 0 ? (
               <div className="mt-1.5 px-0.5">
-                <p className="text-xs font-medium text-neutral-600">Etiquetas</p>
+                <p className="text-xs font-medium text-neutral-600">
+                  Etiquetas
+                </p>
                 {/* p-0.5: a caixa rolável recorta nos quatro lados, e sem
                     esta folga o anel de foco do chip saía cortado. */}
                 <div className="mt-0.5 flex max-h-[132px] flex-wrap gap-0.5 overflow-y-auto p-0.5">
@@ -224,7 +233,9 @@ export function FerramentasPalco({
                         type="button"
                         disabled={pendente}
                         onClick={() =>
-                          executar(() => alternarEtiquetaChat(leadId, t.id, !ativa))
+                          executar(() =>
+                            alternarEtiquetaChat(leadId, t.id, !ativa),
+                          )
                         }
                         className={cn(
                           "inline-flex h-[32px] items-center rounded-full px-1 text-xs font-medium transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
@@ -248,7 +259,12 @@ export function FerramentasPalco({
                 href={`/leads/${leadId}`}
                 className="flex h-[40px] items-center gap-1 rounded-md px-1 text-sm text-neutral-800 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500"
               >
-                <UserRound size={15} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
+                <UserRound
+                  size={15}
+                  strokeWidth={1.7}
+                  aria-hidden
+                  className="text-neutral-400"
+                />
                 Ficha 360 do lead
               </Link>
               <button
@@ -262,7 +278,12 @@ export function FerramentasPalco({
                 }
                 className="flex h-[40px] w-full items-center gap-1 rounded-md px-1 text-left text-sm text-neutral-800 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500"
               >
-                <Mail size={15} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
+                <Mail
+                  size={15}
+                  strokeWidth={1.7}
+                  aria-hidden
+                  className="text-neutral-400"
+                />
                 Marcar como não lida
               </button>
               {ferramentas.conversaResolvida ? (
@@ -274,7 +295,12 @@ export function FerramentasPalco({
                   }
                   className="flex h-[40px] w-full items-center gap-1 rounded-md px-1 text-left text-sm text-neutral-800 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500"
                 >
-                  <Undo2 size={15} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
+                  <Undo2
+                    size={15}
+                    strokeWidth={1.7}
+                    aria-hidden
+                    className="text-neutral-400"
+                  />
                   Reabrir conversa
                 </button>
               ) : null}
@@ -285,7 +311,12 @@ export function FerramentasPalco({
                   onClick={() => executar(() => reabrirLeadChat(leadId))}
                   className="flex h-[40px] w-full items-center gap-1 rounded-md px-1 text-left text-sm text-neutral-800 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500"
                 >
-                  <RotateCcw size={15} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
+                  <RotateCcw
+                    size={15}
+                    strokeWidth={1.7}
+                    aria-hidden
+                    className="text-neutral-400"
+                  />
                   Reabrir atendimento
                 </button>
               ) : (
@@ -355,7 +386,9 @@ export function FerramentasPalco({
               )}
             </div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-1 rounded-md bg-accent-100 px-1.5 py-1">
-              <span className="text-sm text-accent-700">Vai pensar? Não é perda:</span>
+              <span className="text-sm text-accent-700">
+                Vai pensar? Não é perda:
+              </span>
               <button
                 type="button"
                 disabled={pendente}

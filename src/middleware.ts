@@ -96,6 +96,41 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Segundo fator obrigatório (EXIGIR_2FA=0 desliga em emergência). Quem
+  // entrou só com a senha: com fator cadastrado vai digitar o código; sem
+  // fator vai cadastrar. As duas telas ficam sob /entrar e são as únicas
+  // que um usuário "meio logado" alcança.
+  if (user && process.env.EXIGIR_2FA !== "0") {
+    const paginaCodigo = pathname.startsWith("/entrar/codigo");
+    const paginaCadastro = pathname.startsWith("/entrar/2fa");
+    // "Tem fator?" vem do getUser() de cima (servidor, fresco) — o cookie
+    // guarda uma foto velha dos fatores e mandaria gente para a tela errada.
+    // "Confirmou?" é a claim aal do próprio token.
+    const { data: aal } =
+      await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    const temFator = (user.factors ?? []).some((f) => f.status === "verified");
+    const confirmado = aal?.currentLevel === "aal2";
+    if (!confirmado) {
+      const destino = temFator ? "/entrar/codigo" : "/entrar/2fa";
+      const jaLa = temFator ? paginaCodigo : paginaCadastro;
+      const liberada =
+        pathname.startsWith("/api/webhooks") ||
+        pathname.startsWith("/api/cron");
+      if (!jaLa && !liberada) {
+        const url = request.nextUrl.clone();
+        url.pathname = destino;
+        url.search = "";
+        if (!pathname.startsWith("/entrar") && pathname !== "/") {
+          url.searchParams.set("proximo", pathname);
+        }
+        const ida = NextResponse.redirect(url);
+        response.cookies.getAll().forEach((c) => ida.cookies.set(c));
+        return ida;
+      }
+      return response;
+    }
+  }
+
   if (user && pathname.startsWith("/entrar")) {
     const url = request.nextUrl.clone();
     url.pathname = "/hoje";

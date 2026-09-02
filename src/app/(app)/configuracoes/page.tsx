@@ -2,9 +2,14 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Check, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { ehGestao, rotuloPapel } from "@/lib/papeis";
 import { perfilAtual } from "@/lib/auth";
 import { formatarReais, formatarTelefone } from "@/lib/format";
-import { CAMPO, BOTAO_ICONE, BOTAO_ICONE_PERIGO } from "@/components/app/form-styles";
+import {
+  CAMPO,
+  BOTAO_ICONE,
+  BOTAO_ICONE_PERIGO,
+} from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
 import {
   listarTemplatesMeta,
@@ -71,7 +76,8 @@ const PARAMETROS = [
   {
     chave: "distribuicao_automatica",
     rotulo: "Distribuição automática (0/1)",
-    ajuda: "1 = lead novo do WhatsApp vai para o vendedor com menos atendimentos.",
+    ajuda:
+      "1 = lead novo do WhatsApp vai para o vendedor com menos atendimentos.",
   },
   {
     chave: "dias_churn",
@@ -97,7 +103,8 @@ const PARAMETROS = [
   {
     chave: "receita_por_lote",
     rotulo: "Receita por lote (R$)",
-    ajuda: "Receita média da assessoria por lote girado; habilita LTV e receita em risco (0 desliga).",
+    ajuda:
+      "Receita média da assessoria por lote girado; habilita LTV e receita em risco (0 desliga).",
   },
   {
     chave: "resumo_gestor_ativo",
@@ -165,7 +172,9 @@ export default async function ConfiguracoesPage({
       ),
     supabase
       .from("whatsapp_instances")
-      .select("id, nome, telefone_e164, vendedor_id, ativa, meta_phone_number_id")
+      .select(
+        "id, nome, telefone_e164, vendedor_id, ativa, meta_phone_number_id",
+      )
       .order("nome"),
     supabase
       .from("profiles")
@@ -264,14 +273,16 @@ export default async function ConfiguracoesPage({
         </p>
 
         <div className="mt-2 flex flex-col gap-1">
-          {((produtos ?? []) as {
-            id: string;
-            codigo: string;
-            nome: string;
-            valor_comissao_centavos: number;
-            recorrencia: string;
-            ativo: boolean;
-          }[]).map((produto) => (
+          {(
+            (produtos ?? []) as {
+              id: string;
+              codigo: string;
+              nome: string;
+              valor_comissao_centavos: number;
+              recorrencia: string;
+              ativo: boolean;
+            }[]
+          ).map((produto) => (
             <div key={produto.id} className="flex flex-wrap items-center gap-1">
               <form
                 action={atualizarProduto}
@@ -309,7 +320,10 @@ export default async function ConfiguracoesPage({
                     .replace(".", ",")}
                   required
                   inputMode="decimal"
-                  className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+                  className={cn(
+                    CAMPO,
+                    "w-[96px] text-right font-mono tabular-nums",
+                  )}
                 />
                 <label htmlFor={`prod-rec-${produto.id}`} className="sr-only">
                   Recorrência
@@ -365,7 +379,10 @@ export default async function ConfiguracoesPage({
             </div>
           ))}
 
-          <form action={criarProduto} className="flex flex-wrap items-center gap-1">
+          <form
+            action={criarProduto}
+            className="flex flex-wrap items-center gap-1"
+          >
             <label htmlFor="novo-prod-cod" className="sr-only">
               Código do novo produto
             </label>
@@ -395,7 +412,10 @@ export default async function ConfiguracoesPage({
               placeholder="15,00"
               required
               inputMode="decimal"
-              className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+              className={cn(
+                CAMPO,
+                "w-[96px] text-right font-mono tabular-nums",
+              )}
             />
             <label htmlFor="novo-prod-rec" className="sr-only">
               Recorrência
@@ -412,7 +432,11 @@ export default async function ConfiguracoesPage({
                 </option>
               ))}
             </select>
-            <button type="submit" aria-label="Adicionar produto" className={BOTAO_ICONE}>
+            <button
+              type="submit"
+              aria-label="Adicionar produto"
+              className={BOTAO_ICONE}
+            >
               <Plus size={18} strokeWidth={1.5} aria-hidden />
             </button>
           </form>
@@ -426,8 +450,8 @@ export default async function ConfiguracoesPage({
         </h2>
         <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
           Etiqueta marca <strong className="font-medium">interesse</strong> do
-          lead e a <strong className="font-medium">campanha</strong> de onde
-          ele veio. A fase do funil não é etiqueta — é a coluna do kanban, em
+          lead e a <strong className="font-medium">campanha</strong> de onde ele
+          veio. A fase do funil não é etiqueta — é a coluna do kanban, em
           Atendimento. Guardar a fase nos dois lugares faz um contradizer o
           outro.
         </p>
@@ -487,7 +511,11 @@ export default async function ConfiguracoesPage({
                 </option>
               ))}
             </select>
-            <button type="submit" aria-label="Adicionar tag" className={BOTAO_ICONE}>
+            <button
+              type="submit"
+              aria-label="Adicionar tag"
+              className={BOTAO_ICONE}
+            >
               <Plus size={18} strokeWidth={1.5} aria-hidden />
             </button>
           </form>
@@ -504,66 +532,63 @@ export default async function ConfiguracoesPage({
         </p>
 
         <div className="mt-2 grid gap-2 lg:grid-cols-2">
-          {((mensagens ?? []) as {
-            id: string;
-            titulo: string;
-            corpo: string;
-            anexos?: AnexoMensagem[] | null;
-          }[]).map(
-            (msg) => (
-              <form
-                key={`${msg.id}-${carimboVolta}`}
-                action={atualizarMensagem}
-                className="flex flex-col gap-1 rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
-              >
-                <input type="hidden" name="id" value={msg.id} />
-                <div className="flex items-center gap-1">
-                  <label htmlFor={`msg-titulo-${msg.id}`} className="sr-only">
-                    Título
-                  </label>
-                  <input
-                    id={`msg-titulo-${msg.id}`}
-                    name="titulo"
-                    defaultValue={msg.titulo}
-                    required
-                    className={cn(CAMPO, "flex-1 font-medium")}
-                  />
-                  <button
-                    type="submit"
-                    aria-label={`Salvar mensagem ${msg.titulo}`}
-                    className={BOTAO_ICONE}
-                  >
-                    <Check size={18} strokeWidth={1.5} aria-hidden />
-                  </button>
-                  <button
-                    type="submit"
-                    formAction={excluirMensagem}
-                    aria-label={`Excluir mensagem ${msg.titulo}`}
-                    className={cn(BOTAO_ICONE, BOTAO_ICONE_PERIGO)}
-                  >
-                    <Trash2 size={18} strokeWidth={1.5} aria-hidden />
-                  </button>
-                </div>
-                <label htmlFor={`msg-corpo-${msg.id}`} className="sr-only">
-                  Texto da mensagem
+          {(
+            (mensagens ?? []) as {
+              id: string;
+              titulo: string;
+              corpo: string;
+              anexos?: AnexoMensagem[] | null;
+            }[]
+          ).map((msg) => (
+            <form
+              key={`${msg.id}-${carimboVolta}`}
+              action={atualizarMensagem}
+              className="flex flex-col gap-1 rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-sm"
+            >
+              <input type="hidden" name="id" value={msg.id} />
+              <div className="flex items-center gap-1">
+                <label htmlFor={`msg-titulo-${msg.id}`} className="sr-only">
+                  Título
                 </label>
-                <textarea
-                  id={`msg-corpo-${msg.id}`}
-                  name="corpo"
-                  defaultValue={msg.corpo}
+                <input
+                  id={`msg-titulo-${msg.id}`}
+                  name="titulo"
+                  defaultValue={msg.titulo}
                   required
-                  rows={3}
-                  className="rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  className={cn(CAMPO, "flex-1 font-medium")}
                 />
-                {anexosMensagemDisponiveis ? (
-                  <AnexosMensagem
-                    idBase={msg.id}
-                    existentes={msg.anexos ?? []}
-                  />
-                ) : null}
-              </form>
-            ),
-          )}
+                <button
+                  type="submit"
+                  aria-label={`Salvar mensagem ${msg.titulo}`}
+                  className={BOTAO_ICONE}
+                >
+                  <Check size={18} strokeWidth={1.5} aria-hidden />
+                </button>
+                <button
+                  type="submit"
+                  formAction={excluirMensagem}
+                  aria-label={`Excluir mensagem ${msg.titulo}`}
+                  className={cn(BOTAO_ICONE, BOTAO_ICONE_PERIGO)}
+                >
+                  <Trash2 size={18} strokeWidth={1.5} aria-hidden />
+                </button>
+              </div>
+              <label htmlFor={`msg-corpo-${msg.id}`} className="sr-only">
+                Texto da mensagem
+              </label>
+              <textarea
+                id={`msg-corpo-${msg.id}`}
+                name="corpo"
+                defaultValue={msg.corpo}
+                required
+                rows={3}
+                className="rounded-md border border-neutral-300 bg-neutral-0 px-1.5 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+              />
+              {anexosMensagemDisponiveis ? (
+                <AnexosMensagem idBase={msg.id} existentes={msg.anexos ?? []} />
+              ) : null}
+            </form>
+          ))}
 
           <form
             key={`nova-${carimboVolta}`}
@@ -618,14 +643,16 @@ export default async function ConfiguracoesPage({
         </p>
 
         <div className="mt-2 flex flex-col gap-1">
-          {((instancias ?? []) as {
-            id: string;
-            nome: string;
-            telefone_e164: string;
-            vendedor_id: string | null;
-            ativa: boolean;
-            meta_phone_number_id: string | null;
-          }[]).map((inst) => (
+          {(
+            (instancias ?? []) as {
+              id: string;
+              nome: string;
+              telefone_e164: string;
+              vendedor_id: string | null;
+              ativa: boolean;
+              meta_phone_number_id: string | null;
+            }[]
+          ).map((inst) => (
             <div key={inst.id} className="flex flex-wrap items-center gap-1">
               <form
                 action={atualizarInstancia}
@@ -710,7 +737,10 @@ export default async function ConfiguracoesPage({
             </div>
           ))}
 
-          <form action={criarInstancia} className="flex flex-wrap items-center gap-1">
+          <form
+            action={criarInstancia}
+            className="flex flex-wrap items-center gap-1"
+          >
             <label htmlFor="nova-inst-nome" className="sr-only">
               Nome da nova instância
             </label>
@@ -790,11 +820,14 @@ export default async function ConfiguracoesPage({
         ) : (
           <div className="mt-2 flex flex-col gap-1">
             {listaEquipe.map((vendedor) => (
-              <div key={vendedor.id} className="flex flex-wrap items-center gap-1">
+              <div
+                key={vendedor.id}
+                className="flex flex-wrap items-center gap-1"
+              >
                 <span className="w-[220px] truncate text-sm text-neutral-800">
                   {vendedor.nome}
                   <span className="ml-0.5 text-xs text-neutral-400 capitalize">
-                    {vendedor.papel}
+                    {rotuloPapel(vendedor.papel)}
                   </span>
                 </span>
                 <form action={salvarMeta} className="flex items-center gap-1">
@@ -809,7 +842,10 @@ export default async function ConfiguracoesPage({
                       .toFixed(2)
                       .replace(".", ",")}
                     inputMode="decimal"
-                    className={cn(CAMPO, "w-[128px] text-right font-mono tabular-nums")}
+                    className={cn(
+                      CAMPO,
+                      "w-[128px] text-right font-mono tabular-nums",
+                    )}
                   />
                   <button
                     type="submit"
@@ -838,7 +874,10 @@ export default async function ConfiguracoesPage({
                       min={0}
                       max={500}
                       defaultValue={metaContatosPorPessoa.get(vendedor.id) ?? 0}
-                      className={cn(CAMPO, "w-[80px] text-right font-mono tabular-nums")}
+                      className={cn(
+                        CAMPO,
+                        "w-[80px] text-right font-mono tabular-nums",
+                      )}
                     />
                     <button
                       type="submit"
@@ -851,7 +890,10 @@ export default async function ConfiguracoesPage({
                 ) : null}
                 {metasTipoDisponiveis ? (
                   <>
-                    <form action={salvarMetaTipo} className="flex items-center gap-1">
+                    <form
+                      action={salvarMetaTipo}
+                      className="flex items-center gap-1"
+                    >
                       <input type="hidden" name="id" value={vendedor.id} />
                       <input type="hidden" name="campo" value="contas" />
                       <label
@@ -865,7 +907,10 @@ export default async function ConfiguracoesPage({
                         name="meta"
                         defaultValue={vendedor.meta_contas_mes ?? 0}
                         inputMode="numeric"
-                        className={cn(CAMPO, "w-[64px] text-right font-mono tabular-nums")}
+                        className={cn(
+                          CAMPO,
+                          "w-[64px] text-right font-mono tabular-nums",
+                        )}
                       />
                       <button
                         type="submit"
@@ -875,7 +920,10 @@ export default async function ConfiguracoesPage({
                         <Check size={18} strokeWidth={1.5} aria-hidden />
                       </button>
                     </form>
-                    <form action={salvarMetaTipo} className="flex items-center gap-1">
+                    <form
+                      action={salvarMetaTipo}
+                      className="flex items-center gap-1"
+                    >
                       <input type="hidden" name="id" value={vendedor.id} />
                       <input type="hidden" name="campo" value="ativacoes" />
                       <label
@@ -889,7 +937,10 @@ export default async function ConfiguracoesPage({
                         name="meta"
                         defaultValue={vendedor.meta_ativacoes_mes ?? 0}
                         inputMode="numeric"
-                        className={cn(CAMPO, "w-[64px] text-right font-mono tabular-nums")}
+                        className={cn(
+                          CAMPO,
+                          "w-[64px] text-right font-mono tabular-nums",
+                        )}
                       />
                       <button
                         type="submit"
@@ -901,8 +952,11 @@ export default async function ConfiguracoesPage({
                     </form>
                   </>
                 ) : null}
-                {whatsappDisponivel && vendedor.papel !== "vendedor" ? (
-                  <form action={salvarWhatsapp} className="flex items-center gap-1">
+                {whatsappDisponivel && ehGestao(vendedor.papel) ? (
+                  <form
+                    action={salvarWhatsapp}
+                    className="flex items-center gap-1"
+                  >
                     <input type="hidden" name="id" value={vendedor.id} />
                     <label
                       htmlFor={`whats-${vendedor.id}`}
@@ -921,7 +975,10 @@ export default async function ConfiguracoesPage({
                           ? formatarTelefone(vendedor.whatsapp_e164)
                           : ""
                       }
-                      className={cn(CAMPO, "w-[150px] font-mono text-xs tabular-nums")}
+                      className={cn(
+                        CAMPO,
+                        "w-[150px] font-mono text-xs tabular-nums",
+                      )}
                     />
                     <button
                       type="submit"
@@ -945,8 +1002,8 @@ export default async function ConfiguracoesPage({
           Cadência de follow-up
         </h2>
         <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
-          Lead que nunca respondeu recebe automaticamente o template escolhido
-          N dias depois de criado — no máximo um disparo por regra por lead.
+          Lead que nunca respondeu recebe automaticamente o template escolhido N
+          dias depois de criado — no máximo um disparo por regra por lead.
           Templates com uma variável têm a variável preenchida com o nome do
           lead.
         </p>
@@ -1046,7 +1103,10 @@ export default async function ConfiguracoesPage({
                     max={90}
                     required
                     placeholder="3"
-                    className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+                    className={cn(
+                      CAMPO,
+                      "w-[96px] text-right font-mono tabular-nums",
+                    )}
                   />
                 </div>
                 <div className="flex min-w-0 flex-col gap-0.5">
@@ -1112,7 +1172,10 @@ export default async function ConfiguracoesPage({
                 defaultValue={valorParametro.get(parametro.chave) ?? ""}
                 required
                 inputMode="numeric"
-                className={cn(CAMPO, "w-[96px] text-right font-mono tabular-nums")}
+                className={cn(
+                  CAMPO,
+                  "w-[96px] text-right font-mono tabular-nums",
+                )}
               />
               <button
                 type="submit"
@@ -1131,12 +1194,15 @@ export default async function ConfiguracoesPage({
         <div className="mt-2 max-w-[68ch] rounded-md border border-neutral-200 bg-neutral-50 px-1.5 py-1">
           {templatesWhatsapp.some((t) => t.nome === "resumo_diario") ? (
             <p className="text-sm text-neutral-800">
-              Template <span className="font-mono">resumo_diario</span>{" "}
-              aprovado na Meta — o resumo diário sai sozinho com o parâmetro
-              acima ligado e os WhatsApps preenchidos em Metas do mês.
+              Template <span className="font-mono">resumo_diario</span> aprovado
+              na Meta — o resumo diário sai sozinho com o parâmetro acima ligado
+              e os WhatsApps preenchidos em Metas do mês.
             </p>
           ) : (
-            <form action={criarTemplateResumo} className="flex flex-wrap items-center gap-1">
+            <form
+              action={criarTemplateResumo}
+              className="flex flex-wrap items-center gap-1"
+            >
               <p className="min-w-[240px] flex-1 text-sm text-neutral-600">
                 O template <span className="font-mono">resumo_diario</span>{" "}
                 ainda não está aprovado na WABA.

@@ -1,3 +1,5 @@
+import { veTudo } from "@/lib/papeis";
+import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Download, Search } from "lucide-react";
@@ -40,7 +42,9 @@ export default async function CarteiraPage({
 }: PageProps<"/carteira">) {
   const params = await searchParams;
   const perfil = await perfilAtual();
-  const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
+  // Atendente não tem carteira (nem custódia) — a matriz de acesso é essa.
+  if (perfil?.papel === "atendente") redirect("/hoje");
+  const ehGestor = veTudo(perfil?.papel);
   const filtro =
     params.f === "minha" || (!ehGestor && params.f !== "todas")
       ? "minha"
@@ -60,7 +64,8 @@ export default async function CarteiraPage({
     if (filtro === "minha" && perfil) {
       consulta = consulta.eq("responsavel_id", perfil.id);
     }
-    if (statusFiltro !== "todos") consulta = consulta.eq("status", statusFiltro);
+    if (statusFiltro !== "todos")
+      consulta = consulta.eq("status", statusFiltro);
     if (busca) {
       const digitos = busca.replace(/\D/g, "");
       consulta =
@@ -137,8 +142,12 @@ export default async function CarteiraPage({
   if (ehGestor && filtro === "todas") {
     for (const linha of resumo) {
       const nome = linha.responsavel_nome ?? "Sem dono";
-      const atual =
-        porAssessor.get(nome) ?? { total: 0, emRisco: 0, churn: 0, receita: 0 };
+      const atual = porAssessor.get(nome) ?? {
+        total: 0,
+        emRisco: 0,
+        churn: 0,
+        receita: 0,
+      };
       atual.total++;
       if (linha.status === "em_risco") atual.emRisco++;
       if (linha.status === "churn") atual.churn++;
@@ -269,7 +278,10 @@ export default async function CarteiraPage({
                     {rotulo}
                   </Link>
                 ))}
-                <span aria-hidden className="mx-0.5 self-center text-neutral-300">
+                <span
+                  aria-hidden
+                  className="mx-0.5 self-center text-neutral-300"
+                >
                   ·
                 </span>
               </>
@@ -277,7 +289,10 @@ export default async function CarteiraPage({
             {FILTROS_STATUS.map((s) => (
               <Link
                 key={s.chave}
-                href={url({ s: s.chave === "todos" ? "" : s.chave, pagina: "" })}
+                href={url({
+                  s: s.chave === "todos" ? "" : s.chave,
+                  pagina: "",
+                })}
                 aria-current={statusFiltro === s.chave ? "page" : undefined}
                 className={cn(
                   "inline-flex h-[32px] items-center rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
@@ -346,7 +361,9 @@ export default async function CarteiraPage({
                     .sort((a, b) => b[1].emRisco - a[1].emRisco)
                     .map(([nome, r]) => (
                       <tr key={nome} className="h-[40px]">
-                        <td className="px-2 text-sm text-neutral-800">{nome}</td>
+                        <td className="px-2 text-sm text-neutral-800">
+                          {nome}
+                        </td>
                         <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
                           {r.total}
                         </td>

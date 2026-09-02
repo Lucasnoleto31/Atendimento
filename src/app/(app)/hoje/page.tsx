@@ -3,6 +3,7 @@ import Link from "next/link";
 import { MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 import {
   agoraEmBrasilia,
   formatarData,
@@ -98,7 +99,7 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
   // O layout do grupo (app) já redireciona sem sessão — isto só acalma o tipo.
   if (!perfil) return null;
 
-  const ehGestor = perfil.papel === "admin" || perfil.papel === "gestor";
+  const ehGestor = veTudo(perfil.papel);
   const dePedido = typeof params.de === "string" ? params.de : "";
 
   const supabase = await createClient();
@@ -247,11 +248,7 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
           .or("primeiro_giro_recente.is.true,sem_giro_ja_conversou.is.true")
           .eq("responsavel_id", alvoId);
         if (sonecaAtivacao.length > 0) {
-          q = q.not(
-            "lead_id",
-            "in",
-            `(${sonecaAtivacao.join(",")})`,
-          );
+          q = q.not("lead_id", "in", `(${sonecaAtivacao.join(",")})`);
         }
         return q;
       };
@@ -356,10 +353,7 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
       )
       .eq("vendedor_id", alvoId)
       .eq("status", "pendente")
-      .lte(
-        "ocorreu_em",
-        new Date(agoraMs - 7 * 86_400_000).toISOString(),
-      )
+      .lte("ocorreu_em", new Date(agoraMs - 7 * 86_400_000).toISOString())
       .order("ocorreu_em", { ascending: true })
       .limit(LIMITE),
     supabase
@@ -544,10 +538,7 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
 
       {/* ── Quadro da equipe (gestor) ── */}
       {ehGestor && quadro.length > 0 ? (
-        <section
-          aria-labelledby="quadro-titulo"
-          className="mt-3 max-w-[720px]"
-        >
+        <section aria-labelledby="quadro-titulo" className="mt-3 max-w-[720px]">
           <h2
             id="quadro-titulo"
             className="text-xs font-medium tracking-[0.06em] text-neutral-600 uppercase"
@@ -660,8 +651,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
             </table>
           </div>
           <p className="mt-0.5 text-xs text-neutral-600">
-            Vermelho: tarefa vencida, conversa esperando 24h+ ou meta abaixo
-            do ritmo do expediente. Clique no nome para ver a fila da pessoa.
+            Vermelho: tarefa vencida, conversa esperando 24h+ ou meta abaixo do
+            ritmo do expediente. Clique no nome para ver a fila da pessoa.
           </p>
         </section>
       ) : null}
@@ -821,7 +812,11 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
                       className="shrink-0 text-neutral-400"
                     />
                   </ItemConversa>
-                  <BotaoSoneca tipo="conversa" alvo={l.lead_id} pessoa={alvoId} />
+                  <BotaoSoneca
+                    tipo="conversa"
+                    alvo={l.lead_id}
+                    pessoa={alvoId}
+                  />
                 </li>
               ))}
             </ul>
@@ -849,9 +844,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
           </span>
         </div>
         <p className="mt-0.5 max-w-[68ch] text-sm text-neutral-600">
-          Conta aberta, sem 1º giro — o roteiro do Profit Pro é para eles.
-          Quem nunca recebeu o roteiro vem primeiro; depois, a conta mais
-          antiga.
+          Conta aberta, sem 1º giro — o roteiro do Profit Pro é para eles. Quem
+          nunca recebeu o roteiro vem primeiro; depois, a conta mais antiga.
         </p>
 
         {erroAtivacao ? null : ativacao.length === 0 ? (
@@ -911,7 +905,11 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
                       className="shrink-0 text-neutral-400"
                     />
                   </ItemConversa>
-                  <BotaoSoneca tipo="ativacao" alvo={l.lead_id} pessoa={alvoId} />
+                  <BotaoSoneca
+                    tipo="ativacao"
+                    alvo={l.lead_id}
+                    pessoa={alvoId}
+                  />
                 </li>
               ))}
             </ul>
@@ -992,7 +990,10 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
       </section>
 
       {/* ── 5. Vendas pendentes ── */}
-      <section className="mt-3 max-w-[720px]" aria-labelledby="pendentes-titulo">
+      <section
+        className="mt-3 max-w-[720px]"
+        aria-labelledby="pendentes-titulo"
+      >
         <div className="flex flex-wrap items-baseline gap-1">
           <h2
             id="pendentes-titulo"
@@ -1019,7 +1020,9 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
               {pendentes.map((v) => (
                 <li key={v.id}>
                   <Link
-                    href={v.lead ? `/leads/${v.lead.id}?aba=vendas` : "/pagamentos"}
+                    href={
+                      v.lead ? `/leads/${v.lead.id}?aba=vendas` : "/pagamentos"
+                    }
                     className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-0 px-1.5 py-1 transition-colors duration-[120ms] hover:border-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                   >
                     <span className="min-w-0 flex-1">
@@ -1027,7 +1030,8 @@ export default async function HojePage({ searchParams }: PageProps<"/hoje">) {
                         {v.lead?.nome ?? "Lead removido"}
                       </span>
                       <span className="block font-mono text-xs text-neutral-600 tabular-nums">
-                        {v.produto?.nome ?? "produto"} · {formatarData(v.ocorreu_em)}
+                        {v.produto?.nome ?? "produto"} ·{" "}
+                        {formatarData(v.ocorreu_em)}
                       </span>
                     </span>
                     <span className="shrink-0 font-mono text-xs font-medium text-neutral-800 tabular-nums">

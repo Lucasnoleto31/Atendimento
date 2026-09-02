@@ -16,9 +16,7 @@ export const metadata: Metadata = { title: "Chat · Zeve CRM" };
  * Os componentes do app seguem em ../conversas (a Janela, que o palco
  * reusa, mora aqui em ./janela — mover seria churn sem ganho).
  */
-export default async function ChatPage({
-  searchParams,
-}: PageProps<"/chat">) {
+export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const params = await searchParams;
   const perfil = await perfilAtual();
   if (!perfil) return null; // o layout do grupo já redireciona sem sessão

@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve, perfilAtual } from "@/lib/auth";
 import { ehPassoAtivacao, PASSOS_ATIVACAO } from "@/lib/ativacao-passos";
 import {
   ehTrilha,
@@ -908,8 +908,11 @@ export async function alternarPassoAtivacao(
   passo: string,
   feito: boolean,
 ): Promise<{ ok?: true; erro?: string }> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!ehPassoAtivacao(passo)) return { erro: "Passo desconhecido." };
   const def = PASSOS_ATIVACAO.find((d) => d.passo === passo);
   if (def?.auto) {
@@ -954,8 +957,11 @@ export async function alterarTrilhaLead(
   leadId: string,
   trilha: string,
 ): Promise<{ ok?: true; erro?: string }> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!ehTrilha(trilha)) return { erro: "Trilha desconhecida." };
 
   const supabase = await createClient();

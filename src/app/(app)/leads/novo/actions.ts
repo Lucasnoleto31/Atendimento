@@ -3,11 +3,12 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve } from "@/lib/auth";
+import { ehGestao } from "@/lib/papeis";
 import { normalizarTelefone, variantesTelefone } from "@/lib/csv";
 
 export async function criarLead(formData: FormData) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil) redirect("/entrar");
 
   const nome = String(formData.get("nome") ?? "").trim();
@@ -43,9 +44,8 @@ export async function criarLead(formData: FormData) {
       .limit(1)
       .maybeSingle();
     if (existente) {
-      const dono = (
-        existente as { responsavel?: { nome?: string } | null }
-      ).responsavel?.nome;
+      const dono = (existente as { responsavel?: { nome?: string } | null })
+        .responsavel?.nome;
       redirect(
         `/leads/${existente.id}?aviso=${encodeURIComponent(
           `Esse telefone já é o lead "${existente.nome}"${
@@ -89,7 +89,9 @@ export async function criarLead(formData: FormData) {
       stage_id: etapaId,
       status: "novo",
       entrada_motivo: "manual",
-      responsavel_id: responsavelId || perfil.id,
+      responsavel_id: ehGestao(perfil.papel)
+        ? responsavelId || perfil.id
+        : perfil.id,
       observacao: observacao || null,
     })
     .select("id")

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { formatarData } from "@/lib/format";
 import { perfilAtual } from "@/lib/auth";
 import { genialConfigurada } from "@/lib/genial";
@@ -72,10 +72,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       )
       .order("criado_em", { ascending: false })
       .limit(20),
-    supabase
-      .from("pipelines")
-      .select("id, nome, padrao")
-      .order("criado_em"),
+    supabase.from("pipelines").select("id, nome, padrao").order("criado_em"),
     supabase
       .from("pipeline_stages")
       // "*": prazo_dias (0051) entra quando a migração rodar, sem quebrar antes.
@@ -226,6 +223,9 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
         <Usuarios
           usuarios={(usuarios ?? []) as UsuarioLinha[]}
           meuId={perfil.id}
+          doisFatores={await fatoresVerificados(
+            ((usuarios ?? []) as UsuarioLinha[]).map((u) => u.id),
+          )}
         />
       ) : null}
 
@@ -247,7 +247,9 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             <div className="flex items-baseline justify-between gap-2 py-1">
               <dt className="text-sm text-neutral-600">Token de verificação</dt>
               <dd>
-                <StatusEnv definido={Boolean(process.env.META_WEBHOOK_VERIFY_TOKEN)} />
+                <StatusEnv
+                  definido={Boolean(process.env.META_WEBHOOK_VERIFY_TOKEN)}
+                />
               </dd>
             </div>
             <div className="flex items-baseline justify-between gap-2 py-1">
@@ -264,9 +266,11 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               </dt>
               <dd className="font-mono text-sm text-neutral-800 tabular-nums">
                 {
-                  ((instancias ?? []) as { meta_phone_number_id: string | null }[]).filter(
-                    (i) => i.meta_phone_number_id,
-                  ).length
+                  (
+                    (instancias ?? []) as {
+                      meta_phone_number_id: string | null;
+                    }[]
+                  ).filter((i) => i.meta_phone_number_id).length
                 }
                 /{(instancias ?? []).length}
               </dd>
@@ -283,7 +287,8 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               apontando para o endpoint acima (URL pública + o token).
             </li>
             <li>
-              3. Assine o campo <code className="font-mono text-xs">messages</code>.
+              3. Assine o campo{" "}
+              <code className="font-mono text-xs">messages</code>.
             </li>
             <li>
               4. Em Configurações, preencha o phone_number_id de cada instância
@@ -305,25 +310,46 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             <table className="w-full min-w-[640px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-neutral-200 bg-neutral-50">
-                  <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                  >
                     Arquivo
                   </th>
-                  <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                  >
                     Tipo
                   </th>
-                  <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                  >
                     Status
                   </th>
-                  <th scope="col" className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                  >
                     Linhas
                   </th>
-                  <th scope="col" className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                  >
                     Referência
                   </th>
-                  <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                  >
                     Por
                   </th>
-                  <th scope="col" className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                  <th
+                    scope="col"
+                    className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                  >
                     <span className="sr-only">Ações</span>
                   </th>
                 </tr>
@@ -353,7 +379,10 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                     <td className="px-2 text-right font-mono text-sm text-neutral-800 tabular-nums">
                       {imp.linhas_ok}/{imp.total_linhas}
                       {imp.linhas_erro > 0 ? (
-                        <span className="text-warning"> · {imp.linhas_erro} erro(s)</span>
+                        <span className="text-warning">
+                          {" "}
+                          · {imp.linhas_erro} erro(s)
+                        </span>
                       ) : null}
                     </td>
                     <td className="px-2 text-right font-mono text-sm text-neutral-600 tabular-nums">
@@ -378,4 +407,31 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       </section>
     </div>
   );
+}
+
+/**
+ * Quem já tem o segundo fator verificado. listUsers não traz os fatores;
+ * é um listFactors por pessoa (equipe pequena). Falha vira "ninguém" — a
+ * tela avisa pendente, não quebra.
+ */
+async function fatoresVerificados(
+  ids: string[],
+): Promise<Record<string, boolean>> {
+  try {
+    const service = createServiceClient();
+    const pares = await Promise.all(
+      ids.map(async (id) => {
+        const { data } = await service.auth.admin.mfa.listFactors({
+          userId: id,
+        });
+        return [
+          id,
+          (data?.factors ?? []).some((f) => f.status === "verified"),
+        ] as const;
+      }),
+    );
+    return Object.fromEntries(pares);
+  } catch {
+    return {};
+  }
 }

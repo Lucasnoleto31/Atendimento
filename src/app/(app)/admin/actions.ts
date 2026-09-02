@@ -175,7 +175,9 @@ export async function importarClientes(
     );
 
     // Leads criados sem telefone herdam o telefone que a base trouxe agora.
-    const { data: preenchidos } = await service.rpc("atualizar_telefones_leads");
+    const { data: preenchidos } = await service.rpc(
+      "atualizar_telefones_leads",
+    );
     // Leads que ditaram o CPF no chat casam com a base agora (0018 — sem a
     // migração a função não existe e o erro volta no retorno, ignorado).
     await service.rpc("atualizar_documentos_leads");
@@ -405,7 +407,8 @@ export async function importarLeads(
         .from("profiles")
         .select("id")
         .eq("ativo", true)
-        .in("papel", ["vendedor", "gestor"])
+        // Mesma régua da distribuição automática (0041): quem está no rodízio.
+        .eq("recebe_leads", true)
         .order("nome");
       equipe = (data ?? []).map((p: { id: string }) => p.id);
     }
@@ -414,7 +417,8 @@ export async function importarLeads(
     // de clientes ainda não tem lead, e criar um agora seria justamente
     // "mexer" em quem a lista deveria deixar em paz.
     const eraCliente = (l: { telefone: string }) =>
-      somenteNovos && !jaExiste.has(l.telefone) &&
+      somenteNovos &&
+      !jaExiste.has(l.telefone) &&
       clientePorTelefone.has(l.telefone);
 
     const jaEramClientes = leads.filter(eraCliente).length;
@@ -434,8 +438,7 @@ export async function importarLeads(
       cliente_confirmado_em: clientePorTelefone.has(lead.telefone)
         ? agora
         : null,
-      responsavel_id:
-        equipe.length > 0 ? equipe[i % equipe.length] : null,
+      responsavel_id: equipe.length > 0 ? equipe[i % equipe.length] : null,
     }));
 
     // Insert puro, não upsert: o telefone é único por índice PARCIAL

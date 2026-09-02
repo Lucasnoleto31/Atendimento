@@ -497,7 +497,7 @@ export function AppConversas({
       setResumo(null);
       setResumindo(false);
       setCarregandoConversa(true);
-      const r = await carregarConversa(linha.leadId);
+      const r = await carregarConversa(linha.leadId, { registrarAcesso: true });
       // Dois cliques rápidos: só a resposta do ÚLTIMO clique conta — sem
       // isto, a resposta lenta do lead A sobrescrevia o lead B já aberto.
       if (pedido !== pedidoConversaRef.current) return;

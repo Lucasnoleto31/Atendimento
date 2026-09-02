@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve } from "@/lib/auth";
 import { variantesTelefone } from "@/lib/csv";
 
 export type ResultadoConversa = { leadId?: string; erro?: string };
@@ -16,8 +16,11 @@ export type ResultadoConversa = { leadId?: string; erro?: string };
 export async function abrirConversaCliente(
   customerId: string,
 ): Promise<ResultadoConversa> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!customerId) return { erro: "Cliente não informado." };
 
   const supabase = await createClient();
@@ -47,7 +50,9 @@ export async function abrirConversaCliente(
     (candidatos ?? [])
       .slice()
       .sort((a, b) =>
-        (b.ultima_interacao_em ?? "").localeCompare(a.ultima_interacao_em ?? ""),
+        (b.ultima_interacao_em ?? "").localeCompare(
+          a.ultima_interacao_em ?? "",
+        ),
       )[0] ?? null;
 
   if (existente) {
@@ -116,7 +121,7 @@ import { parsearContas } from "@/lib/clientes";
  * telefone dispara o gatilho da 0020, que adota o lead daquele número.
  */
 export async function salvarFichaCliente(formData: FormData) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil) redirect("/entrar");
 
   const customerId = String(formData.get("customer_id") ?? "");
@@ -195,12 +200,13 @@ export async function salvarFichaCliente(formData: FormData) {
 
   const mudancas: Record<string, unknown> = {
     nome_completo: nome,
-    documento: documento || null,
     email: email || null,
     conta_aberta_em: abertura || null,
     responsavel_id: responsavel || null,
     ativo,
   };
+  // O campo vem mascarado na tela: vazio é "não mexi", não "apague".
+  if (documento) mudancas.documento = documento;
   if (!telefoneIntocado) mudancas.telefone_e164 = telefone;
 
   const { error } = await service

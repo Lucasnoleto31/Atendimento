@@ -130,7 +130,12 @@ export function PaletaComandos({
     >
       <div className="w-full max-w-[480px] overflow-hidden rounded-lg border border-neutral-300 bg-neutral-0 shadow-lg">
         <label className="flex h-[48px] items-center gap-1 border-b border-neutral-200 px-1.5">
-          <Search size={16} strokeWidth={1.7} aria-hidden className="text-neutral-400" />
+          <Search
+            size={16}
+            strokeWidth={1.7}
+            aria-hidden
+            className="text-neutral-400"
+          />
           <input
             ref={inputRef}
             value={filtro}

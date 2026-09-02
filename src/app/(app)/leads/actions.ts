@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve } from "@/lib/auth";
 
 const BLOCO = 200;
 const LIMITE = 5000;
@@ -22,7 +22,7 @@ function embaralhar<T>(lista: T[]): T[] {
  * em partes iguais (diferença máxima de 1). Leads já atribuídos não mudam.
  */
 export async function distribuirLeads() {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
     redirect("/leads");
   }
@@ -36,7 +36,11 @@ export async function distribuirLeads() {
   const supabase = await createClient();
 
   const [{ data: equipe }, { data: semDono }] = await Promise.all([
-    supabase.from("profiles").select("id, nome").eq("ativo", true).order("nome"),
+    supabase
+      .from("profiles")
+      .select("id, nome")
+      .eq("ativo", true)
+      .order("nome"),
     supabase
       .from("leads")
       .select("id")
@@ -48,7 +52,8 @@ export async function distribuirLeads() {
   const leads = ((semDono ?? []) as { id: string }[]).map((l) => l.id);
 
   if (pessoas.length === 0) terminar("Nenhuma pessoa ativa na equipe.");
-  if (leads.length === 0) terminar("Nenhum lead sem responsável para distribuir.");
+  if (leads.length === 0)
+    terminar("Nenhum lead sem responsável para distribuir.");
 
   // Sorteia a ordem dos leads e o ponto de partida do rodízio.
   const sorteados = embaralhar(leads);
@@ -136,7 +141,7 @@ export async function dispararTemplateLista(
   _estado: ResultadoDisparo,
   formData: FormData,
 ): Promise<ResultadoDisparo> {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
     return { erro: "Só administração e gestão disparam em massa." };
   }
@@ -148,7 +153,8 @@ export async function dispararTemplateLista(
   const iniciadoEm =
     String(formData.get("iniciado_em") ?? "") || new Date().toISOString();
 
-  if (!LISTAS_DISPARO.has(lista)) return { erro: "Fila inválida para disparo." };
+  if (!LISTAS_DISPARO.has(lista))
+    return { erro: "Fila inválida para disparo." };
   if (!nome) return { erro: "Escolha um template." };
 
   // O canal é só a Meta: sem ela configurada, avisa em vez de estourar no

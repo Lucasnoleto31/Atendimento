@@ -62,11 +62,13 @@ export async function entrar(
       acao: "login_bloqueado",
       detalhes: { email: emailNorm, ip },
     });
-    return { erro: "Muitas tentativas. Aguarde alguns minutos e tente de novo." };
+    return {
+      erro: "Muitas tentativas. Aguarde alguns minutos e tente de novo.",
+    };
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data: sessao, error } = await supabase.auth.signInWithPassword({
     email,
     password: senha,
   });
@@ -76,7 +78,10 @@ export async function entrar(
     await service
       .from("login_tentativas")
       .insert({ email: emailNorm, ip })
-      .then(() => {}, () => {});
+      .then(
+        () => {},
+        () => {},
+      );
     return { erro: "E-mail ou senha incorretos." };
   }
 
@@ -86,15 +91,35 @@ export async function entrar(
     .from("login_tentativas")
     .delete()
     .or(`email.eq."${paraFiltro(emailNorm)}",ip.eq."${paraFiltro(ip)}"`)
-    .then(() => {}, () => {});
+    .then(
+      () => {},
+      () => {},
+    );
   await service
     .from("login_tentativas")
     .delete()
     .lt("criado_em", new Date(Date.now() - 86_400_000).toISOString())
-    .then(() => {}, () => {});
+    .then(
+      () => {},
+      () => {},
+    );
 
   revalidatePath("/", "layout");
-  redirect(proximo.startsWith("/") ? proximo : "/hoje");
+  const destino =
+    proximo.startsWith("/") && !proximo.startsWith("//") ? proximo : "/hoje";
+  // Senha certa = sessão aal1. Com 2FA obrigatório, o próximo passo é o
+  // código (ou o cadastro do fator) — redireciona DIRETO para lá: se
+  // mandasse para /hoje, o Next seguiria o 307 do middleware por dentro e
+  // a tela do código apareceria com /hoje na barra.
+  if (process.env.EXIGIR_2FA !== "0") {
+    const temFator = (sessao.user?.factors ?? []).some(
+      (f) => f.status === "verified",
+    );
+    redirect(
+      `/entrar/${temFator ? "codigo" : "2fa"}?proximo=${encodeURIComponent(destino)}`,
+    );
+  }
+  redirect(destino);
 }
 
 export async function sair() {

@@ -4,6 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { registrarAcesso } from "@/lib/auditoria";
+import { mascararDocumento } from "@/lib/documento";
 import { formatarData, formatarReais, formatarTelefone } from "@/lib/format";
 import { CAMPO } from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
@@ -31,29 +33,33 @@ export default async function ClientePage({
   const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
   const supabase = await createClient();
 
-  const [{ data: cliente }, { data: giro }, { data: contas }, { data: equipe }] =
-    await Promise.all([
-      supabase
-        .from("customers")
-        .select(
-          "id, nome_completo, telefone_e164, documento, email, conta_aberta_em, ativo, status, segmento, responsavel_id, churned_em",
-        )
-        .eq("id", id)
-        .maybeSingle(),
-      supabase
-        .from("v_carteira")
-        .select(
-          "lotes_30d, lotes_30d_anterior, ultimo_giro_em, dias_sem_giro, receita_30d_centavos, ltv_centavos, lead_id",
-        )
-        .eq("customer_id", id)
-        .maybeSingle(),
-      supabase.from("customer_accounts").select("conta").eq("customer_id", id),
-      supabase
-        .from("profiles")
-        .select("id, nome")
-        .eq("ativo", true)
-        .order("nome"),
-    ]);
+  const [
+    { data: cliente },
+    { data: giro },
+    { data: contas },
+    { data: equipe },
+  ] = await Promise.all([
+    supabase
+      .from("customers")
+      .select(
+        "id, nome_completo, telefone_e164, documento, email, conta_aberta_em, ativo, status, segmento, responsavel_id, churned_em",
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("v_carteira")
+      .select(
+        "lotes_30d, lotes_30d_anterior, ultimo_giro_em, dias_sem_giro, receita_30d_centavos, ltv_centavos, lead_id",
+      )
+      .eq("customer_id", id)
+      .maybeSingle(),
+    supabase.from("customer_accounts").select("conta").eq("customer_id", id),
+    supabase
+      .from("profiles")
+      .select("id, nome")
+      .eq("ativo", true)
+      .order("nome"),
+  ]);
 
   if (!cliente) notFound();
 
@@ -68,6 +74,11 @@ export default async function ClientePage({
     );
   }
 
+  registrarAcesso(perfil?.id ?? null, "viu_cliente", {
+    customer_id: cliente.id,
+    nome: cliente.nome_completo,
+  });
+
   const status = ROTULO_STATUS[cliente.status as string] ?? {
     texto: cliente.status,
     classe: "bg-neutral-100 text-neutral-600",
@@ -77,7 +88,8 @@ export default async function ClientePage({
     giro?.lotes_30d_anterior != null &&
     giro.lotes_30d_anterior > 0
       ? Math.round(
-          ((giro.lotes_30d - giro.lotes_30d_anterior) / giro.lotes_30d_anterior) *
+          ((giro.lotes_30d - giro.lotes_30d_anterior) /
+            giro.lotes_30d_anterior) *
             100,
         )
       : null;
@@ -190,9 +202,7 @@ export default async function ClientePage({
             Último giro
           </dt>
           <dd className="font-mono text-h2 text-neutral-800 tabular-nums">
-            {giro?.ultimo_giro_em
-              ? formatarData(giro.ultimo_giro_em)
-              : "nunca"}
+            {giro?.ultimo_giro_em ? formatarData(giro.ultimo_giro_em) : "nunca"}
           </dd>
           {giro?.dias_sem_giro != null ? (
             <dd className="text-xs text-neutral-600">
@@ -278,7 +288,12 @@ export default async function ClientePage({
                     id="documento"
                     name="documento"
                     inputMode="numeric"
-                    defaultValue={cliente.documento ?? ""}
+                    defaultValue=""
+                    placeholder={
+                      cliente.documento
+                        ? `${mascararDocumento(cliente.documento)} — preencha só para trocar`
+                        : "só números"
+                    }
                     className={cn(CAMPO, "font-mono tabular-nums")}
                   />
                 </div>

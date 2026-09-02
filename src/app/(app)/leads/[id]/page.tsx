@@ -4,6 +4,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, MessageSquare, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { registrarAcesso } from "@/lib/auditoria";
+import { mascararDocumento } from "@/lib/documento";
+import { DocumentoMascarado } from "@/components/app/documento-mascarado";
 import { Button } from "@/components/ui/button";
 import { CAMPO } from "@/components/app/form-styles";
 import { registrarVenda } from "@/app/(app)/pagamentos/actions";
@@ -20,10 +23,7 @@ import { estiloEtiqueta } from "@/lib/etiquetas";
 import { ROTULO_STATUS, type LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TarefasLead, type TarefaLead } from "@/app/(app)/chat/tarefas-lead";
-import {
-  ItemConversa,
-  PainelConversa,
-} from "@/app/(app)/hoje/painel-conversa";
+import { ItemConversa, PainelConversa } from "@/app/(app)/hoje/painel-conversa";
 
 export const metadata: Metadata = { title: "Lead · Zeve CRM" };
 
@@ -122,6 +122,11 @@ export default async function LeadPage({
 
   if (!data) notFound();
   const lead = data as unknown as LeadDetalhe;
+  // Trilha de leitura: quem abriu a ficha de quem (o compliance lê isso).
+  registrarAcesso(perfil?.id ?? null, "viu_ficha", {
+    lead_id: lead.id,
+    nome: lead.nome,
+  });
 
   const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
   // eslint-disable-next-line react-hooks/purity -- Server Component: um render por request
@@ -179,14 +184,20 @@ export default async function LeadPage({
         .order("criado_em", { ascending: false })
         .limit(40),
     ]);
-    etiquetas = ((tagsR.data ?? []) as unknown as {
-      tag: { id: string; nome: string; cor: string | null } | null;
-    }[])
+    etiquetas = (
+      (tagsR.data ?? []) as unknown as {
+        tag: { id: string; nome: string; cor: string | null } | null;
+      }[]
+    )
       .map((v) => v.tag)
       .filter((t): t is NonNullable<typeof t> => t !== null);
     tarefasDisponiveis = tarefasR.error === null;
     tarefas = (
-      (tarefasR.data ?? []) as { id: string; titulo: string; vence_em: string }[]
+      (tarefasR.data ?? []) as {
+        id: string;
+        titulo: string;
+        vence_em: string;
+      }[]
     ).map((t) => ({
       ...t,
       vencida: new Date(t.vence_em).getTime() < agoraMs,
@@ -200,7 +211,7 @@ export default async function LeadPage({
       /^Abriu conta na corretora/,
     ];
     notas = (
-      (notasR.data ?? []) as unknown as (typeof notas[number] & {
+      (notasR.data ?? []) as unknown as ((typeof notas)[number] & {
         metadados: { sistema?: boolean } | null;
       })[]
     )
@@ -290,7 +301,8 @@ export default async function LeadPage({
   };
   let giro: Giro | null = null;
   let pontos: PontoLote[] = [];
-  let porConta: { conta: string; total30d: number; totalPeriodo: number }[] = [];
+  let porConta: { conta: string; total30d: number; totalPeriodo: number }[] =
+    [];
 
   if (aba === "giro" && lead.customer_id) {
     const inicio = new Date(agoraMs);
@@ -345,7 +357,8 @@ export default async function LeadPage({
       const chave = l.conta ?? "sem conta";
       const atual = mapaContas.get(chave) ?? { total30d: 0, totalPeriodo: 0 };
       atual.totalPeriodo += Number(l.quantidade);
-      if (l.referencia_data >= inicio30Iso) atual.total30d += Number(l.quantidade);
+      if (l.referencia_data >= inicio30Iso)
+        atual.total30d += Number(l.quantidade);
       mapaContas.set(chave, atual);
     }
     porConta = [...mapaContas.entries()]
@@ -441,14 +454,21 @@ export default async function LeadPage({
             <MessageSquare size={14} strokeWidth={1.5} aria-hidden />
             Conversar
           </ItemConversa>
-          <Button href={`/leads/${lead.id}/editar`} variant="secondary" size="sm">
+          <Button
+            href={`/leads/${lead.id}/editar`}
+            variant="secondary"
+            size="sm"
+          >
             <Pencil size={14} strokeWidth={1.5} aria-hidden />
             Editar
           </Button>
         </div>
       </header>
 
-      <nav aria-label="Seções da ficha" className="mt-2 border-b border-neutral-200">
+      <nav
+        aria-label="Seções da ficha"
+        className="mt-2 border-b border-neutral-200"
+      >
         <ul className="flex flex-wrap gap-1">
           {abas.map((a) => {
             const ativa = a.chave === aba;
@@ -499,7 +519,9 @@ export default async function LeadPage({
               />
               <LinhaDado
                 rotulo="Entrada"
-                valor={ROTULO_MOTIVO[lead.entrada_motivo] ?? lead.entrada_motivo}
+                valor={
+                  ROTULO_MOTIVO[lead.entrada_motivo] ?? lead.entrada_motivo
+                }
                 detalhe={formatarData(lead.criado_em)}
               />
               <LinhaDado
@@ -509,7 +531,10 @@ export default async function LeadPage({
             </dl>
 
             {etiquetas.length > 0 ? (
-              <ul className="mt-2 flex flex-wrap gap-0.5" aria-label="Etiquetas">
+              <ul
+                className="mt-2 flex flex-wrap gap-0.5"
+                aria-label="Etiquetas"
+              >
                 {etiquetas.map((t) => (
                   <li
                     key={t.id}
@@ -643,7 +668,10 @@ export default async function LeadPage({
                   className="rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-1">
-                    <h2 id="cliente-titulo" className="text-h3 text-neutral-900">
+                    <h2
+                      id="cliente-titulo"
+                      className="text-h3 text-neutral-900"
+                    >
                       Cliente
                     </h2>
                     <span className="flex items-center gap-0.5">
@@ -680,10 +708,18 @@ export default async function LeadPage({
                     />
                     <LinhaDado
                       rotulo="CPF/CNPJ"
-                      valor={lead.customer.documento ?? "—"}
+                      valor={
+                        <DocumentoMascarado
+                          customerId={lead.customer.id}
+                          mascara={mascararDocumento(lead.customer.documento)}
+                        />
+                      }
                       mono
                     />
-                    <LinhaDado rotulo="E-mail" valor={lead.customer.email ?? "—"} />
+                    <LinhaDado
+                      rotulo="E-mail"
+                      valor={lead.customer.email ?? "—"}
+                    />
                     <LinhaDado
                       rotulo="Conta aberta em"
                       valor={formatarData(lead.customer.conta_aberta_em)}
@@ -692,7 +728,8 @@ export default async function LeadPage({
                     <LinhaDado
                       rotulo={`Conta(s) — ${lead.customer.contas.length}`}
                       valor={
-                        lead.customer.contas.map((c) => c.conta).join(" · ") || "—"
+                        lead.customer.contas.map((c) => c.conta).join(" · ") ||
+                        "—"
                       }
                       mono
                     />
@@ -782,8 +819,12 @@ export default async function LeadPage({
                             id="cliente-documento"
                             name="documento"
                             inputMode="numeric"
-                            defaultValue={lead.customer.documento ?? ""}
-                            placeholder="só números"
+                            defaultValue=""
+                            placeholder={
+                              lead.customer.documento
+                                ? `${mascararDocumento(lead.customer.documento)} — preencha só para trocar`
+                                : "só números"
+                            }
                             className={cn(CAMPO, "font-mono tabular-nums")}
                           />
                         </div>
@@ -1010,7 +1051,12 @@ export default async function LeadPage({
                 >
                   Produto vendido
                 </label>
-                <select id="product_id" name="product_id" required className={CAMPO}>
+                <select
+                  id="product_id"
+                  name="product_id"
+                  required
+                  className={CAMPO}
+                >
                   {produtos.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.nome} — {formatarReais(p.valor_comissao_centavos)}
@@ -1235,7 +1281,7 @@ function LinhaDado({
   mono = false,
 }: {
   rotulo: string;
-  valor: string;
+  valor: React.ReactNode;
   detalhe?: string;
   mono?: boolean;
 }) {

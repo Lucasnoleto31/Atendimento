@@ -22,7 +22,9 @@ async function exigirGestor() {
 
 function terminar(aviso?: string): never {
   revalidatePath("/campanhas");
-  redirect(aviso ? `/campanhas?aviso=${encodeURIComponent(aviso)}` : "/campanhas");
+  redirect(
+    aviso ? `/campanhas?aviso=${encodeURIComponent(aviso)}` : "/campanhas",
+  );
 }
 
 export async function criarCampanha(formData: FormData) {
@@ -51,7 +53,11 @@ export async function criarCampanha(formData: FormData) {
   // Valores fixos das variáveis do template, no formato param_<token>.
   const parametros: Record<string, string> = {};
   for (const [chave, valor] of formData.entries()) {
-    if (chave.startsWith("param_") && typeof valor === "string" && valor.trim()) {
+    if (
+      chave.startsWith("param_") &&
+      typeof valor === "string" &&
+      valor.trim()
+    ) {
       parametros[chave.slice("param_".length)] = valor.trim();
     }
   }
@@ -78,7 +84,8 @@ export async function alterarStatusCampanha(formData: FormData) {
   await exigirGestor();
   const id = String(formData.get("id") ?? "");
   const status = String(formData.get("status") ?? "");
-  if (!id || !["ativa", "pausada"].includes(status)) terminar("Status inválido.");
+  if (!id || !["ativa", "pausada"].includes(status))
+    terminar("Status inválido.");
 
   const supabase = await createClient();
   const { error } = await supabase

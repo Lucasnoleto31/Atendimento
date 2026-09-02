@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve } from "@/lib/auth";
 import { garantirClienteDoLead } from "@/lib/clientes";
 
 // A edição dos dados do cliente saiu daqui na Ficha 360 (6.2): a aba Cliente
@@ -11,7 +11,7 @@ import { garantirClienteDoLead } from "@/lib/clientes";
 
 /** Lead ganho sem registro na base vira cliente (com conta, se informada). */
 export async function virarCliente(formData: FormData) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil) redirect("/entrar");
 
   const leadId = String(formData.get("lead_id") ?? "");

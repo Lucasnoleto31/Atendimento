@@ -104,7 +104,9 @@ export async function excluirKanban(formData: FormData) {
     .single();
 
   if (pipeline?.padrao) {
-    terminar("O kanban padrão não pode ser excluído. Defina outro como padrão antes.");
+    terminar(
+      "O kanban padrão não pode ser excluído. Defina outro como padrão antes.",
+    );
   }
 
   const { data: stages } = await supabase
@@ -182,8 +184,13 @@ export async function definirPrazoEtapa(formData: FormData) {
   const prazo = bruto === "" ? null : Number(bruto);
 
   if (!id) return terminar("Etapa não informada.");
-  if (prazo !== null && (!Number.isInteger(prazo) || prazo < 1 || prazo > 365)) {
-    return terminar("Prazo inválido — dias inteiros de 1 a 365, ou vazio para o padrão (7).");
+  if (
+    prazo !== null &&
+    (!Number.isInteger(prazo) || prazo < 1 || prazo > 365)
+  ) {
+    return terminar(
+      "Prazo inválido — dias inteiros de 1 a 365, ou vazio para o padrão (7).",
+    );
   }
 
   const supabase = await createClient();
@@ -248,7 +255,10 @@ export async function moverEtapa(formData: FormData) {
   if (!vizinha) terminar();
 
   // Troca as ordens em três passos por causa do índice único.
-  await supabase.from("pipeline_stages").update({ ordem: -1 }).eq("id", etapa.id);
+  await supabase
+    .from("pipeline_stages")
+    .update({ ordem: -1 })
+    .eq("id", etapa.id);
   await supabase
     .from("pipeline_stages")
     .update({ ordem: etapa.ordem })
@@ -295,7 +305,10 @@ export async function excluirEtapa(formData: FormData) {
     }
   }
 
-  const { error } = await supabase.from("pipeline_stages").delete().eq("id", id);
+  const { error } = await supabase
+    .from("pipeline_stages")
+    .delete()
+    .eq("id", id);
   if (error) terminar(`Não deu para excluir: ${error.message}`);
   terminar();
 }

@@ -93,7 +93,9 @@ export async function sugerirResposta(
 
   if (!lead) return { erro: "Lead não encontrado." };
   if (!interacoes || interacoes.length === 0) {
-    return { erro: "Ainda não há conversa suficiente para sugerir uma resposta." };
+    return {
+      erro: "Ainda não há conversa suficiente para sugerir uma resposta.",
+    };
   }
 
   const contexto = [
@@ -102,7 +104,9 @@ export async function sugerirResposta(
       ? "Situação: já é cliente da corretora."
       : "Situação: ainda não é cliente.",
     lead.entrada_motivo ? `Como chegou: ${lead.entrada_motivo}` : null,
-    lead.observacao ? `Observações internas da equipe: ${lead.observacao}` : null,
+    lead.observacao
+      ? `Observações internas da equipe: ${lead.observacao}`
+      : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -224,7 +228,8 @@ export async function resumirConversa(
     if (resposta.stop_reason === "refusal") {
       return { erro: "A IA preferiu não resumir esta conversa." };
     }
-    if (truncou(resposta)) return { erro: "O resumo veio cortado — tente de novo." };
+    if (truncou(resposta))
+      return { erro: "O resumo veio cortado — tente de novo." };
     const resumo = extrairTexto(resposta);
     if (!resumo) return { erro: "A IA não devolveu texto — tente de novo." };
     return { resumo };
@@ -254,7 +259,9 @@ export async function corrigirTexto(
   const limpo = texto.trim();
   if (!limpo) return { erro: "Escreva algo antes de corrigir." };
   if (limpo.length > 4000) {
-    return { erro: "Texto longo demais para corrigir de uma vez (máx. 4000 caracteres)." };
+    return {
+      erro: "Texto longo demais para corrigir de uma vez (máx. 4000 caracteres).",
+    };
   }
 
   const ia = clienteIa();

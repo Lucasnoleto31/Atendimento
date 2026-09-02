@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { normalizarConta } from "@/lib/imports/tabular";
 import { variantesTelefone } from "@/lib/csv";
 
@@ -40,6 +40,16 @@ export async function garantirClienteDoLead(
   if ("erro" in parse) return { erro: parse.erro };
   const { contas } = parse;
 
+  // Quem chama pode ser um atendente: o lead tem que estar no alcance DELE
+  // (RLS do usuário) antes de o service role fazer qualquer coisa.
+  const usuario = await createClient();
+  const { data: visivel } = await usuario
+    .from("leads")
+    .select("id")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (!visivel) return { erro: "Lead fora do seu alcance." };
+
   const service = createServiceClient();
   const { data: lead } = await service
     .from("leads")
@@ -54,7 +64,8 @@ export async function garantirClienteDoLead(
     .select("documento")
     .eq("id", leadId)
     .maybeSingle();
-  const documentoLead = (docLinha?.documento as string | null | undefined) ?? null;
+  const documentoLead =
+    (docLinha?.documento as string | null | undefined) ?? null;
 
   let customerId = lead.customer_id as string | null;
 
@@ -103,21 +114,22 @@ export async function garantirClienteDoLead(
       })
       .select("id")
       .single();
-    if (error) return { erro: `Não deu para criar o cliente: ${error.message}` };
+    if (error)
+      return { erro: `Não deu para criar o cliente: ${error.message}` };
     customerId = novo.id as string;
   }
 
   if (contas.length > 0) {
     // ignoreDuplicates: conta que já pertence a alguém não é roubada — a
     // importação da base resolve conflito de verdade via mesclar_clientes.
-    const { error } = await service
-      .from("customer_accounts")
-      .upsert(
-        contas.map((conta) => ({ customer_id: customerId, conta })),
-        { onConflict: "conta", ignoreDuplicates: true },
-      );
+    const { error } = await service.from("customer_accounts").upsert(
+      contas.map((conta) => ({ customer_id: customerId, conta })),
+      { onConflict: "conta", ignoreDuplicates: true },
+    );
     if (error) {
-      return { erro: `Cliente criado, mas as contas não gravaram: ${error.message}` };
+      return {
+        erro: `Cliente criado, mas as contas não gravaram: ${error.message}`,
+      };
     }
   }
 

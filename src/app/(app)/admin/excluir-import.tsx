@@ -30,7 +30,10 @@ export function ExcluirImportacao({
   arquivo: string;
 }) {
   const [confirmando, setConfirmando] = useState(false);
-  const [estado, formAction] = useActionState(excluirImportacao, ESTADO_INICIAL);
+  const [estado, formAction] = useActionState(
+    excluirImportacao,
+    ESTADO_INICIAL,
+  );
   const regiao = useRef<HTMLDivElement>(null);
 
   // Fecha a confirmação ao clicar fora ou apertar Esc.

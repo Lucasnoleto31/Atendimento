@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve } from "@/lib/auth";
 import { templateBloqueadoAte } from "@/lib/perda";
 import { variantesTelefone } from "@/lib/csv";
 import { listarTemplatesMeta, metaConfigurada } from "@/lib/whatsapp";
@@ -302,8 +302,11 @@ export async function etiquetarClientesEmMassa(
   customerIds: string[],
   etiqueta: Etiqueta,
 ): Promise<ResultadoMassa> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const ids = [...new Set(customerIds.filter(Boolean))];
   if (ids.length === 0) return { erro: "Selecione pelo menos um cliente." };
@@ -337,8 +340,11 @@ export async function etiquetarPorFiltroCarteira(
   filtro: FiltroCarteira,
   etiqueta: Etiqueta,
 ): Promise<ResultadoMassa> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   // Leitura pelo cliente do USUÁRIO: v_carteira é security_invoker, então o
   // filtro enxerga exatamente o que essa pessoa enxerga na tela.
@@ -402,8 +408,11 @@ export async function dispararTemplateEmMassa(
   templateIdioma: string,
   valores: Record<string, string>,
 ): Promise<ResultadoMassa> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const ids = [...new Set(customerIds.filter(Boolean))];
   if (ids.length === 0) return { erro: "Selecione pelo menos um cliente." };
@@ -442,7 +451,9 @@ export async function dispararTemplateEmMassa(
   const service = createServiceClient();
   const padroes = await padroesDeLead(service);
 
-  const { data: clientes } = await service
+  const { data: clientes } = await (
+    await createClient()
+  )
     .from("customers")
     .select("id, nome_completo, telefone_e164, responsavel_id")
     .in("id", ids);

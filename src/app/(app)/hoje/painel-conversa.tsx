@@ -133,7 +133,9 @@ export function PainelConversa() {
     if (!pedido) return;
     let vivo = true;
     iniciar(async () => {
-      const r = await carregarConversa(pedido.leadId);
+      const r = await carregarConversa(pedido.leadId, {
+        registrarAcesso: true,
+      });
       if (!vivo) return;
       if ("erro" in r) setErro(r.erro);
       else setDados(r);

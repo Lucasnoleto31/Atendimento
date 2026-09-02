@@ -33,7 +33,11 @@ const CAMPO =
 const BOTAO_ICONE =
   "inline-flex h-[40px] w-[40px] items-center justify-center rounded-md text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-transparent";
 
-export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) {
+export function KanbanConfig({
+  pipelines,
+}: {
+  pipelines: PipelineComEtapas[];
+}) {
   return (
     <section className="mt-3" aria-labelledby="kanbans-titulo">
       <h2 id="kanbans-titulo" className="text-h3 text-neutral-900">
@@ -52,7 +56,10 @@ export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) 
             className="rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm"
           >
             <header className="flex items-center gap-1">
-              <form action={renomearKanban} className="flex flex-1 items-center gap-1">
+              <form
+                action={renomearKanban}
+                className="flex flex-1 items-center gap-1"
+              >
                 <input type="hidden" name="id" value={pipeline.id} />
                 <label htmlFor={`kanban-${pipeline.id}`} className="sr-only">
                   Nome do kanban
@@ -103,7 +110,10 @@ export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) 
                       ? "O kanban padrão não pode ser excluído"
                       : "Excluir kanban"
                   }
-                  className={cn(BOTAO_ICONE, "hover:bg-danger-bg hover:text-danger")}
+                  className={cn(
+                    BOTAO_ICONE,
+                    "hover:bg-danger-bg hover:text-danger",
+                  )}
                 >
                   <Trash2 size={18} strokeWidth={1.5} aria-hidden />
                 </button>
@@ -114,12 +124,18 @@ export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) 
               {pipeline.etapas.map((etapa, i) => (
                 // flex-wrap: em 375px os botões descem para a segunda linha em
                 // vez de esmagar o campo de nome até sumir.
-                <li key={etapa.id} className="flex flex-wrap items-center gap-1">
+                <li
+                  key={etapa.id}
+                  className="flex flex-wrap items-center gap-1"
+                >
                   <span className="w-2 shrink-0 text-right font-mono text-xs text-neutral-400 tabular-nums">
                     {etapa.ordem}
                   </span>
 
-                  <form action={renomearEtapa} className="flex min-w-[180px] flex-1 items-center gap-1">
+                  <form
+                    action={renomearEtapa}
+                    className="flex min-w-[180px] flex-1 items-center gap-1"
+                  >
                     <input type="hidden" name="id" value={etapa.id} />
                     <label htmlFor={`etapa-${etapa.id}`} className="sr-only">
                       Nome da etapa
@@ -140,7 +156,10 @@ export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) 
                     </button>
                   </form>
 
-                  <form action={definirPrazoEtapa} className="flex items-center gap-0.5">
+                  <form
+                    action={definirPrazoEtapa}
+                    className="flex items-center gap-0.5"
+                  >
                     <input type="hidden" name="id" value={etapa.id} />
                     <label
                       htmlFor={`prazo-${etapa.id}`}
@@ -228,7 +247,10 @@ export function KanbanConfig({ pipelines }: { pipelines: PipelineComEtapas[] }) 
                             ? "O kanban precisa de pelo menos uma etapa"
                             : "Excluir etapa"
                       }
-                      className={cn(BOTAO_ICONE, "hover:bg-danger-bg hover:text-danger")}
+                      className={cn(
+                        BOTAO_ICONE,
+                        "hover:bg-danger-bg hover:text-danger",
+                      )}
                     >
                       <Trash2 size={18} strokeWidth={1.5} aria-hidden />
                     </button>

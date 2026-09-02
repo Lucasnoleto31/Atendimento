@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Ban } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 import { formatarData, formatarReais } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { buscarTudo } from "@/lib/supabase/paginar";
@@ -35,7 +36,9 @@ type Venda = {
 };
 
 /** A janela anterior de mesmo tamanho, para o "vs período anterior". */
-function janelaAnterior(chave: ChavePeriodo): { de: string; ate: string } | null {
+function janelaAnterior(
+  chave: ChavePeriodo,
+): { de: string; ate: string } | null {
   const inicio = inicioDoPeriodo(chave);
   if (!inicio) return null; // "tudo" não tem anterior
   const de = new Date(inicio);
@@ -93,7 +96,7 @@ export default async function PagamentosPage({
   const fBusca = typeof params.q === "string" ? params.q.trim() : "";
 
   const perfil = await perfilAtual();
-  const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
+  const ehGestor = veTudo(perfil?.papel);
 
   const supabase = await createClient();
   const inicio = inicioDoPeriodo(periodo);
@@ -112,7 +115,9 @@ export default async function PagamentosPage({
     return q;
   };
 
-  const relacaoLead = fBusca ? "lead:leads!inner(id, nome)" : "lead:leads(id, nome)";
+  const relacaoLead = fBusca
+    ? "lead:leads!inner(id, nome)"
+    : "lead:leads(id, nome)";
   // Sem a 0052 a coluna prevista_em não existe: tenta com ela e cai sem.
   const selecionar = (comPrevista: boolean) =>
     `id, valor_comissao_centavos, status, ocorreu_em, observacao,${
@@ -215,7 +220,9 @@ export default async function PagamentosPage({
   const equipePromise = (async () => {
     const r = await supabase
       .from("profiles")
-      .select("id, nome, meta_mensal_centavos, meta_contas_mes, meta_ativacoes_mes")
+      .select(
+        "id, nome, meta_mensal_centavos, meta_contas_mes, meta_ativacoes_mes",
+      )
       .eq("ativo", true)
       .order("nome");
     if (r.error?.code === "42703") {
@@ -312,7 +319,9 @@ export default async function PagamentosPage({
     ? new Date(inicio)
     : new Date(fimSerie.getTime() - 90 * DIA_MS);
   const chaveDia = (d: Date) =>
-    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(d);
+    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(
+      d,
+    );
   const porDia = new Map<string, number>();
   for (const v of confirmadas) {
     const quando = new Date(v.ocorreu_em);
@@ -337,7 +346,7 @@ export default async function PagamentosPage({
     ocorreu_em: string;
     vendedor: { id: string; nome: string } | null;
   };
-  const pendentes = ((pendentesBrutos ?? []) as unknown as Pendente[]);
+  const pendentes = (pendentesBrutos ?? []) as unknown as Pendente[];
   const pendentesTotal = pendentes.reduce(
     (s, v) => s + v.valor_comissao_centavos,
     0,
@@ -349,7 +358,10 @@ export default async function PagamentosPage({
   ).length;
   // "Conversão" honesta possível sem histórico de status: confirmadas do
   // período vs pendentes em aberto, por vendedor.
-  const porVendedorPend = new Map<string, { nome: string; pendentes: number }>();
+  const porVendedorPend = new Map<
+    string,
+    { nome: string; pendentes: number }
+  >();
   for (const v of pendentes) {
     const chave = v.vendedor?.id ?? "-";
     const atual = porVendedorPend.get(chave) ?? {
@@ -436,7 +448,11 @@ export default async function PagamentosPage({
             : ("abaixo" as const);
     const falta = Math.max(meta - realizado, 0);
     const ritmoDia =
-      meta <= 0 ? 0 : uteisRestantes > 0 ? Math.ceil(falta / uteisRestantes) : falta;
+      meta <= 0
+        ? 0
+        : uteisRestantes > 0
+          ? Math.ceil(falta / uteisRestantes)
+          : falta;
     return { proj, estado, ritmoDia };
   };
 
@@ -477,8 +493,8 @@ export default async function PagamentosPage({
       <header className="border-b border-neutral-200 pb-2">
         <h1 className="text-h1 text-neutral-900">Pagamentos</h1>
         <p className="mt-1 max-w-[68ch] text-base text-neutral-600">
-          As últimas operações de venda da equipe. A venda é registrada na
-          ficha do lead, com a comissão do dia.
+          As últimas operações de venda da equipe. A venda é registrada na ficha
+          do lead, com a comissão do dia.
         </p>
       </header>
 
@@ -498,7 +514,11 @@ export default async function PagamentosPage({
             return (
               <li key={p.chave}>
                 <Link
-                  href={p.chave === "mes" ? "/pagamentos" : `/pagamentos?periodo=${p.chave}`}
+                  href={
+                    p.chave === "mes"
+                      ? "/pagamentos"
+                      : `/pagamentos?periodo=${p.chave}`
+                  }
                   aria-current={ativo ? "page" : undefined}
                   className={cn(
                     "inline-flex h-[32px] items-center rounded-md px-1.5 text-sm transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
@@ -516,7 +536,11 @@ export default async function PagamentosPage({
       </nav>
 
       {/* Filtros combináveis com o período (5.1) */}
-      <form action="/pagamentos" method="get" className="mt-2 flex flex-wrap items-center gap-1">
+      <form
+        action="/pagamentos"
+        method="get"
+        className="mt-2 flex flex-wrap items-center gap-1"
+      >
         {periodo !== "mes" ? (
           <input type="hidden" name="periodo" value={periodo} />
         ) : null}
@@ -540,11 +564,13 @@ export default async function PagamentosPage({
           className="h-[40px] max-w-[190px] rounded-md border border-neutral-300 bg-neutral-0 px-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
         >
           <option value="">Todo produto</option>
-          {((produtosLista ?? []) as { id: string; nome: string }[]).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.nome}
-            </option>
-          ))}
+          {((produtosLista ?? []) as { id: string; nome: string }[]).map(
+            (p) => (
+              <option key={p.id} value={p.id}>
+                {p.nome}
+              </option>
+            ),
+          )}
         </select>
         <select
           name="st"
@@ -761,7 +787,11 @@ export default async function PagamentosPage({
             <span className="font-mono tabular-nums">
               {uteisAteHoje}/{uteisTotal}
             </span>{" "}
-            já correram{resumo ? "" : " — rode a migração 0053 para ver contas e ativações"}.
+            já correram
+            {resumo
+              ? ""
+              : " — rode a migração 0053 para ver contas e ativações"}
+            .
           </p>
           <ul className="mt-2 flex flex-col gap-2">
             {metas.map((v) => {
@@ -936,22 +966,40 @@ export default async function PagamentosPage({
               <table className="w-full min-w-[760px] border-collapse text-left">
                 <thead>
                   <tr className="border-b border-neutral-200 bg-neutral-50">
-                    <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    <th
+                      scope="col"
+                      className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
                       Data
                     </th>
-                    <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    <th
+                      scope="col"
+                      className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
                       Lead
                     </th>
-                    <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    <th
+                      scope="col"
+                      className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
                       Produto
                     </th>
-                    <th scope="col" className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    <th
+                      scope="col"
+                      className="px-2 py-1 text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
                       Vendedor
                     </th>
-                    <th scope="col" className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    <th
+                      scope="col"
+                      className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
                       Comissão
                     </th>
-                    <th scope="col" className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase">
+                    <th
+                      scope="col"
+                      className="px-2 py-1 text-right text-xs tracking-[0.06em] text-neutral-600 uppercase"
+                    >
                       <span className="sr-only">Ações</span>
                     </th>
                   </tr>
@@ -960,9 +1008,13 @@ export default async function PagamentosPage({
                   {linhas.map((venda) => {
                     const cancelada = venda.status === "cancelada";
                     const podeCancelar =
-                      !cancelada && (ehGestor || venda.vendedor?.id === perfil?.id);
+                      !cancelada &&
+                      (ehGestor || venda.vendedor?.id === perfil?.id);
                     return (
-                      <tr key={venda.id} className="h-[48px] hover:bg-neutral-50">
+                      <tr
+                        key={venda.id}
+                        className="h-[48px] hover:bg-neutral-50"
+                      >
                         <td className="px-2 font-mono text-sm text-neutral-600 tabular-nums">
                           {formatarData(venda.ocorreu_em)}
                         </td>
@@ -1040,7 +1092,10 @@ export default async function PagamentosPage({
                               cancelada
                             </span>
                           ) : podeCancelar ? (
-                            <form action={cancelarVenda} className="inline-flex">
+                            <form
+                              action={cancelarVenda}
+                              className="inline-flex"
+                            >
                               <input type="hidden" name="id" value={venda.id} />
                               <button
                                 type="submit"
@@ -1138,7 +1193,6 @@ function PaginaLink({
   );
 }
 
-
 /**
  * Comissão por dia em SVG desenhado à mão: sem biblioteca, cores por token
  * (currentColor herda o tema claro/escuro). Área suave + linha + pontos de
@@ -1186,11 +1240,7 @@ function GraficoLinha({ serie }: { serie: { dia: string; total: number }[] }) {
           strokeWidth="1"
           opacity=".2"
         />
-        <polygon
-          points={area}
-          fill="var(--color-primary-500)"
-          opacity=".12"
-        />
+        <polygon points={area} fill="var(--color-primary-500)" opacity=".12" />
         <polyline
           points={pontos.join(" ")}
           fill="none"
@@ -1208,10 +1258,7 @@ function GraficoLinha({ serie }: { serie: { dia: string; total: number }[] }) {
               fill="var(--color-primary-500)"
             />
             <text
-              x={Math.min(
-                Math.max(margem.esq + iPico * passo, 40),
-                L - 60,
-              )}
+              x={Math.min(Math.max(margem.esq + iPico * passo, 40), L - 60)}
               y={Math.max(y(serie[iPico].total) - 8, 10)}
               textAnchor="middle"
               fontSize="11"

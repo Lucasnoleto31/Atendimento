@@ -53,3 +53,17 @@ npm run dev
 
 Crie um bucket **privado** chamado `importacoes` em **Storage > New bucket**. É
 onde ficam os arquivos de clientes e de lotes enviados todo dia.
+
+
+## Segundo fator (2FA)
+
+Obrigatório para todos os papéis desde a migração 0067. Precisa do **MFA TOTP
+ligado no painel do Supabase** (Authentication → Multi-factor → TOTP).
+
+Interruptor de emergência (alguém da administração sem app autenticador):
+
+1. `update settings set valor = '"0"' where chave = 'exigir_2fa';` — solta o banco
+   na hora (as policies restritivas `exige_segundo_fator` leem esse valor);
+2. `EXIGIR_2FA=0` na Vercel **e redeploy** — solta o middleware.
+
+Para voltar: `'"1"'` no settings e remova a env (ou `EXIGIR_2FA=1`).

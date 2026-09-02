@@ -3,19 +3,14 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve } from "@/lib/auth";
 import { normalizarTelefone } from "@/lib/csv";
 import { ehMotivoPerda } from "@/lib/perda";
 
-const STATUS_VALIDOS = new Set([
-  "novo",
-  "em_atendimento",
-  "ganho",
-  "perdido",
-]);
+const STATUS_VALIDOS = new Set(["novo", "em_atendimento", "ganho", "perdido"]);
 
 export async function atualizarLead(formData: FormData) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil) redirect("/entrar");
 
   const id = String(formData.get("id") ?? "");

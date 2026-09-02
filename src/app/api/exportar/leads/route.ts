@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 import { COLUNA_LISTA } from "@/lib/listas-leads";
 
 /**
@@ -17,7 +18,9 @@ import { COLUNA_LISTA } from "@/lib/listas-leads";
 
 function celula(valor: unknown): string {
   const texto = valor === null || valor === undefined ? "" : String(valor);
-  return `"${texto.replaceAll('"', '""')}"`;
+  // Nome vindo do WhatsApp pode começar com "=": no Excel viraria fórmula.
+  const seguro = /^[=+\-@\t\r]/.test(texto) ? `'${texto}` : texto;
+  return `"${seguro.replaceAll('"', '""')}"`;
 }
 
 const CABECALHO = [
@@ -55,7 +58,7 @@ export async function GET(request: NextRequest) {
   if (!perfil) return new Response("Forbidden", { status: 403 });
   // A base com telefones é O ativo da mesa: exportação completa é coisa de
   // gestão, e toda exportação deixa rastro de quem levou o quê.
-  if (perfil.papel !== "admin" && perfil.papel !== "gestor") {
+  if (!veTudo(perfil.papel)) {
     return new Response(
       "Exportação da base é restrita à gestão. Peça a um gestor.",
       { status: 403 },

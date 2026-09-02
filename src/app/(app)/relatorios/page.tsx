@@ -1,13 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { agoraEmBrasilia, formatarData, formatarReais } from "@/lib/format";
-import {
-  MOTIVOS_PERDA,
-  corteDiasAtras,
-  type MotivoPerda,
-} from "@/lib/perda";
+import { MOTIVOS_PERDA, corteDiasAtras, type MotivoPerda } from "@/lib/perda";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Relatórios · Zeve CRM" };
@@ -76,6 +75,11 @@ export default async function RelatoriosPage({
   const escolhido = PERIODOS.find((p) => String(p.dias) === params.periodo);
   const periodo = escolhido ?? PERIODOS[3]; // padrão: tudo
   const corte = periodo.dias !== null ? corteDiasAtras(periodo.dias) : null;
+
+  // Relatórios são da mesa inteira: quem vê a base inteira (gestão e
+  // compliance). Assessor e atendente têm o próprio recorte em Pagamentos.
+  const perfil = await perfilAtual();
+  if (!perfil || !veTudo(perfil.papel)) redirect("/hoje");
 
   const supabase = await createClient();
 
@@ -530,8 +534,8 @@ export default async function RelatoriosPage({
           role="alert"
           className="mt-3 max-w-[68ch] rounded-md border border-warning bg-warning-bg px-1.5 py-1 text-sm text-warning"
         >
-          Rode as migrações 0022 e 0031 no SQL Editor do Supabase — são elas
-          que calculam este relatório.
+          Rode as migrações 0022 e 0031 no SQL Editor do Supabase — são elas que
+          calculam este relatório.
         </p>
       ) : (
         <>
@@ -548,8 +552,8 @@ export default async function RelatoriosPage({
                 role="alert"
                 className="mt-1 max-w-[68ch] rounded-md bg-warning-bg px-1.5 py-1 text-sm text-warning"
               >
-                Nenhum lote importado ainda — os números de giro aparecem
-                depois da primeira importação em Administração.
+                Nenhum lote importado ainda — os números de giro aparecem depois
+                da primeira importação em Administração.
               </p>
             ) : importeVelhoDias !== null && importeVelhoDias > 1 ? (
               <p
@@ -661,8 +665,8 @@ export default async function RelatoriosPage({
                   : `${numero(nuncaGiraram)} contas abertas que nunca giraram`}
               </h2>
               <p className="mt-1 max-w-[68ch] text-sm text-accent-700">
-                Cliente com conta na Genial que nunca operou não gera nada — é
-                a maior receita não realizada da mesa. O roteiro de ativação
+                Cliente com conta na Genial que nunca operou não gera nada — é a
+                maior receita não realizada da mesa. O roteiro de ativação
                 (Profit Pro → 1ª operação → print) existe para esta fila.
               </p>
               <div className="mt-2 flex flex-wrap gap-1">

@@ -46,9 +46,7 @@ export function validarCnpj(cnpj: string): boolean {
     const resto = soma % 11;
     return resto < 2 ? 0 : 11 - resto;
   };
-  return (
-    calcular(12) === Number(cnpj[12]) && calcular(13) === Number(cnpj[13])
-  );
+  return calcular(12) === Number(cnpj[12]) && calcular(13) === Number(cnpj[13]);
 }
 
 /**
@@ -72,4 +70,26 @@ export function extrairDocumento(
     if (digitos.length === 14 && validarCnpj(digitos)) return digitos;
   }
   return null;
+}
+
+/** 01234567890 → 012.345.678-90 · 12345678000199 → 12.345.678/0001-99 */
+export function formatarDocumento(doc: string | null | undefined): string {
+  const d = (doc ?? "").replace(/\D/g, "");
+  if (d.length === 11)
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  if (d.length === 14)
+    return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+  return d || "—";
+}
+
+/**
+ * O que a tela mostra por padrão: os dígitos do meio, para a pessoa
+ * conferir que é o cliente certo, sem entregar o documento inteiro.
+ * CPF → •••.345.678-•• · CNPJ → ••.345.678/••••-••
+ */
+export function mascararDocumento(doc: string | null | undefined): string {
+  const d = (doc ?? "").replace(/\D/g, "");
+  if (d.length === 11) return `•••.${d.slice(3, 6)}.${d.slice(6, 9)}-••`;
+  if (d.length === 14) return `••.${d.slice(2, 5)}.${d.slice(5, 8)}/••••-••`;
+  return d ? "•".repeat(Math.min(d.length, 14)) : "—";
 }

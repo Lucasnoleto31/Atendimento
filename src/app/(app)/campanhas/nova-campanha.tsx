@@ -42,9 +42,7 @@ export function NovaCampanha({
   const [valores, setValores] = useState<Record<string, string>>({});
   const id = useId();
 
-  const template = templates.find(
-    (t) => `${t.nome}|${t.idioma}` === escolhido,
-  );
+  const template = templates.find((t) => `${t.nome}|${t.idioma}` === escolhido);
 
   const preencher = (token: string) =>
     valores[token] ?? (template?.parametros.length === 1 ? "{nome}" : "");
@@ -62,8 +60,8 @@ export function NovaCampanha({
     >
       <h2 className="text-h3 text-neutral-900">Nova campanha</h2>
       <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
-        O público é uma etiqueta. A campanha manda o template no ritmo que
-        você definir e para sozinha quando a lista acabar.
+        O público é uma etiqueta. A campanha manda o template no ritmo que você
+        definir e para sozinha quando a lista acabar.
       </p>
 
       <div className="mt-2 grid gap-2 md:grid-cols-2">
@@ -122,7 +120,10 @@ export function NovaCampanha({
               Escolha o template…
             </option>
             {templates.map((t) => (
-              <option key={`${t.nome}|${t.idioma}`} value={`${t.nome}|${t.idioma}`}>
+              <option
+                key={`${t.nome}|${t.idioma}`}
+                value={`${t.nome}|${t.idioma}`}
+              >
                 {t.nome} · {t.idioma} · {t.categoria.toLowerCase()}
               </option>
             ))}

@@ -54,7 +54,9 @@ export function AnexosMensagem({
         return;
       }
       if (arquivo.type.startsWith("image/") && arquivo.size > MAX_IMAGEM) {
-        setErro(`"${arquivo.name}" passa de 5MB — o WhatsApp limita imagem a 5MB.`);
+        setErro(
+          `"${arquivo.name}" passa de 5MB — o WhatsApp limita imagem a 5MB.`,
+        );
         return;
       }
     }

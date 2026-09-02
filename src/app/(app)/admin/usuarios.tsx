@@ -5,11 +5,13 @@ import { useFormStatus } from "react-dom";
 import { KeyRound, Plus, UserCheck, UserX } from "lucide-react";
 import { CAMPO, BOTAO_ICONE } from "@/components/app/form-styles";
 import { cn } from "@/lib/utils";
+import { PAPEIS, type Papel } from "@/lib/papeis";
 import {
   alternarRecebeLeads,
   alternarUsuarioAtivo,
   criarUsuario,
   mudarPapel,
+  resetar2fa,
   resetarSenha,
   type ResultadoUsuario,
 } from "./usuarios-actions";
@@ -20,7 +22,7 @@ export type UsuarioLinha = {
   id: string;
   nome: string;
   email: string;
-  papel: "admin" | "gestor" | "vendedor";
+  papel: Papel;
   ativo: boolean;
   recebe_leads?: boolean | null;
 };
@@ -87,9 +89,12 @@ function ResetSenha({ usuario }: { usuario: UsuarioLinha }) {
 export function Usuarios({
   usuarios,
   meuId,
+  doisFatores = {},
 }: {
   usuarios: UsuarioLinha[];
   meuId: string;
+  /** id → tem segundo fator verificado (vem do admin API, fora do RLS). */
+  doisFatores?: Record<string, boolean>;
 }) {
   const [estadoCriar, acaoCriar] = useActionState(criarUsuario, ESTADO);
 
@@ -99,8 +104,8 @@ export function Usuarios({
         Usuários
       </h2>
       <p className="mt-1 max-w-[68ch] text-sm text-neutral-600">
-        Quem cria conta é a administração — não existe cadastro público. A
-        senha temporária aparece uma única vez.
+        Quem cria conta é a administração — não existe cadastro público. A senha
+        temporária aparece uma única vez.
       </p>
 
       <div className="mt-2 flex flex-col gap-1">
@@ -110,13 +115,25 @@ export function Usuarios({
               <span className="block truncate text-sm font-medium text-neutral-800">
                 {usuario.nome}
                 {usuario.id === meuId ? (
-                  <span className="ml-0.5 text-xs text-neutral-400">(você)</span>
+                  <span className="ml-0.5 text-xs text-neutral-400">
+                    (você)
+                  </span>
                 ) : null}
               </span>
               <span className="block truncate text-xs text-neutral-600">
                 {usuario.email}
               </span>
             </span>
+
+            {doisFatores[usuario.id] ? (
+              <span className="inline-flex h-[20px] items-center rounded-sm bg-success-bg px-1 text-xs font-medium text-success">
+                2FA ativo
+              </span>
+            ) : (
+              <span className="inline-flex h-[20px] items-center rounded-sm bg-warning-bg px-1 text-xs font-medium text-warning">
+                2FA pendente
+              </span>
+            )}
 
             <form action={mudarPapel} className="flex items-center gap-1">
               <input type="hidden" name="id" value={usuario.id} />
@@ -128,11 +145,13 @@ export function Usuarios({
                 name="papel"
                 defaultValue={usuario.papel}
                 disabled={usuario.id === meuId}
-                className={cn(CAMPO, "w-[120px]")}
+                className={cn(CAMPO, "w-[176px]")}
               >
-                <option value="admin">Admin</option>
-                <option value="gestor">Gestor</option>
-                <option value="vendedor">Vendedor</option>
+                {PAPEIS.map((p) => (
+                  <option key={p.papel} value={p.papel}>
+                    {p.rotulo}
+                  </option>
+                ))}
               </select>
               {usuario.id !== meuId ? (
                 <button
@@ -195,6 +214,18 @@ export function Usuarios({
             </form>
 
             <ResetSenha usuario={usuario} />
+            {doisFatores[usuario.id] && usuario.id !== meuId ? (
+              <form action={resetar2fa}>
+                <input type="hidden" name="id" value={usuario.id} />
+                <button
+                  type="submit"
+                  title="Apaga o segundo fator — a pessoa cadastra de novo no próximo login"
+                  className="inline-flex h-[32px] items-center rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-xs font-medium text-neutral-800 transition-colors duration-[120ms] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                >
+                  Resetar 2FA
+                </button>
+              </form>
+            ) : null}
           </div>
         ))}
       </div>
@@ -231,11 +262,13 @@ export function Usuarios({
           id="novo-usuario-papel"
           name="papel"
           defaultValue="vendedor"
-          className={cn(CAMPO, "w-[120px]")}
+          className={cn(CAMPO, "w-[176px]")}
         >
-          <option value="vendedor">Vendedor</option>
-          <option value="gestor">Gestor</option>
-          <option value="admin">Admin</option>
+          {PAPEIS.map((p) => (
+            <option key={p.papel} value={p.papel}>
+              {p.rotulo}
+            </option>
+          ))}
         </select>
         <BotaoCriar />
         <div className="w-full">

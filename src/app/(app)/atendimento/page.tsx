@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 import { KanbanBoard, type Coluna } from "@/components/app/kanban/board";
 import type { LeadCard, Stage } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -89,7 +90,7 @@ export default async function AtendimentoPage({
   const params = await searchParams;
   const perfil = await perfilAtual();
   const soMeus = params.meus === "1" && perfil !== null;
-  const ehGestor = perfil?.papel === "admin" || perfil?.papel === "gestor";
+  const ehGestor = veTudo(perfil?.papel);
   const limites = limitesDaUrl(
     typeof params.mais === "string" ? params.mais : undefined,
   );
@@ -202,111 +203,112 @@ export default async function AtendimentoPage({
 
   const listaStages = (stages ?? []) as Stage[];
 
-  const [colunas, { count: totalClientes }, { count: totalSemResposta }, semDonoLinhas, aguardando24Linhas] =
-    await Promise.all([
-      Promise.all(
-        listaStages.map(async (stage): Promise<Coluna> => {
-          const limite = limites.get(stage.id) ?? POR_COLUNA;
-          const prazo = stage.prazo_dias ?? PRAZO_PADRAO_DIAS;
-          const idsNaoLidos = (naoLidasPorStage.get(stage.id) ?? []).slice(
-            0,
-            limite,
+  const [
+    colunas,
+    { count: totalClientes },
+    { count: totalSemResposta },
+    semDonoLinhas,
+    aguardando24Linhas,
+  ] = await Promise.all([
+    Promise.all(
+      listaStages.map(async (stage): Promise<Coluna> => {
+        const limite = limites.get(stage.id) ?? POR_COLUNA;
+        const prazo = stage.prazo_dias ?? PRAZO_PADRAO_DIAS;
+        const idsNaoLidos = (naoLidasPorStage.get(stage.id) ?? []).slice(
+          0,
+          limite,
+        );
+
+        // Fatia 1: as não lidas da coluna, pela ordem de quem espera há
+        // mais tempo na etapa. Fatia 2: completa com os parados há mais
+        // tempo. Urgência = não lida > parado > recente.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
+        const consultaNaoLidas: any =
+          idsNaoLidos.length > 0
+            ? supabase
+                .from("leads")
+                .select(CAMPOS)
+                .in("id", idsNaoLidos)
+                .order("entrou_na_etapa_em", { ascending: true })
+            : Promise.resolve({ data: [] });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
+        let consultaResto: any = supabase
+          .from("leads")
+          .select(CAMPOS, { count: "exact" })
+          .eq("stage_id", stage.id)
+          .order("entrou_na_etapa_em", { ascending: true })
+          .limit(limite);
+        if (idsNaoLidos.length > 0) {
+          consultaResto = consultaResto.not(
+            "id",
+            "in",
+            `(${idsNaoLidos.join(",")})`,
           );
+        }
+        if (escopoPessoa) {
+          consultaResto = consultaResto.eq("responsavel_id", escopoPessoa);
+        }
 
-          // Fatia 1: as não lidas da coluna, pela ordem de quem espera há
-          // mais tempo na etapa. Fatia 2: completa com os parados há mais
-          // tempo. Urgência = não lida > parado > recente.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
-          const consultaNaoLidas: any =
-            idsNaoLidos.length > 0
-              ? supabase
-                  .from("leads")
-                  .select(CAMPOS)
-                  .in("id", idsNaoLidos)
-                  .order("entrou_na_etapa_em", { ascending: true })
-              : Promise.resolve({ data: [] });
+        // Vermelhos da coluna inteira (não só dos visíveis): estourou o
+        // DOBRO do prazo da etapa.
+        const corteVermelho = new Date(
+          agoraMs - prazo * 2 * 86_400_000,
+        ).toISOString();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
+        let consultaVermelhos: any = supabase
+          .from("leads")
+          .select("id", { count: "exact", head: true })
+          .eq("stage_id", stage.id)
+          .lte("entrou_na_etapa_em", corteVermelho);
+        if (escopoPessoa) {
+          consultaVermelhos = consultaVermelhos.eq(
+            "responsavel_id",
+            escopoPessoa,
+          );
+        }
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
-          let consultaResto: any = supabase
-            .from("leads")
-            .select(CAMPOS, { count: "exact" })
-            .eq("stage_id", stage.id)
-            .order("entrou_na_etapa_em", { ascending: true })
-            .limit(limite);
-          if (idsNaoLidos.length > 0) {
-            consultaResto = consultaResto.not(
-              "id",
-              "in",
-              `(${idsNaoLidos.join(",")})`,
-            );
-          }
-          if (escopoPessoa) {
-            consultaResto = consultaResto.eq("responsavel_id", escopoPessoa);
-          }
+        const [
+          { data: dataNaoLidas },
+          { data: dataResto, count, error },
+          { count: vermelhos },
+        ] = await Promise.all([
+          consultaNaoLidas,
+          consultaResto,
+          consultaVermelhos,
+        ]);
 
-          // Vermelhos da coluna inteira (não só dos visíveis): estourou o
-          // DOBRO do prazo da etapa.
-          const corteVermelho = new Date(
-            agoraMs - prazo * 2 * 86_400_000,
-          ).toISOString();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- idem
-          let consultaVermelhos: any = supabase
-            .from("leads")
-            .select("id", { count: "exact", head: true })
-            .eq("stage_id", stage.id)
-            .lte("entrou_na_etapa_em", corteVermelho);
-          if (escopoPessoa) {
-            consultaVermelhos = consultaVermelhos.eq(
-              "responsavel_id",
-              escopoPessoa,
-            );
-          }
+        const linhas = [
+          ...((dataNaoLidas ?? []) as unknown as LinhaLead[]),
+          ...((dataResto ?? []) as unknown as LinhaLead[]),
+        ].slice(0, limite);
 
-          const [
-            { data: dataNaoLidas },
-            { data: dataResto, count, error },
-            { count: vermelhos },
-          ] = await Promise.all([
-            consultaNaoLidas,
-            consultaResto,
-            consultaVermelhos,
-          ]);
-
-          const linhas = [
-            ...((dataNaoLidas ?? []) as unknown as LinhaLead[]),
-            ...((dataResto ?? []) as unknown as LinhaLead[]),
-          ].slice(0, limite);
-
-          return {
-            stage,
-            total: error
-              ? 0
-              : (count ?? 0) + idsNaoLidos.length,
-            vermelhos: vermelhos ?? 0,
-            limite,
-            leads: linhas.map((l) =>
-              paraCard(l, agoraMs, prazo, naoLidasIds),
-            ),
-          };
-        }),
-      ),
-      contarBase((q) => q.not("customer_id", "is", null)),
-      contarBase((q) => q.is("primeira_resposta_em", null)),
-      // Raio-x: sem dono por etapa, numa varredura pequena (só os sem dono).
-      supabase
-        .from("leads")
-        .select("stage_id")
-        .is("responsavel_id", null)
-        .not("stage_id", "is", null)
-        .limit(1000),
-      // Aguardando 24h+ por etapa (definição canônica da view).
-      supabase
-        .from("v_leads_listas")
-        .select("lead_id, etapa_nome, horas_esperando")
-        .eq("aguardando_resposta", true)
-        .gte("horas_esperando", 24)
-        .limit(1000),
-    ]);
+        return {
+          stage,
+          total: error ? 0 : (count ?? 0) + idsNaoLidos.length,
+          vermelhos: vermelhos ?? 0,
+          limite,
+          leads: linhas.map((l) => paraCard(l, agoraMs, prazo, naoLidasIds)),
+        };
+      }),
+    ),
+    contarBase((q) => q.not("customer_id", "is", null)),
+    contarBase((q) => q.is("primeira_resposta_em", null)),
+    // Raio-x: sem dono por etapa, numa varredura pequena (só os sem dono).
+    supabase
+      .from("leads")
+      .select("stage_id")
+      .is("responsavel_id", null)
+      .not("stage_id", "is", null)
+      .limit(1000),
+    // Aguardando 24h+ por etapa (definição canônica da view).
+    supabase
+      .from("v_leads_listas")
+      .select("lead_id, etapa_nome, horas_esperando")
+      .eq("aguardando_resposta", true)
+      .gte("horas_esperando", 24)
+      .limit(1000),
+  ]);
 
   const semDonoPorEtapa = new Map<string, number>();
   for (const l of (semDonoLinhas.data ?? []) as { stage_id: string }[]) {
@@ -388,11 +390,13 @@ export default async function AtendimentoPage({
   }
 
   const naoLidasPorEtapa = new Map<string, number>();
-  for (const linha of ((linhasNaoLidas ?? []) as {
-    stage_id: string | null;
-    ultima_interacao_em: string;
-    chat_lido_em: string | null;
-  }[]).filter(
+  for (const linha of (
+    (linhasNaoLidas ?? []) as {
+      stage_id: string | null;
+      ultima_interacao_em: string;
+      chat_lido_em: string | null;
+    }[]
+  ).filter(
     (l) => l.chat_lido_em === null || l.ultima_interacao_em > l.chat_lido_em,
   )) {
     if (linha.stage_id) {
@@ -417,7 +421,8 @@ export default async function AtendimentoPage({
       const novos = new Map(limites);
       novos.set(c.stage.id, (c.limite ?? POR_COLUNA) + 50);
       const p = new URLSearchParams();
-      if (pipelineAtivo && !pipelineAtivo.padrao) p.set("kanban", pipelineAtivo.id);
+      if (pipelineAtivo && !pipelineAtivo.padrao)
+        p.set("kanban", pipelineAtivo.id);
       if (soMeus) p.set("meus", "1");
       if (funilDe) p.set("de", funilDe);
       p.set(
@@ -467,7 +472,11 @@ export default async function AtendimentoPage({
                 return (
                   <li key={p.id}>
                     <Link
-                      href={p.padrao ? "/atendimento" : `/atendimento?kanban=${p.id}`}
+                      href={
+                        p.padrao
+                          ? "/atendimento"
+                          : `/atendimento?kanban=${p.id}`
+                      }
                       aria-current={ativo ? "page" : undefined}
                       className={
                         ativo
@@ -488,8 +497,13 @@ export default async function AtendimentoPage({
           Neste funil:{" "}
           <span className="font-mono tabular-nums">{totalLeads}</span> leads
           <span className="mx-1 text-neutral-300">|</span>
-          Na base{funilDe ? ` de ${equipe.find((p) => p.id === funilDe)?.nome ?? ""}` : soMeus ? " (minha)" : ""}:{" "}
-          <span className="font-mono tabular-nums">{totalClientes ?? 0}</span>{" "}
+          Na base
+          {funilDe
+            ? ` de ${equipe.find((p) => p.id === funilDe)?.nome ?? ""}`
+            : soMeus
+              ? " (minha)"
+              : ""}
+          : <span className="font-mono tabular-nums">{totalClientes ?? 0}</span>{" "}
           clientes ·{" "}
           <span className="font-mono tabular-nums">
             {totalSemResposta ?? 0}
@@ -498,7 +512,11 @@ export default async function AtendimentoPage({
         </p>
 
         {ehGestor && equipe.length > 0 ? (
-          <form action="/atendimento" method="get" className="mt-1 flex items-center gap-1">
+          <form
+            action="/atendimento"
+            method="get"
+            className="mt-1 flex items-center gap-1"
+          >
             {pipelineAtivo && !pipelineAtivo.padrao ? (
               <input type="hidden" name="kanban" value={pipelineAtivo.id} />
             ) : null}

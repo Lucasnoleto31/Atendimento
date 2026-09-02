@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
 import { perfilAtual } from "@/lib/auth";
+import { veTudo } from "@/lib/papeis";
 
 /**
  * Exporta as vendas em CSV com os MESMOS filtros da página Pagamentos.
@@ -11,7 +12,9 @@ import { perfilAtual } from "@/lib/auth";
 
 function celula(valor: unknown): string {
   const texto = valor === null || valor === undefined ? "" : String(valor);
-  return `"${texto.replaceAll('"', '""')}"`;
+  // Nome vindo do WhatsApp pode começar com "=": no Excel viraria fórmula.
+  const seguro = /^[=+\-@\t\r]/.test(texto) ? `'${texto}` : texto;
+  return `"${seguro.replaceAll('"', '""')}"`;
 }
 
 function inicioDoPeriodo(chave: string): string | null {
@@ -35,7 +38,7 @@ function inicioDoPeriodo(chave: string): string | null {
 export async function GET(request: NextRequest) {
   const perfil = await perfilAtual();
   if (!perfil) return new Response("Forbidden", { status: 403 });
-  if (perfil.papel !== "admin" && perfil.papel !== "gestor") {
+  if (!veTudo(perfil.papel)) {
     return new Response("Exportação restrita à gestão.", { status: 403 });
   }
 
@@ -64,7 +67,8 @@ export async function GET(request: NextRequest) {
     if (fVendedor) q = q.eq("vendedor_id", fVendedor);
     if (fProduto) q = q.eq("product_id", fProduto);
     if (fStatus) q = q.eq("status", fStatus);
-    if (fBusca) q = q.ilike("lead.nome", `%${fBusca.replaceAll(/[,()]/g, " ")}%`);
+    if (fBusca)
+      q = q.ilike("lead.nome", `%${fBusca.replaceAll(/[,()]/g, " ")}%`);
     return q;
   });
 
@@ -87,18 +91,20 @@ export async function GET(request: NextRequest) {
     v.observacao ?? "",
   ]);
 
-  await createServiceClient().from("auditoria").insert({
-    quem: perfil.id,
-    acao: "exportar_vendas",
-    detalhes: {
-      periodo,
-      vendedor: fVendedor,
-      produto: fProduto,
-      status: fStatus,
-      busca: fBusca,
-      linhas: linhas.length,
-    },
-  });
+  await createServiceClient()
+    .from("auditoria")
+    .insert({
+      quem: perfil.id,
+      acao: "exportar_vendas",
+      detalhes: {
+        periodo,
+        vendedor: fVendedor,
+        produto: fProduto,
+        status: fStatus,
+        busca: fBusca,
+        linhas: linhas.length,
+      },
+    });
 
   const csv =
     "﻿" +

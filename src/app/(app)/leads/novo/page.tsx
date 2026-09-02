@@ -21,7 +21,11 @@ export default async function NovoLeadPage({
   const supabase = await createClient();
   const [{ data: canais }, { data: pipelines }, { data: equipe }] =
     await Promise.all([
-      supabase.from("channels").select("id, nome").eq("ativo", true).order("nome"),
+      supabase
+        .from("channels")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome"),
       supabase.from("pipelines").select("id, nome, padrao").order("criado_em"),
       supabase
         .from("profiles")
@@ -31,8 +35,9 @@ export default async function NovoLeadPage({
     ]);
 
   const kanbanPadrao =
-    ((pipelines ?? []) as { id: string; padrao: boolean }[]).find((p) => p.padrao)
-      ?.id ?? "";
+    ((pipelines ?? []) as { id: string; padrao: boolean }[]).find(
+      (p) => p.padrao,
+    )?.id ?? "";
 
   return (
     <div className="p-2 md:p-3">
@@ -60,8 +65,17 @@ export default async function NovoLeadPage({
         </p>
       ) : null}
 
-      <form action={criarLead} className="mt-3 flex max-w-[480px] flex-col gap-2">
-        <Field id="nome" name="nome" label="Nome" required placeholder="Nome do lead" />
+      <form
+        action={criarLead}
+        className="mt-3 flex max-w-[480px] flex-col gap-2"
+      >
+        <Field
+          id="nome"
+          name="nome"
+          label="Nome"
+          required
+          placeholder="Nome do lead"
+        />
 
         <Field
           id="telefone"
@@ -73,7 +87,10 @@ export default async function NovoLeadPage({
         />
 
         <div className="flex flex-col gap-1">
-          <label htmlFor="channel_id" className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor="channel_id"
+            className="text-sm font-medium text-neutral-800"
+          >
             Canal de origem
           </label>
           <select
@@ -91,10 +108,18 @@ export default async function NovoLeadPage({
           </select>
         </div>
 
-        <Field id="campanha" name="campanha" label="Campanha" placeholder="ex.: conta-pj-agosto" />
+        <Field
+          id="campanha"
+          name="campanha"
+          label="Campanha"
+          placeholder="ex.: conta-pj-agosto"
+        />
 
         <div className="flex flex-col gap-1">
-          <label htmlFor="pipeline_id" className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor="pipeline_id"
+            className="text-sm font-medium text-neutral-800"
+          >
             Kanban
           </label>
           <select
@@ -136,7 +161,10 @@ export default async function NovoLeadPage({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label htmlFor="observacao" className="text-sm font-medium text-neutral-800">
+          <label
+            htmlFor="observacao"
+            className="text-sm font-medium text-neutral-800"
+          >
             Observação
           </label>
           <textarea

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { avancarAposDisparo } from "@/lib/kanban";
 import { marcarRoteiroEnviado } from "@/lib/ativacao";
-import { perfilAtual } from "@/lib/auth";
+import { perfilQueEscreve, perfilAtual } from "@/lib/auth";
 import { ehMotivoPerda, templateBloqueadoAte } from "@/lib/perda";
 import { formatarData } from "@/lib/format";
 import {
@@ -39,8 +39,11 @@ type AnexoRemoto = {
 export async function prepararUploadAnexo(
   nome: string,
 ): Promise<{ caminho?: string; token?: string; erro?: string }> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const limpo = nome.replace(/[^\w.\-]+/g, "_").slice(-80);
   const caminho = `envios/${crypto.randomUUID()}-${limpo}`;
@@ -189,8 +192,11 @@ export async function enviarMensagemLead(
   _estado: ResultadoEnvio,
   formData: FormData,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const leadId = String(formData.get("lead_id") ?? "");
   const textoBruto = String(formData.get("texto") ?? "").trim();
@@ -512,8 +518,11 @@ export async function enviarTemplateLead(
   _estado: ResultadoEnvio,
   formData: FormData,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const leadId = String(formData.get("lead_id") ?? "");
   const nome = String(formData.get("template_nome") ?? "");
@@ -617,8 +626,11 @@ export async function definirResponsavelChat(
   leadId: string,
   responsavelId: string | null,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId) return { erro: "Lead não informado." };
 
   const supabase = await createClient();
@@ -663,8 +675,11 @@ export async function alternarEtiquetaChat(
   tagId: string,
   marcar: boolean,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId || !tagId) return { erro: "Etiqueta não informada." };
 
   const supabase = await createClient();
@@ -692,8 +707,11 @@ export async function alterarStatusConversaChat(
   leadId: string,
   status: "open" | "resolved",
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const lead = await leadComConversa(leadId);
   if (!lead) return { erro: "Lead não encontrado." };
@@ -741,8 +759,11 @@ export async function alterarEtapaChat(
   leadId: string,
   stageId: string,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId || !stageId) return { erro: "Etapa não informada." };
 
   const supabase = await createClient();
@@ -767,8 +788,11 @@ export async function marcarPerdidoChat(
   motivo: string,
   detalhe: string,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId) return { erro: "Lead não informado." };
   if (!ehMotivoPerda(motivo)) return { erro: "Escolha o motivo da perda." };
 
@@ -837,8 +861,11 @@ export async function marcarPerdidoChat(
  * primeira etapa — quando o lead responder, o espelho o move sozinho.
  */
 export async function reabrirLeadChat(leadId: string): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId) return { erro: "Lead não informado." };
 
   const supabase = await createClient();
@@ -919,8 +946,11 @@ export async function reabrirLeadChat(leadId: string): Promise<ResultadoEnvio> {
  * de volta à caixa sozinho.
  */
 export async function marcarStandBy(leadId: string): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId) return { erro: "Lead não informado." };
 
   const supabase = await createClient();
@@ -1066,8 +1096,11 @@ export async function criarTarefaLead(
   _estado: ResultadoEnvio,
   formData: FormData,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const leadId = String(formData.get("lead_id") ?? "");
   const titulo = String(formData.get("titulo") ?? "").trim();
@@ -1106,8 +1139,11 @@ export async function concluirTarefaLead(
   tarefaId: string,
   leadId: string,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!tarefaId) return { erro: "Tarefa não informada." };
 
   const supabase = await createClient();
@@ -1130,7 +1166,7 @@ export async function concluirTarefaLead(
  * atualização de 5s da própria tela reflete a mudança logo em seguida.
  */
 export async function marcarChatLido(leadId: string) {
-  const perfil = await perfilAtual();
+  const perfil = await perfilQueEscreve();
   if (!perfil || !leadId) return;
 
   const supabase = await createClient();
@@ -1182,8 +1218,11 @@ export async function adiarConversa(
   leadId: string,
   prazo: PrazoAdiar,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId) return { erro: "Lead não informado." };
 
   const agora = new Date().toISOString();
@@ -1236,8 +1275,11 @@ export async function adiarConversa(
 export async function reativarConversa(
   leadId: string,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId) return { erro: "Lead não informado." };
 
   const supabase = await createClient();
@@ -1264,8 +1306,11 @@ export async function reativarConversa(
 export async function marcarChatNaoLido(
   leadId: string,
 ): Promise<ResultadoEnvio> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!leadId) return { erro: "Lead não informado." };
 
   const supabase = await createClient();
@@ -1289,8 +1334,11 @@ async function emMassa(
   mudanca: Record<string, unknown>,
   nota: string | null,
 ): Promise<ResultadoEnvio & { total?: number }> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   const ids = [...new Set(leadIds)].filter(Boolean).slice(0, MAX_EM_MASSA);
   if (ids.length === 0) return { erro: "Nenhuma conversa selecionada." };
@@ -1371,8 +1419,11 @@ export async function etiquetarEmMassa(
   tagId: string,
   marcar: boolean,
 ): Promise<ResultadoEnvio & { total?: number }> {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
   if (!tagId) return { erro: "Etiqueta não informada." };
 
   const ids = [...new Set(leadIds)].filter(Boolean).slice(0, MAX_EM_MASSA);
@@ -1403,8 +1454,11 @@ export async function atribuirEmMassa(
   leadIds: string[],
   responsavelId: string | null,
 ) {
-  const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  const perfil = await perfilQueEscreve();
+  if (!perfil)
+    return {
+      erro: "Sem permissão para alterar (perfil somente leitura) — ou a sessão expirou.",
+    };
 
   let nome = "ninguém";
   if (responsavelId) {
