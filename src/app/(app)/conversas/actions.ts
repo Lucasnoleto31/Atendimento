@@ -656,6 +656,7 @@ export async function carregarContexto(
           .from("customer_lots")
           .select("referencia_data")
           .eq("customer_id", l.customer_id)
+          .gt("quantidade", 0)
           .order("referencia_data", { ascending: true })
           .limit(1)
           .maybeSingle()
@@ -674,10 +675,9 @@ export async function carregarContexto(
           .from("customer_events")
           .select("tipo, criado_em")
           .eq("customer_id", l.customer_id)
-          .in("tipo", ["em_risco", "churn", "reativado"])
+          .in("tipo", ["reativacao", "churn", "retomou_giro"])
           .order("criado_em", { ascending: false })
-          .limit(1)
-          .maybeSingle()
+          .limit(30)
       : Promise.resolve({ data: null, error: null }),
     // Recorrente = dias DISTINTOS com lote nos últimos 30 dias.
     l.customer_id
@@ -685,7 +685,8 @@ export async function carregarContexto(
           .from("customer_lots")
           .select("referencia_data")
           .eq("customer_id", l.customer_id)
-          .gte("referencia_data", corte30)
+          .gt("quantidade", 0)
+          .gt("referencia_data", corte30)
       : Promise.resolve({ data: null, error: null }),
     // A venda automática de ativação, se já pagou.
     l.customer_id
@@ -696,7 +697,7 @@ export async function carregarContexto(
           )
           .eq("customer_id", l.customer_id)
           .eq("produto.codigo", "ATIVACAO")
-          .neq("status", "cancelada")
+          .eq("status", "confirmada")
           .limit(1)
       : Promise.resolve({ data: null, error: null }),
   ]);
@@ -731,7 +732,9 @@ export async function carregarContexto(
   ).size;
   // Último episódio de cada tipo — a régua mostra o histórico do ciclo.
   const episodios = (
-    (cicloR.data ?? []) as { tipo: string; criado_em: string }[]
+    Array.isArray(cicloR.data)
+      ? (cicloR.data as { tipo: string; criado_em: string }[])
+      : []
   ).reduce(
     (acc, e) => {
       if (!acc[e.tipo]) acc[e.tipo] = e.criado_em;
