@@ -23,6 +23,7 @@ import {
   formatarReais,
   formatarTelefone,
   instante,
+  formatarDataCurta,
 } from "@/lib/format";
 import {
   concluirTarefaLead,
@@ -461,7 +462,7 @@ export function PainelContexto({
                           )}
                         >
                           {p.em
-                            ? `${formatarData(p.em)}${p.origem ? ` · ${p.origem}` : ""}`
+                            ? `${formatarDataCurta(p.em)}${p.origem ? ` · ${p.origem}` : ""}`
                             : (p.detalhe ?? "")}
                         </span>
                       </li>
@@ -512,14 +513,14 @@ export function PainelContexto({
                       );
                     const direita = atual
                       ? dados.trilha.desde
-                        ? `desde ${formatarData(dados.trilha.desde)}${
+                        ? `desde ${formatarDataCurta(dados.trilha.desde)}${
                             dados.trilha.por
                               ? ` · ${iniciais(dados.trilha.por)}`
                               : ""
                           }`
                         : ""
                       : t.trilha === dados.trilha.de && dados.trilha.desde
-                        ? `até ${formatarData(dados.trilha.desde)}`
+                        ? `até ${formatarDataCurta(dados.trilha.desde)}`
                         : "";
                     return (
                       <li
