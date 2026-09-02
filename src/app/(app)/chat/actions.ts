@@ -160,7 +160,7 @@ async function leadComConversa(leadId: string) {
   const cheio = await supabase
     .from("leads")
     .select(
-      "id, nome, telefone_e164, instagram_id, instagram_usuario, status, perdido_em",
+      "id, nome, telefone_e164, instagram_id, instagram_usuario, status, perdido_em, responsavel_id",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -172,7 +172,9 @@ async function leadComConversa(leadId: string) {
       ? (
           await supabase
             .from("leads")
-            .select("id, nome, telefone_e164, instagram_id, instagram_usuario")
+            .select(
+              "id, nome, telefone_e164, instagram_id, instagram_usuario, responsavel_id",
+            )
             .eq("id", leadId)
             .maybeSingle()
         ).data
@@ -185,7 +187,44 @@ async function leadComConversa(leadId: string) {
     instagram_usuario: string | null;
     status?: string | null;
     perdido_em?: string | null;
+    responsavel_id?: string | null;
   } | null;
+}
+
+/**
+ * Quem fala com o lead, assume — quando ele não tem dono.
+ *
+ * Sem isto, disparar um template pela /hoje deixava o lead órfão: some da
+ * fila de todo mundo e ninguém acompanha a resposta. Lead que JÁ tem dono
+ * não muda de mãos por uma mensagem: trocar responsável no envio viraria
+ * briga de comissão.
+ *
+ * O update é condicional (responsavel_id ainda nulo): dois atendentes
+ * mandando ao mesmo tempo, só o primeiro assume.
+ */
+async function assumirSeSemDono(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  leadId: string,
+  perfil: { id: string; nome: string },
+) {
+  const { data } = await supabase
+    .from("leads")
+    .update({ responsavel_id: perfil.id })
+    .eq("id", leadId)
+    .is("responsavel_id", null)
+    .select("id");
+  if (!data?.length) return;
+  await supabase.from("lead_interactions").insert({
+    lead_id: leadId,
+    tipo: "atribuicao",
+    conteudo: `Atendimento assumido por ${perfil.nome} ao falar com o lead`,
+    autor_id: perfil.id,
+    metadados: { via: "crm", sistema: true, automatico: true },
+  });
+  // A fila da /hoje mostra o dono: sem isto ela seguia dizendo "sem dono"
+  // até a próxima navegação. Só recarrega quando a posse MUDOU — não a
+  // cada mensagem.
+  revalidatePath("/hoje");
 }
 
 export async function enviarMensagemLead(
@@ -469,6 +508,8 @@ export async function enviarMensagemLead(
     .maybeSingle();
 
   await encerrarAdiamentoAoResponder(supabase, leadId, agora);
+  // Mesma regra do template: quem escreve para um lead sem dono, assume.
+  if (!lead.responsavel_id) await assumirSeSemDono(supabase, leadId, perfil);
 
   // Template disparado é contato feito: sai de "Novo" para "Em Contato".
   const servico = createServiceClient();
@@ -614,6 +655,9 @@ export async function enviarTemplateLead(
   }
 
   await encerrarAdiamentoAoResponder(supabase, leadId, agora);
+  // Disparou o template pela /hoje num lead órfão? Ele passa a ser seu —
+  // senão a resposta cai numa fila de ninguém.
+  if (!lead.responsavel_id) await assumirSeSemDono(supabase, leadId, perfil);
 
   // A carteira mostra "último contato": sem isto ela seguia no valor velho.
   revalidatePath("/carteira");
