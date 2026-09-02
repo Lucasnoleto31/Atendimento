@@ -3,6 +3,8 @@ import { listarTemplatesMeta, metaConfigurada } from "@/lib/whatsapp";
 import { dispararTemplate, type Alvo } from "@/lib/cadencia";
 import { agoraEmBrasilia } from "@/lib/format";
 import { orcamentoEnviosRestante } from "@/lib/envios";
+import { podeNutrirPerdido } from "@/lib/perda";
+import { lerReguasConversao } from "@/lib/conversao";
 import { avancarAposDisparo } from "@/lib/kanban";
 
 /**
@@ -218,6 +220,9 @@ type LinhaPublico = {
     id: string;
     nome: string;
     telefone_e164: string | null;
+    status?: string | null;
+    perdido_em?: string | null;
+    perda_motivo?: string | null;
   } | null;
 };
 
@@ -231,6 +236,8 @@ async function proximosAlvos(
   campanha: Campanha,
   quantos: number,
 ): Promise<{ alvos: Alvo[]; publicoAcabou: boolean }> {
+  const { nutrirPerdidoAposDias: diasNutrir } =
+    await lerReguasConversao(service);
   // Quem já recebeu (sucesso ou falha) sai da fila para sempre.
   const jaRecebeu = new Set<string>();
   for (let de = 0; de < VARREDURA_MAXIMA; de += 1000) {
@@ -247,7 +254,8 @@ async function proximosAlvos(
   const alvos: Alvo[] = [];
   let fim = false;
 
-  const COLUNAS = "lead_id, lead:leads!inner(id, nome, telefone_e164)";
+  const COLUNAS =
+    "lead_id, lead:leads!inner(id, nome, telefone_e164, status, perdido_em, perda_motivo)";
 
   for (let de = 0; de < VARREDURA_MAXIMA; de += PAGINA) {
     // Sem a migração 0019 a coluna de bloqueio não existe: repete sem ela.
@@ -255,7 +263,6 @@ async function proximosAlvos(
       .from("lead_tags")
       .select(COLUNAS)
       .eq("tag_id", campanha.etiqueta_id!)
-      .neq("lead.status", "perdido")
       .not("lead.telefone_e164", "is", null)
       .is("lead.marketing_bloqueado_em", null)
       .order("criado_em")
@@ -266,7 +273,6 @@ async function proximosAlvos(
           .from("lead_tags")
           .select(COLUNAS)
           .eq("tag_id", campanha.etiqueta_id!)
-          .neq("lead.status", "perdido")
           .not("lead.telefone_e164", "is", null)
           .order("criado_em")
           .range(de, de + PAGINA - 1)
@@ -288,6 +294,17 @@ async function proximosAlvos(
     for (const linha of linhas) {
       if (!linha.lead?.telefone_e164) continue;
       if (jaRecebeu.has(linha.lead_id)) continue;
+      // Perdido volta para a campanha depois do prazo da régua (0069).
+      if (
+        !podeNutrirPerdido(
+          linha.lead.status,
+          linha.lead.perdido_em,
+          linha.lead.perda_motivo,
+          diasNutrir,
+        )
+      ) {
+        continue;
+      }
       alvos.push({
         leadId: linha.lead_id,
         nome: linha.lead.nome,

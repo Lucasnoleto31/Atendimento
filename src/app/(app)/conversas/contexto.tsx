@@ -377,6 +377,67 @@ export function PainelContexto({
               </div>
             </section>
 
+            {/* Score: ordena a fila, nunca descarta. Os fatores ficam à
+                vista — número sem explicação vira superstição. */}
+            <section className="rounded-lg border border-neutral-200 bg-neutral-50 p-1.5">
+              <div className="flex items-center justify-between gap-1">
+                <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+                  Score
+                </h3>
+                <span
+                  className={cn(
+                    "inline-flex h-[20px] items-center rounded-sm px-1 text-xs font-medium",
+                    dados.score.faixa === "quente"
+                      ? "bg-success-bg text-success"
+                      : dados.score.faixa === "morno"
+                        ? "bg-warning-bg text-warning"
+                        : "bg-neutral-100 text-neutral-600",
+                  )}
+                >
+                  {dados.score.faixa}
+                </span>
+              </div>
+              <div className="mt-0.5 flex items-baseline gap-1">
+                <span className="font-mono text-h3 font-semibold text-neutral-900 tabular-nums">
+                  {dados.score.total}
+                </span>
+                <span className="text-xs text-neutral-600">de 100</span>
+              </div>
+              <div className="mt-1 h-1 overflow-hidden rounded-sm bg-neutral-200">
+                <div
+                  className={cn(
+                    "h-1",
+                    dados.score.faixa === "quente"
+                      ? "bg-success"
+                      : dados.score.faixa === "morno"
+                        ? "bg-warning"
+                        : "bg-neutral-400",
+                  )}
+                  style={{ width: `${dados.score.total}%` }}
+                />
+              </div>
+              <ul className="mt-1 flex flex-col border-t border-neutral-200 pt-1">
+                {dados.score.fatores.map((f) => (
+                  <li
+                    key={f.rotulo}
+                    className="flex h-[32px] items-center gap-1 text-sm"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-neutral-800">
+                      {f.rotulo}
+                    </span>
+                    <span
+                      className={cn(
+                        "shrink-0 font-mono text-xs tabular-nums",
+                        f.pontos >= 0 ? "text-success" : "text-danger",
+                      )}
+                    >
+                      {f.pontos >= 0 ? `+${f.pontos}` : f.pontos}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
             {/* Jornada: a espinha dorsal, montada dos fatos (cada estado com
                 data e origem). O atual ganha a barra de selecionado. */}
             {(() => {

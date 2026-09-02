@@ -48,3 +48,34 @@ export function templateBloqueadoAte(
   const ate = base + DIAS_BLOQUEIO_TEMPLATE_PERDIDO * 86_400_000;
   return Date.now() < ate ? new Date(ate).toISOString() : null;
 }
+
+/**
+ * Motivos que NUNCA voltam para a nutrição: o número não é da pessoa
+ * ("contato_invalido") ou ela disse que não quer ("sem_interesse"). Insistir
+ * com quem recusou é o caminho mais curto para virar spam na Meta.
+ */
+export const MOTIVOS_SEM_VOLTA = new Set<string>([
+  "contato_invalido",
+  "sem_interesse",
+]);
+
+/**
+ * Lead perdido volta a receber cadência e campanha depois do prazo da régua
+ * (settings.nutrir_perdido_apos_dias). Nunca antes do bloqueio de template
+ * dos 30 dias — o mais longo dos dois manda, senão a nutrição dispararia um
+ * template que o envio recusa logo em seguida.
+ */
+export function podeNutrirPerdido(
+  status: string | null | undefined,
+  perdidoEm: string | null | undefined,
+  motivo: string | null | undefined,
+  diasRegua: number,
+): boolean {
+  if (status !== "perdido") return true; // não é perdido: a regra não se aplica
+  if (!perdidoEm) return false;
+  if (motivo && MOTIVOS_SEM_VOLTA.has(motivo)) return false;
+  if (templateBloqueadoAte(status, perdidoEm)) return false;
+  const base = Date.parse(perdidoEm);
+  if (Number.isNaN(base)) return false;
+  return Date.now() >= base + diasRegua * 86_400_000;
+}

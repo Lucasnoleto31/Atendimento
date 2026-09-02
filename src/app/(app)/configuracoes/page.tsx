@@ -69,9 +69,40 @@ const PARAMETROS = [
     ajuda: "Dias sem resposta do lead para marcá-lo como sem resposta.",
   },
   {
+    chave: "sla_atencao_min",
+    rotulo: "Primeiro contato — atenção (min)",
+    ajuda:
+      "Lead novo que ninguém respondeu ainda acende em âmbar na Caixa depois deste tempo.",
+  },
+  {
     chave: "minutos_alerta_espera",
-    rotulo: "Alerta de espera (min)",
-    ajuda: "Minutos aguardando resposta para destacar a conversa no Chat.",
+    rotulo: "Primeiro contato — alarme (min)",
+    ajuda:
+      "Passado este tempo o selo fica vermelho. É o campo que existia e não era lido por ninguém.",
+  },
+  {
+    chave: "sla_horario_comercial",
+    rotulo: "Contar só em expediente (0/1)",
+    ajuda:
+      "1 = o relógio do primeiro contato só corre de 9h às 18h em dia útil — senão o lead da madrugada amanhece vermelho.",
+  },
+  {
+    chave: "reabrir_perdido_ao_responder",
+    rotulo: "Reabrir perdido que responde (0/1)",
+    ajuda:
+      "1 = mensagem de quem está como perdido tira o lead da perda e devolve para a Caixa, com registro na conversa.",
+  },
+  {
+    chave: "nutrir_perdido_apos_dias",
+    rotulo: "Perdido volta à nutrição após (dias)",
+    ajuda:
+      "Perdido volta a receber cadência e campanha depois deste prazo — nunca antes de 30 dias, que é o bloqueio de template do lead perdido. Quem foi perdido por número errado ou por não querer nunca volta.",
+  },
+  {
+    chave: "travar_cpf_duplicado",
+    rotulo: "Travar CPF repetido (0/1)",
+    ajuda:
+      "1 = cadastrar um CPF/CNPJ que já existe avisa e aponta o cadastro atual, em vez de criar o segundo.",
   },
   {
     chave: "distribuicao_automatica",

@@ -2,6 +2,9 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { perfilQueEscreve, perfilAtual } from "@/lib/auth";
+import { lerReguasConversao } from "@/lib/conversao";
+import { estadoSla } from "@/lib/sla";
+import { calcularScore, type Score } from "@/lib/score";
 import { ehPassoAtivacao, PASSOS_ATIVACAO } from "@/lib/ativacao-passos";
 import {
   ehTrilha,
@@ -50,6 +53,8 @@ export type LinhaConversa = {
   responsavelIniciais: string | null;
   /** Quem está no atendimento — aparece acima do nome do lead na fila. */
   responsavelNome: string | null;
+  /** SLA de primeiro contato (0069) — null quando não se aplica. */
+  sla: { situacao: "atencao" | "alarme"; rotulo: string } | null;
   etiquetaNome: string | null;
   /** Todas as etiquetas do lead, com a cor cadastrada — vão na linha. */
   etiquetas: { nome: string; cor: string | null }[];
@@ -91,6 +96,9 @@ type LinhaView = {
 
 type ExtrasLead = {
   id: string;
+  criado_em?: string | null;
+  /** 0069: quando a mesa falou com este lead pela primeira vez. */
+  primeiro_contato_em?: string | null;
   instagram_usuario: string | null;
   chat_lido_em: string | null;
   chat_adiado_em: string | null;
@@ -296,17 +304,27 @@ export async function carregarListaConversas(
     ctAdiadas,
     ctResolvidas,
     tagsR,
+    reguasR,
   ] = await Promise.all([
     ids.length > 0
       ? (async () => {
           const cheio = await supabase
             .from("leads")
             .select(
-              "id, instagram_usuario, chat_lido_em, chat_adiado_em, chat_adiado_ate, chat_resolvido_em",
+              "id, criado_em, primeiro_contato_em, instagram_usuario, chat_lido_em, chat_adiado_em, chat_adiado_ate, chat_resolvido_em",
             )
             .in("id", ids);
           if (cheio.error) {
-            // Sem a 0042 (chat_adiado_ate) ou 0017/0018: pede o que der.
+            // Sem a 0069 (primeiro_contato_em) o SLA some, mas o prazo do
+            // adiamento (0042) TEM de continuar: um degrau de cada vez.
+            const semSla = await supabase
+              .from("leads")
+              .select(
+                "id, instagram_usuario, chat_lido_em, chat_adiado_em, chat_adiado_ate, chat_resolvido_em",
+              )
+              .in("id", ids);
+            if (!semSla.error) return semSla;
+            // Sem a 0042 também: pede o que der.
             return supabase
               .from("leads")
               .select(
@@ -371,6 +389,7 @@ export async function carregarListaConversas(
       return q;
     })(),
     supabase.from("tags").select("id, nome, cor").order("nome"),
+    lerReguasConversao(supabase),
   ]);
 
   // Nome → cor. Sem a consulta (RLS, migração), o chip sai neutro: melhor
@@ -396,9 +415,25 @@ export async function carregarListaConversas(
   );
 
   const agoraMs = Date.now();
+  const agora = new Date(agoraMs);
+
+  const reguaSla = reguasR.sla;
 
   const linhas: LinhaConversa[] = linhasView.map((l) => {
     const ex = extras.get(l.lead_id);
+    // Só lead que a mesa ainda não respondeu entra na régua de primeiro
+    // contato; depois disso o cronômetro é outro (espera de resposta).
+    const estadoDoSla =
+      ex?.criado_em && !ex.primeiro_contato_em
+        ? estadoSla(ex.criado_em, null, reguaSla, agora)
+        : null;
+    const conversaParada = Boolean(ex?.chat_resolvido_em || ex?.chat_adiado_em);
+    const sla =
+      !conversaParada &&
+      estadoDoSla &&
+      (estadoDoSla.situacao === "atencao" || estadoDoSla.situacao === "alarme")
+        ? { situacao: estadoDoSla.situacao, rotulo: estadoDoSla.rotulo }
+        : null;
     const pv = previas.get(l.lead_id);
     const naoLida =
       l.ultima_mensagem_em !== null &&
@@ -425,6 +460,7 @@ export async function carregarListaConversas(
       resolvida: Boolean(ex?.chat_resolvido_em),
       responsavelIniciais: iniciais(l.responsavel_nome),
       responsavelNome: l.responsavel_nome,
+      sla,
       etiquetaNome: l.etiquetas?.[0] ?? null,
       etiquetas: (l.etiquetas ?? []).map((nome) => ({
         nome,
@@ -520,6 +556,8 @@ export type ContextoConversa = {
       em: string;
     } | null;
   };
+  /** Score do lead (0-100) — ordena a fila, nunca descarta ninguém. */
+  score: Score;
   /** Trilha de perfil; disponivel=false quando a 0066 não rodou. */
   trilha: {
     disponivel: boolean;
@@ -830,6 +868,16 @@ export async function carregarContexto(
       vencida: Date.parse(t.vence_em) < agora,
     })),
     tarefasDisponiveis: tarefasR.error === null,
+    score: calcularScore({
+      criadoEm: l.criado_em,
+      primeiraRespostaEm: l.primeira_resposta_em,
+      ehCliente: l.customer_id !== null,
+      contaAbertaEm: l.customer?.conta_aberta_em ?? null,
+      primeiroLoteEm: fatosJornada.primeiroLoteEm,
+      passosAtivacao: marcadosLista.length,
+      templatesEnviados: templatesR.error ? 0 : (templatesR.count ?? 0),
+      status: l.status ?? null,
+    }),
     jornada: {
       fatos: fatosJornada,
       comissaoAtivacao: comissao

@@ -617,12 +617,21 @@ const PARAMETROS_VALIDOS = new Set([
   "cadencia_por_dia",
   "custo_template_centavos",
   "resumo_gestor_ativo",
+  // Réguas de conversão (0069).
+  "sla_atencao_min",
+  "sla_horario_comercial",
+  "reabrir_perdido_ao_responder",
+  "nutrir_perdido_apos_dias",
+  "travar_cpf_duplicado",
 ]);
 
 // Parâmetros liga/desliga aceitam 0; os demais exigem número positivo.
 const PARAMETROS_BINARIOS = new Set([
   "distribuicao_automatica",
   "resumo_gestor_ativo",
+  "sla_horario_comercial",
+  "reabrir_perdido_ao_responder",
+  "travar_cpf_duplicado",
 ]);
 // Zero desliga o recurso (ex.: receita por lote sem taxa definida).
 const PARAMETROS_ZERO_OK = new Set([

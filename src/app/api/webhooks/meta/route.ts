@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { variantesTelefone } from "@/lib/csv";
+import { normalizarTelefone, variantesTelefone } from "@/lib/csv";
+import { MOTIVOS_SEM_VOLTA } from "@/lib/perda";
 import { escolherVendedor } from "@/lib/distribuicao";
 import { hospedarMidiaMeta } from "@/lib/whatsapp";
 import { extrairDocumento } from "@/lib/documento";
@@ -104,12 +105,20 @@ function descreverErroMeta(erro: NonNullable<StatusMeta["errors"]>[number]) {
       return "Este número está no grupo de teste da Meta e não recebe template de marketing de nenhuma empresa. Fale por outro caminho (ligação, e-mail) ou espere ele te mandar mensagem primeiro.";
     default:
       return (
-        erro.error_data?.details ?? erro.title ?? erro.message ?? "Falha no envio."
+        erro.error_data?.details ??
+        erro.title ??
+        erro.message ??
+        "Falha no envio."
       );
   }
 }
 
 type ValorMeta = {
+  /** Lead Ads (field "leadgen"). */
+  leadgen_id?: string;
+  form_id?: string;
+  ad_id?: string;
+  created_time?: number;
   metadata?: { phone_number_id?: string };
   contacts?: { wa_id?: string; profile?: { name?: string } }[];
   messages?: MensagemMeta[];
@@ -142,7 +151,10 @@ export async function POST(request: NextRequest) {
   }
 
   let payload: {
-    entry?: { time?: number; changes?: { field?: string; value?: ValorMeta }[] }[];
+    entry?: {
+      time?: number;
+      changes?: { field?: string; value?: ValorMeta }[];
+    }[];
   };
   try {
     payload = JSON.parse(corpo);
@@ -161,6 +173,13 @@ export async function POST(request: NextRequest) {
       // desconhecido continua caindo no "continue" logo abaixo, sem erro.
       if (change.field === "phone_number_quality_update") {
         if (valor) await registrarQualidadeNumero(service, valor, entry.time);
+        continue;
+      }
+
+      // Formulário do Facebook/Instagram (Lead Ads): a Meta manda só o id;
+      // os campos vêm por uma busca na Graph API.
+      if (change.field === "leadgen") {
+        if (valor?.leadgen_id) await registrarLeadAds(service, valor);
         continue;
       }
 
@@ -206,7 +225,11 @@ export async function POST(request: NextRequest) {
           // A Meta aceita o envio e só depois avisa que não entregou. Sem
           // devolver isso para campanha_envios, a tela da campanha mostraria
           // zero recusa enquanto o número apanha na prática.
-          if (erro && linha.lead_id && typeof metadados.campanha_id === "string") {
+          if (
+            erro &&
+            linha.lead_id &&
+            typeof metadados.campanha_id === "string"
+          ) {
             await service
               .from("campanha_envios")
               .update({ erro })
@@ -267,6 +290,203 @@ export async function POST(request: NextRequest) {
  * incidente de 24/08 a qualidade caiu para amarelo e ninguém viu no CRM —
  * souberam pelo painel da Meta.
  */
+/** Campos que interessam de um formulário de Lead Ads. */
+type CamposLeadAds = {
+  nome: string | null;
+  telefone: string | null;
+  email: string | null;
+  respostas: string[];
+};
+
+/**
+ * Busca as respostas do formulário na Graph API. O token precisa da
+ * permissão leads_retrieval na página — é o passo que depende do Business
+ * Manager e por isso a falha aqui é registrada, não engolida.
+ */
+async function buscarLeadAds(leadgenId: string): Promise<CamposLeadAds> {
+  const token = process.env.META_PAGE_TOKEN || process.env.META_WHATSAPP_TOKEN;
+  if (!token) throw new Error("Sem META_PAGE_TOKEN para ler o formulário.");
+  const r = await fetch(
+    `https://graph.facebook.com/v21.0/${leadgenId}?fields=field_data&access_token=${encodeURIComponent(token)}`,
+    { cache: "no-store", signal: AbortSignal.timeout(8000) },
+  );
+  const json = (await r.json().catch(() => null)) as {
+    field_data?: { name?: string; values?: string[] }[];
+    error?: { message?: string };
+  } | null;
+  if (!r.ok || !json?.field_data) {
+    throw new Error(json?.error?.message ?? `Graph ${r.status}`);
+  }
+
+  const achar = (...chaves: string[]) =>
+    json.field_data!.find((c) =>
+      chaves.some((k) => (c.name ?? "").toLowerCase().includes(k)),
+    )?.values?.[0] ?? null;
+
+  return {
+    nome: achar("full_name", "nome", "name"),
+    telefone: achar("phone", "telefone", "celular"),
+    email: achar("email", "e-mail"),
+    respostas: json.field_data.map(
+      (c) => `${c.name ?? "campo"}: ${(c.values ?? []).join(", ")}`,
+    ),
+  };
+}
+
+/**
+ * Lead Ads: cria o lead do formulário na hora, com UTM e as respostas.
+ *
+ * A Meta manda só o `leadgen_id`; os campos vêm de uma busca na Graph API
+ * com o token da página. Sem permissão (leads_retrieval) a busca falha — o
+ * evento fica registrado em webhook_events com o motivo e ninguém perde o
+ * lead: ele continua no Gerenciador de Anúncios para baixar à mão.
+ */
+async function registrarLeadAds(
+  service: ReturnType<typeof createServiceClient>,
+  valor: ValorMeta,
+) {
+  const eventoId = `leadgen-${valor.leadgen_id}`;
+  const { error: dup } = await service.from("webhook_events").insert({
+    origem: "meta",
+    evento_id: eventoId,
+    payload: valor as unknown as Record<string, unknown>,
+  });
+  if (dup) return; // já processado
+
+  try {
+    const campos = await buscarLeadAds(valor.leadgen_id!);
+    const nome = campos.nome || "Lead do formulário";
+    const telefone = campos.telefone
+      ? normalizarTelefone(campos.telefone)
+      : null;
+    if (!telefone) {
+      throw new Error("Formulário sem telefone — não dá para atender.");
+    }
+
+    const [{ data: canal }, { data: etapa }, vendedor] = await Promise.all([
+      service
+        .from("channels")
+        .select("id")
+        .eq("slug", "whatsapp")
+        .maybeSingle(),
+      service
+        .from("pipeline_stages")
+        .select("id, pipeline:pipelines!inner(padrao)")
+        .eq("pipeline.padrao", true)
+        .order("ordem")
+        .limit(1)
+        .maybeSingle(),
+      escolherVendedor(service),
+    ]);
+
+    // Telefone repetido = a mesma pessoa preencheu de novo: não duplica.
+    // limit(1), não maybeSingle: o mesmo número existe nas duas grafias do
+    // nono dígito e o maybeSingle devolveria erro — perdendo a submissão.
+    const { data: jaExiste } = await service
+      .from("leads")
+      .select("id, status, chat_resolvido_em")
+      .in("telefone_e164", variantesTelefone(telefone))
+      .limit(1);
+    const antigo = jaExiste?.[0];
+    let leadId = antigo?.id as string | undefined;
+
+    // Preencheu o formulário de novo: é interesse novo — volta para a fila.
+    if (antigo && (antigo.status === "perdido" || antigo.chat_resolvido_em)) {
+      await service
+        .from("leads")
+        .update({
+          status: "novo",
+          chat_resolvido_em: null,
+          stage_id: await primeiraEtapa(service),
+          entrou_na_etapa_em: new Date().toISOString(),
+        })
+        .eq("id", antigo.id);
+    }
+    if (!leadId) {
+      const { data: novo, error } = await service
+        .from("leads")
+        .insert({
+          nome,
+          telefone_e164: telefone,
+          email: campos.email ?? null,
+          channel_id: canal?.id ?? null,
+          stage_id: etapa?.id ?? null,
+          status: "novo",
+          entrada_motivo: "meta_lead_ads",
+          responsavel_id: vendedor?.id ?? null,
+          campanha: valor.form_id ?? null,
+          utm_source: "meta",
+          utm_medium: "lead_ads",
+          // O payload do leadgen traz form_id e ad_id — campaign_id não vem.
+          utm_campaign: valor.form_id ?? null,
+          utm_content: valor.ad_id ?? null,
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+      leadId = novo.id as string;
+    }
+
+    // As respostas do formulário viram a primeira nota da conversa: quem
+    // atender já sabe o que a pessoa pediu.
+    if (campos.respostas.length > 0) {
+      await service.from("lead_interactions").insert({
+        lead_id: leadId,
+        tipo: "nota",
+        conteudo: `Respostas do formulário:\n${campos.respostas.join("\n")}`,
+        metadados: { via: "lead_ads", sistema: true, form_id: valor.form_id },
+      });
+    }
+
+    await service
+      .from("webhook_events")
+      .update({ processado: true })
+      .eq("origem", "meta")
+      .eq("evento_id", eventoId);
+  } catch (e) {
+    await service
+      .from("webhook_events")
+      .update({ erro: e instanceof Error ? e.message : String(e) })
+      .eq("origem", "meta")
+      .eq("evento_id", eventoId);
+  }
+}
+
+/** A primeira etapa do funil padrão — para onde o lead reaberto volta. */
+async function primeiraEtapa(
+  service: ReturnType<typeof createServiceClient>,
+): Promise<string | null> {
+  const { data } = await service
+    .from("pipeline_stages")
+    .select("id, pipeline:pipelines!inner(padrao)")
+    .eq("pipeline.padrao", true)
+    .order("ordem")
+    .limit(1)
+    .maybeSingle();
+  return (data?.id as string | undefined) ?? null;
+}
+
+/** Régua "reabrir perdido ao responder" (0069), lida uma vez por chamada. */
+let cacheReabrir: { valor: boolean; expira: number } | null = null;
+async function reabrirPerdido(
+  service: ReturnType<typeof createServiceClient>,
+): Promise<boolean> {
+  if (cacheReabrir && Date.now() < cacheReabrir.expira)
+    return cacheReabrir.valor;
+  const { data } = await service
+    .from("settings")
+    .select("valor")
+    .eq("chave", "reabrir_perdido_ao_responder")
+    .maybeSingle();
+  const bruto =
+    data?.valor === undefined || data?.valor === null
+      ? "1"
+      : String(data.valor).replace(/"/g, "");
+  const valor = bruto !== "0" && bruto !== "false";
+  cacheReabrir = { valor, expira: Date.now() + 60_000 };
+  return valor;
+}
+
 async function registrarQualidadeNumero(
   service: ReturnType<typeof createServiceClient>,
   valor: ValorMeta,
@@ -332,7 +552,10 @@ async function processarMensagem(
   valor: ValorMeta,
   mensagem: MensagemMeta,
 ) {
-  const telefone = (valor.contacts?.[0]?.wa_id ?? mensagem.from).replace(/\D/g, "");
+  const telefone = (valor.contacts?.[0]?.wa_id ?? mensagem.from).replace(
+    /\D/g,
+    "",
+  );
   if (!telefone) throw new Error("Mensagem sem telefone.");
 
   const nomePerfil = valor.contacts?.[0]?.profile?.name?.trim();
@@ -401,30 +624,74 @@ async function processarMensagem(
 
   const { data: candidatos } = await service
     .from("leads")
-    .select("id, status, primeira_resposta_em, whatsapp_instance_id, telefone_e164")
+    .select(
+      "id, nome, status, perda_motivo, primeira_resposta_em, whatsapp_instance_id, telefone_e164",
+    )
     .in("telefone_e164", variantesTelefone(telefone));
   const existente =
-    candidatos?.find((l) => l.telefone_e164 === telefone) ?? candidatos?.[0] ?? null;
+    candidatos?.find((l) => l.telefone_e164 === telefone) ??
+    candidatos?.[0] ??
+    null;
 
   const agora = new Date().toISOString();
   let leadId: string;
 
   if (existente) {
     leadId = existente.id;
+    // Quem foi perdido por número errado ou por dizer que não quer NÃO
+    // reabre: reabrir apagaria o motivo (trigger da 0038) e devolveria a
+    // pessoa para as réguas de marketing.
+    const vaiReabrir =
+      existente.status === "perdido" &&
+      !MOTIVOS_SEM_VOLTA.has(existente.perda_motivo ?? "") &&
+      (await reabrirPerdido(service));
+    const etapaDeVolta = vaiReabrir ? await primeiraEtapa(service) : null;
     await service
       .from("leads")
       .update({
         primeira_resposta_em: existente.primeira_resposta_em ?? agora,
         ultima_interacao_em: agora,
-        whatsapp_instance_id: existente.whatsapp_instance_id ?? instancia?.id ?? null,
+        whatsapp_instance_id:
+          existente.whatsapp_instance_id ?? instancia?.id ?? null,
         ...(existente.status === "novo" || existente.status === "sem_resposta"
           ? { status: "em_atendimento" }
           : {}),
+        // Perdido que volta a falar: reabre. O trigger da 0038 limpa motivo
+        // e carimbo sozinho quando o status sai de 'perdido' — por isso a
+        // decisão precisa ser tomada ANTES, com o motivo ainda na mão.
+        ...(vaiReabrir
+          ? {
+              status: "em_atendimento",
+              chat_resolvido_em: null,
+              chat_adiado_em: null,
+              chat_adiado_ate: null,
+              // Sai da coluna Perdido: sem isto o card fica parado lá e o
+              // prazo por etapa (0051) mede um relógio da época da perda.
+              stage_id: etapaDeVolta,
+              entrou_na_etapa_em: agora,
+            }
+          : {}),
       })
       .eq("id", leadId);
+
+    // A reabertura precisa aparecer no fio da conversa: sem isso o lead
+    // volta para a Caixa e ninguém entende por quê.
+    if (vaiReabrir) {
+      await service.from("lead_interactions").insert({
+        lead_id: leadId,
+        tipo: "nota",
+        conteudo:
+          "Lead respondeu: reaberto automaticamente — saiu de perdido e voltou para a Caixa.",
+        metadados: { via: "webhook", sistema: true, reabertura: true },
+      });
+    }
   } else {
     const [{ data: canal }, { data: etapa }, vendedor] = await Promise.all([
-      service.from("channels").select("id").eq("slug", "whatsapp").maybeSingle(),
+      service
+        .from("channels")
+        .select("id")
+        .eq("slug", "whatsapp")
+        .maybeSingle(),
       service
         .from("pipeline_stages")
         .select("id, pipeline:pipelines!inner(padrao)")
@@ -433,7 +700,9 @@ async function processarMensagem(
         .limit(1)
         .maybeSingle(),
       // Instância manda; sem vendedor nela, cai no round-robin.
-      instancia?.vendedor_id ? Promise.resolve(null) : escolherVendedor(service),
+      instancia?.vendedor_id
+        ? Promise.resolve(null)
+        : escolherVendedor(service),
     ]);
 
     const { data: novo, error } = await service
@@ -491,7 +760,11 @@ async function processarMensagem(
   // precisa entrar do mesmo jeito.
   const { error: erroFila } = await service
     .from("leads")
-    .update({ chat_adiado_em: null, chat_adiado_ate: null, chat_resolvido_em: null })
+    .update({
+      chat_adiado_em: null,
+      chat_adiado_ate: null,
+      chat_resolvido_em: null,
+    })
     .eq("id", leadId);
   if (erroFila) {
     const { error: erroSemPrazo } = await service
@@ -506,17 +779,19 @@ async function processarMensagem(
     }
   }
 
-  const { error: erroInteracao } = await service.from("lead_interactions").insert({
-    lead_id: leadId,
-    tipo: "mensagem_recebida",
-    conteudo: texto,
-    metadados: {
-      message_id: mensagem.id,
-      tipo: mensagem.type,
-      phone_number_id: phoneNumberId,
-      ...(anexos.length > 0 ? { anexos } : {}),
-    },
-  });
+  const { error: erroInteracao } = await service
+    .from("lead_interactions")
+    .insert({
+      lead_id: leadId,
+      tipo: "mensagem_recebida",
+      conteudo: texto,
+      metadados: {
+        message_id: mensagem.id,
+        tipo: mensagem.type,
+        phone_number_id: phoneNumberId,
+        ...(anexos.length > 0 ? { anexos } : {}),
+      },
+    });
 
   if (erroInteracao) {
     // Sem a interação gravada, o evento não pode virar "processado" — a falha

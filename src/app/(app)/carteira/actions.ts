@@ -111,6 +111,7 @@ export async function abrirConversaCliente(
 
 import { redirect } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
+import { lerReguasConversao } from "@/lib/conversao";
 import { normalizarTelefone } from "@/lib/csv";
 import { formatarTelefone } from "@/lib/format";
 import { parsearContas } from "@/lib/clientes";
@@ -182,6 +183,34 @@ export async function salvarFichaCliente(formData: FormData) {
   const ativo = String(formData.get("situacao") ?? "ativa") === "ativa";
 
   const service = createServiceClient();
+
+  // CPF repetido é o que gera briga de comissão: avisa apontando o cadastro
+  // que já existe, em vez de deixar nascer o segundo. Desligável na régua.
+  if (documento) {
+    const { travarCpfDuplicado } = await lerReguasConversao(service);
+    if (travarCpfDuplicado) {
+      // limit(1) em vez de maybeSingle: com DOIS cadastros repetidos o
+      // maybeSingle devolve erro e a trava passaria batido justamente no
+      // caso que ela existe para pegar.
+      const { data: repetidos, error: erroDoc } = await service
+        .from("customers")
+        .select("id, nome_completo")
+        .eq("documento", documento)
+        .neq("id", customerId)
+        .limit(1);
+      if (erroDoc) {
+        terminar(
+          "Não deu para conferir se este CPF/CNPJ já existe. Tente de novo em instantes.",
+        );
+      }
+      const mesmoDoc = repetidos?.[0];
+      if (mesmoDoc) {
+        terminar(
+          `Este CPF/CNPJ já está no cadastro de ${mesmoDoc.nome_completo}. Se for a mesma pessoa, use o cadastro que já existe em vez de criar outro.`,
+        );
+      }
+    }
+  }
 
   // Telefone é único entre clientes: avisa em vez de estourar erro do banco.
   if (!telefoneIntocado && telefone) {

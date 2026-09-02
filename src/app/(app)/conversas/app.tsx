@@ -9,6 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowDown,
   Check,
   MessageCircle,
@@ -1879,6 +1880,28 @@ function LinhaLista({
                 )}
               </span>
             </div>
+            {/* Primeiro contato atrasado: o selo vem ANTES das etiquetas —
+            é a única informação da linha que pede ação agora. */}
+            {linha.sla ? (
+              <div className="mt-[2px]">
+                <span
+                  title="Lead novo que ninguém respondeu ainda"
+                  className={cn(
+                    "inline-flex h-[18px] items-center gap-0.5 rounded-sm px-0.5 text-xs font-medium",
+                    linha.sla.situacao === "alarme"
+                      ? "bg-danger-bg text-danger"
+                      : "bg-warning-bg text-warning",
+                  )}
+                >
+                  {linha.sla.situacao === "alarme" ? (
+                    <AlertTriangle size={12} strokeWidth={1.7} aria-hidden />
+                  ) : (
+                    <Timer size={12} strokeWidth={1.7} aria-hidden />
+                  )}
+                  {linha.sla.rotulo}
+                </span>
+              </div>
+            ) : null}
             {/* Etiquetas entre o nome e a prévia: é o que diz de que TIPO é
             esta conversa antes de abri-la (Stand-by, VIP, Reativação). */}
             {linha.etiquetas.length > 0 ? (

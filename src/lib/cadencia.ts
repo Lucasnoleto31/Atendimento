@@ -9,6 +9,8 @@ import { avancarAposDisparo } from "@/lib/kanban";
 import { agoraEmBrasilia } from "@/lib/format";
 import { orcamentoEnviosRestante } from "@/lib/envios";
 import { marcarRoteiroEnviado } from "@/lib/ativacao";
+import { podeNutrirPerdido } from "@/lib/perda";
+import { lerReguasConversao } from "@/lib/conversao";
 
 /**
  * Cadência de follow-up com duas famílias de regras (followup_rules.ancora):
@@ -305,6 +307,8 @@ async function alvosLeadNovo(
   regra: Regra,
 ): Promise<Alvo[]> {
   const corte = new Date(Date.now() - regra.dias * 86_400_000).toISOString();
+  const { nutrirPerdidoAposDias: diasNutrir } =
+    await lerReguasConversao(service);
 
   // Quem já recebeu esta regra sai da fila PARA SEMPRE (episódio único).
   // Sem esta exclusão a janela ordenada por criado_em trava nos leads mais
@@ -328,17 +332,24 @@ async function alvosLeadNovo(
     id: string;
     nome: string;
     telefone_e164: string;
+    status?: string | null;
+    perdido_em?: string | null;
+    perda_motivo?: string | null;
   };
 
   const alvos: Alvo[] = [];
-  for (let de = 0; de < 100_000 && alvos.length < VARREDURA_MAXIMA; de += 1000) {
+  for (
+    let de = 0;
+    de < 100_000 && alvos.length < VARREDURA_MAXIMA;
+    de += 1000
+  ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- corta a recursão de tipos do builder
     const base = (): any =>
       service
         .from("leads")
-        .select("id, nome, telefone_e164")
+        .select("id, nome, telefone_e164, status, perdido_em, perda_motivo")
         .is("primeira_resposta_em", null)
-        .not("status", "in", "(ganho,perdido)")
+        .neq("status", "ganho")
         .not("telefone_e164", "is", null)
         .lte("criado_em", corte)
         .order("criado_em", { ascending: true })
@@ -352,6 +363,13 @@ async function alvosLeadNovo(
 
     for (const l of data as LinhaLead[]) {
       if (jaEnviados.has(l.id)) continue;
+      // Perdido volta para a nutrição depois do prazo da régua (0069) —
+      // exceto quem foi perdido por número errado.
+      if (
+        !podeNutrirPerdido(l.status, l.perdido_em, l.perda_motivo, diasNutrir)
+      ) {
+        continue;
+      }
       alvos.push({
         leadId: l.id,
         nome: l.nome,
@@ -403,9 +421,7 @@ async function alvosCliente(
 
   if (ancora === "conta_aberta") {
     // Abriu conta há N+ dias e nunca girou (janela de 45d para não spammar antigos).
-    const janela = new Date(
-      Date.now() - (regra.dias + 45) * 86_400_000,
-    )
+    const janela = new Date(Date.now() - (regra.dias + 45) * 86_400_000)
       .toISOString()
       .slice(0, 10);
     q = q
@@ -450,17 +466,20 @@ async function alvosCliente(
     linhas = linhas.filter(
       (l) =>
         (l.lotes_30d_anterior ?? 0) > 0 &&
-        (l.lotes_30d ?? 0) <
-          (l.lotes_30d_anterior ?? 0) * (1 - limite / 100),
+        (l.lotes_30d ?? 0) < (l.lotes_30d_anterior ?? 0) * (1 - limite / 100),
     );
   }
 
   if (linhas.length === 0) return [];
 
-  // Status do lead (perdido sai) e opt-out de marketing.
+  // Status do lead (perdido volta só depois da régua) e opt-out.
+  const { nutrirPerdidoAposDias: diasNutrir } =
+    await lerReguasConversao(service);
   type InfoLead = {
     id: string;
     status: string;
+    perdido_em?: string | null;
+    perda_motivo?: string | null;
     marketing_bloqueado_em?: string | null;
   };
 
@@ -468,19 +487,32 @@ async function alvosCliente(
   // Sem a migração 0019 a coluna não existe: repete a consulta sem ela.
   const comColuna = await service
     .from("leads")
-    .select("id, status, marketing_bloqueado_em")
+    .select("id, status, perdido_em, perda_motivo, marketing_bloqueado_em")
     .in("id", ids);
   const semColuna = comColuna.error
-    ? await service.from("leads").select("id, status").in("id", ids)
+    ? await service
+        .from("leads")
+        .select("id, status, perdido_em, perda_motivo")
+        .in("id", ids)
     : null;
-  const leadsInfo = ((semColuna?.data ?? comColuna.data ?? []) as unknown) as InfoLead[];
+  const leadsInfo = (semColuna?.data ??
+    comColuna.data ??
+    []) as unknown as InfoLead[];
   const porLead = new Map(leadsInfo.map((l) => [l.id, l]));
 
   return linhas
     .filter((l) => {
       const info = porLead.get(l.lead_id);
-      // Lead perdido ou que recusou marketing sai da cadência.
-      return info?.status !== "perdido" && !info?.marketing_bloqueado_em;
+      // Perdido volta depois do prazo da régua (0069); quem recusou
+      // marketing não volta nunca.
+      return (
+        podeNutrirPerdido(
+          info?.status,
+          info?.perdido_em,
+          info?.perda_motivo,
+          diasNutrir,
+        ) && !info?.marketing_bloqueado_em
+      );
     })
     .map((l) => ({
       leadId: l.lead_id,
