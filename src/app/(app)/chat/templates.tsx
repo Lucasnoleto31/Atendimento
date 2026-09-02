@@ -134,9 +134,13 @@ export function BotaoTemplates({
       )
     : "";
 
+  // z-[60]: este diálogo é o mais interno da pilha e precisa ficar ACIMA do
+  // painel de conversa da /hoje (z-50) e da folha do chat no celular (z-40).
+  // Com z-40 ele abria ATRÁS do painel — o clique em "Enviar template" não
+  // fazia nada visível.
   const dialogo = (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-overlay p-2"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay p-2"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) setAberto(false);
       }}
