@@ -869,13 +869,16 @@ export async function carregarContexto(
     })),
     tarefasDisponiveis: tarefasR.error === null,
     score: calcularScore({
-      criadoEm: l.criado_em,
-      primeiraRespostaEm: l.primeira_resposta_em,
-      ehCliente: l.customer_id !== null,
+      passosFeitos: marcadosLista.map((m) => m.passo),
       contaAbertaEm: l.customer?.conta_aberta_em ?? null,
       primeiroLoteEm: fatosJornada.primeiroLoteEm,
-      passosAtivacao: marcadosLista.length,
-      templatesEnviados: templatesR.error ? 0 : (templatesR.count ?? 0),
+      // O avanço mais recente: último passo marcado, ou a conta aberta.
+      ultimoAvancoEm:
+        marcadosLista
+          .map((m) => m.feito_em)
+          .sort((a, b) => b.localeCompare(a))[0] ??
+        l.customer?.conta_aberta_em ??
+        null,
       status: l.status ?? null,
     }),
     jornada: {

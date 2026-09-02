@@ -377,19 +377,21 @@ export function PainelContexto({
               </div>
             </section>
 
-            {/* Score: ordena a fila, nunca descarta. Os fatores ficam à
-                vista — número sem explicação vira superstição. */}
+            {/* Score de ativação: o quanto este cliente andou até o
+                primeiro giro. Os fatores ficam à vista — número sem
+                explicação vira superstição. */}
             <section className="rounded-lg border border-neutral-200 bg-neutral-50 p-1.5">
               <div className="flex items-center justify-between gap-1">
                 <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
-                  Score
+                  Score de ativação
                 </h3>
                 <span
                   className={cn(
                     "inline-flex h-[20px] items-center rounded-sm px-1 text-xs font-medium",
-                    dados.score.faixa === "quente"
+                    dados.score.faixa === "ativado" ||
+                      dados.score.faixa === "perto"
                       ? "bg-success-bg text-success"
-                      : dados.score.faixa === "morno"
+                      : dados.score.faixa === "andando"
                         ? "bg-warning-bg text-warning"
                         : "bg-neutral-100 text-neutral-600",
                   )}
@@ -407,15 +409,24 @@ export function PainelContexto({
                 <div
                   className={cn(
                     "h-1",
-                    dados.score.faixa === "quente"
+                    dados.score.faixa === "ativado" ||
+                      dados.score.faixa === "perto"
                       ? "bg-success"
-                      : dados.score.faixa === "morno"
+                      : dados.score.faixa === "andando"
                         ? "bg-warning"
                         : "bg-neutral-400",
                   )}
                   style={{ width: `${dados.score.total}%` }}
                 />
               </div>
+              {dados.score.trava ? (
+                <p className="mt-1 text-xs text-neutral-600">
+                  Trava agora:{" "}
+                  <span className="font-medium text-neutral-800">
+                    {dados.score.trava}
+                  </span>
+                </p>
+              ) : null}
               <ul className="mt-1 flex flex-col border-t border-neutral-200 pt-1">
                 {dados.score.fatores.map((f) => (
                   <li
