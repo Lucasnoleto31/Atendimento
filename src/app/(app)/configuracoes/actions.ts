@@ -43,7 +43,9 @@ function amigavel(codigo: string | undefined, mensagem: string) {
 // ===========================================================================
 
 function lerProduto(formData: FormData) {
-  const codigo = String(formData.get("codigo") ?? "").trim().toUpperCase();
+  const codigo = String(formData.get("codigo") ?? "")
+    .trim()
+    .toUpperCase();
   const nome = String(formData.get("nome") ?? "").trim();
   const recorrencia = String(formData.get("recorrencia") ?? "unica");
   const valor = normalizarNumero(String(formData.get("valor") ?? ""));
@@ -75,6 +77,9 @@ export async function criarProduto(formData: FormData) {
   terminar();
 }
 
+/** Produtos que o sistema procura pelo código: renomear desligaria motor. */
+const CODIGOS_DE_SISTEMA = new Set(["ABERTURA", "ATIVACAO"]);
+
 export async function atualizarProduto(formData: FormData) {
   await exigirGestor();
   const id = String(formData.get("id") ?? "");
@@ -82,10 +87,17 @@ export async function atualizarProduto(formData: FormData) {
   if ("erro" in lido) terminar(lido.erro);
 
   const supabase = await createClient();
-  const { error } = await supabase
+  // Código de sistema não muda pela tela — o valor e o nome, sim.
+  const { data: atual } = await supabase
     .from("products")
-    .update(lido.dados)
-    .eq("id", id);
+    .select("codigo")
+    .eq("id", id)
+    .maybeSingle();
+  const dados =
+    atual && CODIGOS_DE_SISTEMA.has(atual.codigo)
+      ? { ...lido.dados, codigo: atual.codigo }
+      : lido.dados;
+  const { error } = await supabase.from("products").update(dados).eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
   terminar();
 }
@@ -113,6 +125,16 @@ export async function excluirProduto(formData: FormData) {
   const id = String(formData.get("id") ?? "");
 
   const supabase = await createClient();
+  const { data: atual } = await supabase
+    .from("products")
+    .select("codigo")
+    .eq("id", id)
+    .maybeSingle();
+  if (atual && CODIGOS_DE_SISTEMA.has(atual.codigo)) {
+    terminar(
+      "Este produto é usado pelo sistema (abertura/ativação): desative em vez de excluir.",
+    );
+  }
   const { error } = await supabase.from("products").delete().eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
   terminar();
@@ -184,7 +206,8 @@ const MAX_ANEXOS_MENSAGEM = 5;
  */
 function lerAnexosMensagem(
   bruto: string,
-): { anexos: { tipo: string; url: string; nome: string }[] } | { erro: string } {
+):
+  { anexos: { tipo: string; url: string; nome: string }[] } | { erro: string } {
   let lista: unknown;
   try {
     lista = JSON.parse(bruto);
@@ -354,7 +377,8 @@ export async function criarInstancia(formData: FormData) {
   const vendedorId = String(formData.get("vendedor_id") ?? "");
 
   if (!nome) terminar("Dê um nome à instância.");
-  if (!telefone) terminar("Telefone inválido. Use DDD + número, ex.: 11 98842-1170.");
+  if (!telefone)
+    terminar("Telefone inválido. Use DDD + número, ex.: 11 98842-1170.");
 
   const supabase = await createClient();
 
@@ -365,7 +389,9 @@ export async function criarInstancia(formData: FormData) {
     terminar(`Limite de ${MAX_INSTANCIAS} instâncias atingido.`);
   }
 
-  const phoneNumberId = String(formData.get("meta_phone_number_id") ?? "").trim();
+  const phoneNumberId = String(
+    formData.get("meta_phone_number_id") ?? "",
+  ).trim();
 
   const { data: nova, error } = await supabase
     .from("whatsapp_instances")
@@ -396,7 +422,9 @@ export async function atualizarInstancia(formData: FormData) {
   const vendedorId = String(formData.get("vendedor_id") ?? "");
   if (!id || !nome) terminar("Nome inválido.");
 
-  const phoneNumberId = String(formData.get("meta_phone_number_id") ?? "").trim();
+  const phoneNumberId = String(
+    formData.get("meta_phone_number_id") ?? "",
+  ).trim();
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -490,8 +518,7 @@ export async function salvarMetaTipo(formData: FormData) {
     terminar("Meta inválida. Use um número inteiro (0 para sem meta).");
   }
 
-  const coluna =
-    campo === "contas" ? "meta_contas_mes" : "meta_ativacoes_mes";
+  const coluna = campo === "contas" ? "meta_contas_mes" : "meta_ativacoes_mes";
   const supabase = await createClient();
   const { error } = await supabase
     .from("profiles")
@@ -515,7 +542,8 @@ export async function salvarMetaTipo(formData: FormData) {
 /** WhatsApp da própria equipe (7.2): destino do resumo diário do gestor. */
 export async function salvarWhatsapp(formData: FormData) {
   const perfil = await exigirGestor();
-  if (perfil.papel !== "admin") terminar("Só o admin altera o WhatsApp da equipe.");
+  if (perfil.papel !== "admin")
+    terminar("Só o admin altera o WhatsApp da equipe.");
 
   const id = String(formData.get("id") ?? "");
   if (!id) terminar("Perfil inválido.");
@@ -609,7 +637,8 @@ export async function salvarParametro(formData: FormData) {
 
   if (!PARAMETROS_VALIDOS.has(chave)) terminar("Parâmetro desconhecido.");
   if (PARAMETROS_BINARIOS.has(chave)) {
-    if (valor !== 0 && valor !== 1) terminar("Use 0 (desligado) ou 1 (ligado).");
+    if (valor !== 0 && valor !== 1)
+      terminar("Use 0 (desligado) ou 1 (ligado).");
   } else if (PARAMETROS_ZERO_OK.has(chave)) {
     if (valor === null || valor < 0) terminar("Informe um número (0 desliga).");
   } else if (valor === null || valor <= 0) {
@@ -687,10 +716,7 @@ export async function excluirRegraCadencia(formData: FormData) {
   if (!id) terminar("Regra não informada.");
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("followup_rules")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("followup_rules").delete().eq("id", id);
   if (error) terminar(amigavel(error.code, error.message));
   terminar();
 }

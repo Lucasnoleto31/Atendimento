@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Circle,
+  CircleDot,
   Clock,
   Copy,
   ExternalLink,
@@ -29,10 +30,17 @@ import {
   type ResultadoEnvio,
 } from "@/app/(app)/chat/actions";
 import {
+  alterarTrilhaLead,
   alternarPassoAtivacao,
   carregarContexto,
   type ContextoConversa,
 } from "./actions";
+import {
+  montarJornada,
+  rotuloTrilha,
+  TRILHAS,
+  type EstadoJornada,
+} from "@/lib/jornada";
 
 const ESTADO: ResultadoEnvio = {};
 
@@ -47,6 +55,19 @@ const ROTULO_MOTIVO: Record<string, string> = {
 };
 
 /** Um dado do painel: rótulo curto em cima, valor legível embaixo. */
+/** Selo do estado atual: cor semântica + rótulo (o rótulo vem da régua). */
+const COR_JORNADA: Record<EstadoJornada, string> = {
+  lead: "bg-neutral-100 text-neutral-600",
+  contato: "bg-primary-50 text-primary-900",
+  abrindo_conta: "bg-primary-50 text-primary-900",
+  conta_aberta: "bg-primary-50 text-primary-900",
+  ativado: "bg-success-bg text-success",
+  recorrente: "bg-success-bg text-success",
+  em_risco: "bg-warning-bg text-warning",
+  inativo: "bg-danger-bg text-danger",
+  reativado: "bg-success-bg text-success",
+};
+
 /** Dias inteiros desde um instante — fora do componente (regra de pureza). */
 function diasDesde(instante: number): number {
   return Math.floor((Date.now() - instante) / 86_400_000);
@@ -180,8 +201,13 @@ export function PainelContexto({
   // Marca/desmarca um passo do checklist com resposta imediata na tela;
   // o servidor é a verdade — erro recarrega e desfaz.
   const [passoEnviando, setPassoEnviando] = useState<string | null>(null);
+  // Aviso local da seção: o erro geral do painel some na recarga seguinte,
+  // e a recarga é justamente o que desfaz o otimismo — o aviso tem que
+  // sobreviver a ela.
+  const [avisoAtivacao, setAvisoAtivacao] = useState<string | null>(null);
   const alternarPasso = (passo: string, feito: boolean) => {
     setPassoEnviando(passo);
+    setAvisoAtivacao(null);
     setDados((d) =>
       d && d.ativacao
         ? {
@@ -204,9 +230,43 @@ export function PainelContexto({
       }))
       .then((r) => {
         setPassoEnviando((p) => (p === passo ? null : p));
-        if (r && "erro" in r && r.erro) setErro(r.erro);
+        if (r && "erro" in r && r.erro) setAvisoAtivacao(r.erro);
         // Sucesso também recarrega: traz as iniciais de quem marcou e
         // desfaz qualquer resposta velha que tenha atropelado o otimismo.
+        setRecarga((n) => n + 1);
+      });
+  };
+
+  // Mudar a trilha: resposta imediata, servidor confirma (e grava o evento).
+  const [trilhaEnviando, setTrilhaEnviando] = useState(false);
+  const [avisoTrilha, setAvisoTrilha] = useState<string | null>(null);
+  const mudarTrilha = (valor: string) => {
+    const nova = TRILHAS.find((t) => t.trilha === valor)?.trilha;
+    if (!nova || trilhaEnviando) return;
+    setTrilhaEnviando(true);
+    setAvisoTrilha(null);
+    setDados((d) =>
+      d
+        ? {
+            ...d,
+            trilha: {
+              ...d.trilha,
+              de: d.trilha.atual,
+              atual: nova,
+              // "desde agora" na hora; a recarga traz quem marcou.
+              desde: new Date().toISOString(),
+              por: null,
+            },
+          }
+        : d,
+    );
+    void alterarTrilhaLead(leadId, nova)
+      .catch(() => ({
+        erro: "Sem resposta do servidor — a trilha voltou ao que está no banco.",
+      }))
+      .then((r) => {
+        setTrilhaEnviando(false);
+        if (r && "erro" in r && r.erro) setAvisoTrilha(r.erro);
         setRecarga((n) => n + 1);
       });
   };
@@ -315,6 +375,240 @@ export function PainelContexto({
                 </Campo>
               </div>
             </section>
+
+            {/* Jornada: a espinha dorsal, montada dos fatos (cada estado com
+                data e origem). O atual ganha a barra de selecionado. */}
+            {(() => {
+              const fatos = dados.jornada.fatos;
+              const { passos, atual } = montarJornada({
+                ...fatos,
+                origemLead:
+                  fatos.origemLead ??
+                  ROTULO_MOTIVO[dados.entradaMotivo] ??
+                  dados.entradaMotivo,
+                abrindoContaPor: fatos.abrindoContaPor
+                  ? iniciais(fatos.abrindoContaPor)
+                  : null,
+              });
+              const rotuloAtual =
+                passos.find((p) => p.estado === atual)?.rotulo ?? "";
+              return (
+                <section className="rounded-lg border border-neutral-200 bg-neutral-50 p-1.5">
+                  <div className="flex items-center justify-between gap-1">
+                    <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+                      Jornada
+                    </h3>
+                    <span
+                      className={cn(
+                        "inline-flex h-[20px] items-center rounded-sm px-1 text-xs font-medium",
+                        COR_JORNADA[atual],
+                      )}
+                    >
+                      {rotuloAtual}
+                    </span>
+                  </div>
+                  <ul className="mt-0.5 flex flex-col">
+                    {passos.map((p) => (
+                      <li
+                        key={p.estado}
+                        className={cn(
+                          "flex h-[32px] items-center gap-1 rounded-md border-l-2 px-0.5",
+                          p.situacao === "atual"
+                            ? "border-primary-600 bg-primary-50"
+                            : "border-transparent",
+                        )}
+                      >
+                        {p.situacao === "feito" ? (
+                          <CheckCircle2
+                            size={16}
+                            strokeWidth={1.5}
+                            aria-hidden
+                            className="shrink-0 text-success"
+                          />
+                        ) : p.situacao === "atual" ? (
+                          <CircleDot
+                            size={16}
+                            strokeWidth={1.5}
+                            aria-hidden
+                            className="shrink-0 text-primary-600"
+                          />
+                        ) : (
+                          <Circle
+                            size={16}
+                            strokeWidth={1.5}
+                            aria-hidden
+                            className="shrink-0 text-neutral-300"
+                          />
+                        )}
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 truncate text-sm",
+                            p.situacao === "atual"
+                              ? "font-medium text-primary-900"
+                              : p.situacao === "feito"
+                                ? "text-neutral-800"
+                                : "text-neutral-400",
+                          )}
+                        >
+                          {p.rotulo}
+                        </span>
+                        <span
+                          className={cn(
+                            "min-w-0 max-w-[60%] truncate font-mono text-xs tabular-nums",
+                            p.situacao === "atual"
+                              ? "text-primary-900"
+                              : "text-neutral-400",
+                          )}
+                        >
+                          {p.em
+                            ? `${formatarData(p.em)}${p.origem ? ` · ${p.origem}` : ""}`
+                            : (p.detalhe ?? "")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {dados.jornada.comissaoAtivacao ? (
+                    <p className="mt-1 border-t border-neutral-200 pt-1 text-xs text-neutral-600">
+                      Ativação pagou{" "}
+                      <span className="font-mono text-neutral-800 tabular-nums">
+                        {formatarReais(
+                          dados.jornada.comissaoAtivacao.valorCentavos,
+                        )}
+                      </span>
+                      {dados.jornada.comissaoAtivacao.vendedor
+                        ? ` a ${dados.jornada.comissaoAtivacao.vendedor}`
+                        : ""}
+                    </p>
+                  ) : null}
+                </section>
+              );
+            })()}
+
+            {/* Trilha de perfil: Iniciante → RV → Sala ao Vivo / Apollo. Cada
+                mudança é evento (quem, quando) e linha no fio da conversa. */}
+            {dados.trilha.disponivel ? (
+              <section className="rounded-lg border border-neutral-200 bg-neutral-50 p-1.5">
+                <div className="flex items-center justify-between gap-1">
+                  <h3 className="text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
+                    Trilha
+                  </h3>
+                  <span className="inline-flex h-[20px] items-center rounded-sm bg-primary-50 px-1 text-xs font-medium text-primary-900">
+                    {rotuloTrilha(dados.trilha.atual)}
+                  </span>
+                </div>
+                <ul className="mt-0.5 flex flex-col">
+                  {TRILHAS.map((t, i) => {
+                    const idxAtual = TRILHAS.findIndex(
+                      (x) => x.trilha === dados.trilha.atual,
+                    );
+                    const atual = t.trilha === dados.trilha.atual;
+                    // Sala ao Vivo e Apollo são alternativas, não degraus.
+                    const feito =
+                      !atual &&
+                      idxAtual > i &&
+                      !(
+                        t.trilha === "sala_ao_vivo" &&
+                        dados.trilha.atual === "apollo"
+                      );
+                    const direita = atual
+                      ? dados.trilha.desde
+                        ? `desde ${formatarData(dados.trilha.desde)}${
+                            dados.trilha.por
+                              ? ` · ${iniciais(dados.trilha.por)}`
+                              : ""
+                          }`
+                        : ""
+                      : t.trilha === dados.trilha.de && dados.trilha.desde
+                        ? `até ${formatarData(dados.trilha.desde)}`
+                        : "";
+                    return (
+                      <li
+                        key={t.trilha}
+                        className={cn(
+                          "flex h-[32px] items-center gap-1 rounded-md border-l-2 px-0.5",
+                          atual
+                            ? "border-primary-600 bg-primary-50"
+                            : "border-transparent",
+                        )}
+                      >
+                        {feito ? (
+                          <CheckCircle2
+                            size={16}
+                            strokeWidth={1.5}
+                            aria-hidden
+                            className="shrink-0 text-success"
+                          />
+                        ) : atual ? (
+                          <CircleDot
+                            size={16}
+                            strokeWidth={1.5}
+                            aria-hidden
+                            className="shrink-0 text-primary-600"
+                          />
+                        ) : (
+                          <Circle
+                            size={16}
+                            strokeWidth={1.5}
+                            aria-hidden
+                            className="shrink-0 text-neutral-300"
+                          />
+                        )}
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 truncate text-sm",
+                            atual
+                              ? "font-medium text-primary-900"
+                              : feito
+                                ? "text-neutral-800"
+                                : "text-neutral-400",
+                          )}
+                        >
+                          {t.rotulo}
+                          {t.detalhe ? (
+                            <span className="text-neutral-400">
+                              {" "}
+                              · {t.detalhe}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span
+                          className={cn(
+                            "min-w-0 max-w-[60%] truncate font-mono text-xs tabular-nums",
+                            atual ? "text-primary-900" : "text-neutral-400",
+                          )}
+                        >
+                          {direita}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <label className="mt-1 block">
+                  <span className="sr-only">Mudar a trilha</span>
+                  <select
+                    value={dados.trilha.atual ?? ""}
+                    aria-busy={trilhaEnviando}
+                    onChange={(e) => mudarTrilha(e.target.value)}
+                    className="h-[40px] w-full rounded-md border border-neutral-300 bg-neutral-0 px-1.5 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="" disabled>
+                      Definir trilha…
+                    </option>
+                    {TRILHAS.map((t) => (
+                      <option key={t.trilha} value={t.trilha}>
+                        {t.rotulo}
+                        {t.detalhe ? ` (${t.detalhe})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {avisoTrilha ? (
+                  <p role="alert" className="mt-1 text-xs text-danger">
+                    {avisoTrilha}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
 
             {/* Cliente da corretora: o que ele vale hoje */}
             {dados.cliente ? (
@@ -511,6 +805,11 @@ export function PainelContexto({
                     });
                   })()}
                 </ul>
+                {avisoAtivacao ? (
+                  <p role="alert" className="mt-1 text-xs text-danger">
+                    {avisoAtivacao}
+                  </p>
+                ) : null}
                 {(() => {
                   const datas = dados.ativacao
                     .filter((i) => i.feitoEm)

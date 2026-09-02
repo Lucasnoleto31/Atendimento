@@ -1,6 +1,11 @@
 import type { createServiceClient } from "../supabase/server.ts";
 import { hojeEmBrasilia } from "../format.ts";
-import { COLUNAS_CONTA, COLUNAS_LOTES, melhorAba, type Aba } from "./tabular.ts";
+import {
+  COLUNAS_CONTA,
+  COLUNAS_LOTES,
+  melhorAba,
+  type Aba,
+} from "./tabular.ts";
 import { prepararLotes } from "./lotes.ts";
 import type { GrupoCliente } from "./clientes.ts";
 
@@ -91,7 +96,10 @@ export async function fecharRegistro(
  * depois pelo telefone; quem não casa com nada vira cliente novo.
  * Devolve também os vínculos conta -> cliente a gravar.
  */
-export async function aplicarClientes(service: Service, grupos: GrupoCliente[]) {
+export async function aplicarClientes(
+  service: Service,
+  grupos: GrupoCliente[],
+) {
   const todasContas = grupos.flatMap((g) => g.contas);
   const todosTelefones = grupos
     .map((g) => g.telefone)
@@ -235,7 +243,10 @@ export async function aplicarClientes(service: Service, grupos: GrupoCliente[]) 
 
   // Dois grupos podem resolver para o MESMO cliente (após mesclas): o upsert
   // não aceita o mesmo id duas vezes no lote, então mescla os campos antes.
-  const porId = new Map<string, (typeof existentes)[number]["grupo"] & { id: string }>();
+  const porId = new Map<
+    string,
+    (typeof existentes)[number]["grupo"] & { id: string }
+  >();
   for (const { id, grupo } of existentes) {
     grupo.contas.forEach((conta) => {
       if (!contaParaCliente.has(conta)) {
@@ -275,7 +286,9 @@ export async function aplicarClientes(service: Service, grupos: GrupoCliente[]) 
   }
 
   // A mesma conta só entra uma vez no lote.
-  const vinculosUnicos = [...new Map(vinculos.map((v) => [v.conta, v])).values()];
+  const vinculosUnicos = [
+    ...new Map(vinculos.map((v) => [v.conta, v])).values(),
+  ];
 
   for (const parte of blocos(vinculosUnicos)) {
     const { error } = await service
@@ -419,8 +432,18 @@ export async function aplicarLotes(
     // Quem caiu de giro volta para a fila.
     // Lotes novos no banco: a foto do giro (0044) atualiza ANTES do motor de
     // reativação decidir quem está parado — senão ele olharia o giro de ontem.
-    await service.rpc("atualizar_giro").then(() => {}, () => {});
+    await service.rpc("atualizar_giro").then(
+      () => {},
+      () => {},
+    );
     const { data: reativados } = await service.rpc("gerar_leads_reativacao");
+    // Ativação paga comissão (0066): quem fez o 1º lote neste arquivo gera a
+    // venda automática para o dono do lead. Sem a migração (ou com o produto
+    // ainda em R$ 0), a função devolve 0 e nada muda.
+    await service.rpc("registrar_comissoes_ativacao").then(
+      () => {},
+      () => {},
+    );
     const linhasReativacao = (reativados ?? []) as {
       criados: number;
       motivo: string;

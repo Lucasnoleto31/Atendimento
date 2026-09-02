@@ -3,6 +3,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { ehPassoAtivacao, PASSOS_ATIVACAO } from "@/lib/ativacao-passos";
+import {
+  ehTrilha,
+  rotuloTrilha,
+  type FatosJornada,
+  type Trilha,
+} from "@/lib/jornada";
 
 /**
  * A camada de dados do chat novo (/conversas). A mudança que importa é de
@@ -451,6 +457,15 @@ export type TarefaDoLead = {
   vencida: boolean;
 };
 
+/** Banco atrasado (migração ainda não aplicada): coluna/tabela ausente. */
+function colunaAusente(erro: { code?: string } | null | undefined): boolean {
+  return (
+    erro?.code === "42703" ||
+    erro?.code === "PGRST204" ||
+    erro?.code === "PGRST205"
+  );
+}
+
 export type ContextoConversa = {
   telefone: string | null;
   email: string | null;
@@ -495,6 +510,24 @@ export type ContextoConversa = {
         automatico: boolean;
       }[]
     | null;
+  /** A régua da jornada nasce dos fatos — o painel monta (src/lib/jornada). */
+  jornada: {
+    fatos: FatosJornada;
+    /** Venda automática de ativação (0066), quando o produto tem valor. */
+    comissaoAtivacao: {
+      valorCentavos: number;
+      vendedor: string | null;
+      em: string;
+    } | null;
+  };
+  /** Trilha de perfil; disponivel=false quando a 0066 não rodou. */
+  trilha: {
+    disponivel: boolean;
+    atual: Trilha | null;
+    desde: string | null;
+    por: string | null;
+    de: Trilha | null;
+  };
 };
 
 /**
@@ -509,13 +542,24 @@ export async function carregarContexto(
   if (!perfil) return { erro: "Sessão expirada." };
 
   const supabase = await createClient();
-  const { data: lead, error } = await supabase
+  const leadCheio = await supabase
     .from("leads")
     .select(
-      "telefone_e164, email, criado_em, primeira_resposta_em, entrada_motivo, campanha, utm_campaign, observacao, customer_id, status, responsavel:profiles(nome), etapa:pipeline_stages(nome), canal:channels(nome), customer:customers(nome_completo, conta_aberta_em)",
+      "telefone_e164, email, criado_em, primeira_resposta_em, entrada_motivo, campanha, utm_campaign, observacao, customer_id, status, trilha, responsavel:profiles(nome), etapa:pipeline_stages(nome), canal:channels(nome), customer:customers(nome_completo, conta_aberta_em, status)",
     )
     .eq("id", leadId)
     .maybeSingle();
+  // Sem a 0066 (coluna trilha) o select cheio erra: refaz sem ela — a
+  // trilha some do painel, o resto segue de pé.
+  const { data: lead, error } = colunaAusente(leadCheio.error)
+    ? await supabase
+        .from("leads")
+        .select(
+          "telefone_e164, email, criado_em, primeira_resposta_em, entrada_motivo, campanha, utm_campaign, observacao, customer_id, status, responsavel:profiles(nome), etapa:pipeline_stages(nome), canal:channels(nome), customer:customers(nome_completo, conta_aberta_em, status)",
+        )
+        .eq("id", leadId)
+        .maybeSingle()
+    : leadCheio;
   if (error) return { erro: "Não deu para ler os dados do lead." };
   if (!lead) return { erro: "Lead não encontrado." };
 
@@ -530,73 +574,132 @@ export async function carregarContexto(
     observacao: string | null;
     customer_id: string | null;
     status: string | null;
+    trilha?: string | null;
     responsavel: { nome: string } | null;
     etapa: { nome: string } | null;
     canal: { nome: string } | null;
-    customer: { nome_completo: string; conta_aberta_em: string | null } | null;
+    customer: {
+      nome_completo: string;
+      conta_aberta_em: string | null;
+      status: string | null;
+    } | null;
   };
   const l = lead as unknown as LeadContexto;
   const agora = Date.now();
 
   // Giro, receita e tarefas em paralelo — e cada uma tolerante: view ou
   // migração ausente vira ausência de cartão, nunca painel quebrado.
-  const [giroR, receitaR, tarefasR, templatesR, custoR, checklistR, loteR] =
-    await Promise.all([
-      l.customer_id
-        ? supabase
-            .from("v_customer_giro")
-            .select("lotes_30d, lotes_30d_anterior, ultimo_giro_em")
-            .eq("customer_id", l.customer_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      l.customer_id
-        ? supabase
-            .from("v_customer_receita")
-            .select("receita_30d_centavos, ltv_centavos")
-            .eq("customer_id", l.customer_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      supabase
-        .from("lead_tasks")
-        .select("id, titulo, vence_em")
-        .eq("lead_id", leadId)
-        .is("concluida_em", null)
-        .order("vence_em")
-        .limit(10),
-      // Template disparado deixa metadados.template no histórico: é por aí
-      // que se sabe quantas vezes já se pagou para falar com este lead.
-      supabase
-        .from("lead_interactions")
-        .select("criado_em, metadados", { count: "exact" })
-        .eq("lead_id", leadId)
-        .eq("tipo", "mensagem_enviada")
-        .not("metadados->>template", "is", null)
-        // Recusado pela Meta não chegou e não foi cobrado.
-        .not("metadados->>status_envio", "eq", "failed")
-        .order("criado_em", { ascending: false })
-        .limit(1),
-      supabase
-        .from("settings")
-        .select("valor")
-        .eq("chave", "custo_template_centavos")
-        .maybeSingle(),
-      // Passos marcados à mão do roteiro de ativação (0065). Tolerante:
-      // sem a migração, a seção some do painel em vez de quebrá-lo.
-      supabase
-        .from("ativacao_checklist")
-        .select("passo, feito_em, autor:profiles(nome)")
-        .eq("lead_id", leadId),
-      // 1ª operação = primeiro lote da vida (definição canônica da Fase 2).
-      l.customer_id
-        ? supabase
-            .from("customer_lots")
-            .select("referencia_data")
-            .eq("customer_id", l.customer_id)
-            .order("referencia_data", { ascending: true })
-            .limit(1)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-    ]);
+  // Data de Brasília (UTC-3) para a janela de 30 dias — igual à v_customer_giro.
+  const corte30 = new Date(agora - 3 * 3_600_000 - 30 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const [
+    giroR,
+    receitaR,
+    tarefasR,
+    templatesR,
+    custoR,
+    checklistR,
+    loteR,
+    trilhaR,
+    cicloR,
+    diasR,
+    comissaoR,
+  ] = await Promise.all([
+    l.customer_id
+      ? supabase
+          .from("v_customer_giro")
+          .select("lotes_30d, lotes_30d_anterior, ultimo_giro_em")
+          .eq("customer_id", l.customer_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    l.customer_id
+      ? supabase
+          .from("v_customer_receita")
+          .select("receita_30d_centavos, ltv_centavos")
+          .eq("customer_id", l.customer_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("lead_tasks")
+      .select("id, titulo, vence_em")
+      .eq("lead_id", leadId)
+      .is("concluida_em", null)
+      .order("vence_em")
+      .limit(10),
+    // Template disparado deixa metadados.template no histórico: é por aí
+    // que se sabe quantas vezes já se pagou para falar com este lead.
+    supabase
+      .from("lead_interactions")
+      .select("criado_em, metadados", { count: "exact" })
+      .eq("lead_id", leadId)
+      .eq("tipo", "mensagem_enviada")
+      .not("metadados->>template", "is", null)
+      // Recusado pela Meta não chegou e não foi cobrado.
+      .not("metadados->>status_envio", "eq", "failed")
+      .order("criado_em", { ascending: false })
+      .limit(1),
+    supabase
+      .from("settings")
+      .select("valor")
+      .eq("chave", "custo_template_centavos")
+      .maybeSingle(),
+    // Passos marcados à mão do roteiro de ativação (0065). Tolerante:
+    // sem a migração, a seção some do painel em vez de quebrá-lo.
+    supabase
+      .from("ativacao_checklist")
+      .select("passo, feito_em, autor:profiles(nome)")
+      .eq("lead_id", leadId),
+    // 1ª operação = primeiro lote da vida (definição canônica da Fase 2).
+    l.customer_id
+      ? supabase
+          .from("customer_lots")
+          .select("referencia_data")
+          .eq("customer_id", l.customer_id)
+          .order("referencia_data", { ascending: true })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    // Trilha: o último evento diz desde quando e por quem (0066).
+    supabase
+      .from("trilha_eventos")
+      .select("de, para, criado_em, autor:profiles(nome)")
+      .eq("lead_id", leadId)
+      .order("criado_em", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    // Ciclo de vida da carteira: o episódio mais recente dá a data.
+    l.customer_id
+      ? supabase
+          .from("customer_events")
+          .select("tipo, criado_em")
+          .eq("customer_id", l.customer_id)
+          .in("tipo", ["em_risco", "churn", "reativado"])
+          .order("criado_em", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    // Recorrente = dias DISTINTOS com lote nos últimos 30 dias.
+    l.customer_id
+      ? supabase
+          .from("customer_lots")
+          .select("referencia_data")
+          .eq("customer_id", l.customer_id)
+          .gte("referencia_data", corte30)
+      : Promise.resolve({ data: null, error: null }),
+    // A venda automática de ativação, se já pagou.
+    l.customer_id
+      ? supabase
+          .from("sales")
+          .select(
+            "valor_comissao_centavos, ocorreu_em, vendedor:profiles(nome), produto:products!inner(codigo)",
+          )
+          .eq("customer_id", l.customer_id)
+          .eq("produto.codigo", "ATIVACAO")
+          .neq("status", "cancelada")
+          .limit(1)
+      : Promise.resolve({ data: null, error: null }),
+  ]);
 
   const giro = giroR.data as {
     lotes_30d: number | null;
@@ -606,6 +709,74 @@ export async function carregarContexto(
   const receita = receitaR.data as {
     receita_30d_centavos: number | null;
     ltv_centavos: number | null;
+  } | null;
+
+  // Fatos da jornada — a régua em si é montada no painel (src/lib/jornada).
+  const marcadosLista = checklistR.error
+    ? []
+    : ((checklistR.data ?? []) as unknown as {
+        passo: string;
+        feito_em: string;
+        autor: { nome: string } | null;
+      }[]);
+  const abrindo = marcadosLista
+    .filter(
+      (m) => m.passo === "link_abertura" || m.passo === "cadastro_iniciado",
+    )
+    .sort((a, b) => a.feito_em.localeCompare(b.feito_em))[0];
+  const diasComGiro30d = new Set(
+    ((diasR.data ?? []) as { referencia_data: string }[]).map(
+      (d) => d.referencia_data,
+    ),
+  ).size;
+  // Último episódio de cada tipo — a régua mostra o histórico do ciclo.
+  const episodios = (
+    (cicloR.data ?? []) as { tipo: string; criado_em: string }[]
+  ).reduce(
+    (acc, e) => {
+      if (!acc[e.tipo]) acc[e.tipo] = e.criado_em;
+      return acc;
+    },
+    {} as Record<string, string>,
+  );
+  const cicloVida = l.customer?.status;
+  const fatosJornada: FatosJornada = {
+    criadoEm: l.criado_em,
+    origemLead: l.canal?.nome ?? null,
+    primeiraRespostaEm: l.primeira_resposta_em,
+    abrindoContaEm: abrindo?.feito_em ?? null,
+    abrindoContaPor: abrindo?.autor?.nome ?? null,
+    contaAbertaEm: l.customer?.conta_aberta_em ?? null,
+    primeiroLoteEm:
+      (loteR.data as { referencia_data: string } | null)?.referencia_data ??
+      null,
+    diasComGiro30d,
+    ultimoGiroEm:
+      (giroR.data as { ultimo_giro_em: string | null } | null)
+        ?.ultimo_giro_em ?? null,
+    cicloVida:
+      cicloVida === "ativo" ||
+      cicloVida === "em_risco" ||
+      cicloVida === "churn" ||
+      cicloVida === "reativado"
+        ? cicloVida
+        : null,
+    emRiscoEm: episodios["reativacao"] ?? null,
+    inativoEm: episodios["churn"] ?? null,
+    reativadoEm: episodios["retomou_giro"] ?? null,
+  };
+  const comissao = (
+    (comissaoR.data ?? []) as unknown as {
+      valor_comissao_centavos: number;
+      ocorreu_em: string;
+      vendedor: { nome: string } | null;
+    }[]
+  )[0];
+  const trilhaEvento = (trilhaR.data ?? null) as unknown as {
+    de: string | null;
+    para: string;
+    criado_em: string;
+    autor: { nome: string } | null;
   } | null;
 
   return {
@@ -656,6 +827,24 @@ export async function carregarContexto(
       vencida: Date.parse(t.vence_em) < agora,
     })),
     tarefasDisponiveis: tarefasR.error === null,
+    jornada: {
+      fatos: fatosJornada,
+      comissaoAtivacao: comissao
+        ? {
+            valorCentavos: comissao.valor_comissao_centavos,
+            vendedor: comissao.vendedor?.nome ?? null,
+            em: comissao.ocorreu_em,
+          }
+        : null,
+    },
+    trilha: {
+      disponivel: trilhaR.error === null,
+      atual: l.trilha && ehTrilha(l.trilha) ? l.trilha : null,
+      desde: trilhaEvento?.criado_em ?? null,
+      por: trilhaEvento?.autor?.nome ?? null,
+      de:
+        trilhaEvento?.de && ehTrilha(trilhaEvento.de) ? trilhaEvento.de : null,
+    },
     ativacao: (() => {
       if (checklistR.error) return null; // banco ainda sem a 0065
       const marcados = new Map(
@@ -750,5 +939,65 @@ export async function alternarPassoAtivacao(
       .eq("passo", passo);
     if (error) return { erro: "Não deu para desmarcar o passo." };
   }
+  return { ok: true };
+}
+
+/**
+ * Muda a trilha de perfil do lead. Cada mudança vira evento (quem, quando,
+ * de onde) e uma linha de sistema na conversa — upgrade de trilha é fato
+ * do relacionamento, não configuração.
+ */
+export async function alterarTrilhaLead(
+  leadId: string,
+  trilha: string,
+): Promise<{ ok?: true; erro?: string }> {
+  const perfil = await perfilAtual();
+  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!ehTrilha(trilha)) return { erro: "Trilha desconhecida." };
+
+  const supabase = await createClient();
+  const { data: lead, error: erroLeitura } = await supabase
+    .from("leads")
+    .select("trilha")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (erroLeitura) {
+    return {
+      erro: colunaAusente(erroLeitura)
+        ? "Banco ainda sem a 0066 — rode a migração da jornada."
+        : "Não deu para ler o lead.",
+    };
+  }
+  if (!lead) return { erro: "Lead não encontrado." };
+  const de = (lead as { trilha: string | null }).trilha;
+  if (de === trilha) return { ok: true };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ trilha })
+    .eq("id", leadId);
+  if (error) return { erro: "Não deu para mudar a trilha. Tente de novo." };
+
+  const { error: erroEvento } = await supabase.from("trilha_eventos").insert({
+    lead_id: leadId,
+    de,
+    para: trilha,
+    autor_id: perfil.id,
+    origem: "crm",
+  });
+  if (erroEvento) {
+    return {
+      erro: "A trilha mudou, mas o histórico não gravou — avise o admin.",
+    };
+  }
+
+  // Linha de sistema no fio da conversa: quem abrir o chat vê a mudança.
+  await supabase.from("lead_interactions").insert({
+    lead_id: leadId,
+    tipo: "nota",
+    conteudo: `Trilha: ${rotuloTrilha(de)} → ${rotuloTrilha(trilha)}`,
+    autor_id: perfil.id,
+    metadados: { via: "crm", sistema: true, trilha: { de, para: trilha } },
+  });
   return { ok: true };
 }
