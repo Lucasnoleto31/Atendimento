@@ -27,14 +27,26 @@ export function Cadastrar2fa({ proximo }: { proximo: string }) {
           await supabase.auth.mfa.unenroll({ factorId: f.id });
         }
       }
+      // Nome único por tentativa: o GoTrue recusa dois fatores com o mesmo
+      // friendly name (422 mfa_factor_name_conflict), e era exatamente isso
+      // que travava quem voltava ao cadastro com um "Zeve CRM" já gravado —
+      // reset incompleto, aba repetida, sessão antiga. O nome é rótulo
+      // interno (a lista da administração), não o que aparece no app
+      // autenticador, então o carimbo de data não incomoda ninguém.
+      const quando = new Date().toISOString().replace("T", " ").slice(0, 19);
       const { data, error } = await supabase.auth.mfa.enroll({
         factorType: "totp",
-        friendlyName: "Zeve CRM",
+        friendlyName: `Zeve CRM · ${quando}`,
       });
       if (!vivo) return;
       if (error || !data) {
+        // A mensagem crua decide o conserto — a tela antiga a engolia e
+        // culpava uma configuração do Supabase que estava certa.
+        const cru = error?.message ?? "resposta vazia";
         setErro(
-          "Não deu para gerar o código. Se persistir, peça à administração para conferir se o segundo fator está ligado no Supabase.",
+          /bearer token|session/i.test(cru)
+            ? "Sua sessão expirou no meio do caminho. Volte e entre de novo."
+            : `Não deu para gerar o código (${cru}). Tente recarregar a página; se persistir, mande esse texto para a administração.`,
         );
         return;
       }
