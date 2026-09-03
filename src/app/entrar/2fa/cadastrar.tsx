@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { sair } from "../actions";
@@ -9,7 +8,6 @@ import { sair } from "../actions";
 type Fator = { id: string; qr: string; segredo: string };
 
 export function Cadastrar2fa({ proximo }: { proximo: string }) {
-  const router = useRouter();
   const [fator, setFator] = useState<Fator | null>(null);
   const [codigo, setCodigo] = useState("");
   const [erro, setErro] = useState<string | null>(null);
@@ -78,8 +76,9 @@ export function Cadastrar2fa({ proximo }: { proximo: string }) {
       );
       return;
     }
-    router.replace(proximo);
-    router.refresh();
+    // Mesma razão da tela do código: virada de autenticação = recarga cheia.
+     
+    window.location.assign(proximo);
   };
 
   return (

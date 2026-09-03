@@ -5,7 +5,15 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 
-export type EstadoLogin = { erro?: string };
+export type EstadoLogin = {
+  erro?: string;
+  /** Para onde ir após a senha. O FORM navega com recarga completa
+   *  (window.location) em vez de redirect do router: aba aberta desde antes
+   *  de um deploy carrega chunks velhos, e a navegação client-side do Next
+   *  morre em silêncio — foi exatamente o "clico em Entrar e nada acontece".
+   *  A recarga zera o estado da aba e ainda leva os cookies novos junto. */
+  ir?: string;
+};
 
 const MAX_FALHAS = 5;
 const JANELA_MIN = 15;
@@ -108,18 +116,18 @@ export async function entrar(
   const destino =
     proximo.startsWith("/") && !proximo.startsWith("//") ? proximo : "/hoje";
   // Senha certa = sessão aal1. Com 2FA obrigatório, o próximo passo é o
-  // código (ou o cadastro do fator) — redireciona DIRETO para lá: se
-  // mandasse para /hoje, o Next seguiria o 307 do middleware por dentro e
-  // a tela do código apareceria com /hoje na barra.
+  // código (ou o cadastro do fator) — o destino vai DIRETO para lá: se
+  // fosse /hoje, o middleware desviaria por dentro e a tela do código
+  // apareceria com /hoje na barra.
   if (process.env.EXIGIR_2FA !== "0") {
     const temFator = (sessao.user?.factors ?? []).some(
       (f) => f.status === "verified",
     );
-    redirect(
-      `/entrar/${temFator ? "codigo" : "2fa"}?proximo=${encodeURIComponent(destino)}`,
-    );
+    return {
+      ir: `/entrar/${temFator ? "codigo" : "2fa"}?proximo=${encodeURIComponent(destino)}`,
+    };
   }
-  redirect(destino);
+  return { ir: destino };
 }
 
 export async function sair() {

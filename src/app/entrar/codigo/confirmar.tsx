@@ -1,13 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { sair } from "../actions";
 
 export function Confirmar2fa({ proximo }: { proximo: string }) {
-  const router = useRouter();
   const [codigo, setCodigo] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -22,7 +20,8 @@ export function Confirmar2fa({ proximo }: { proximo: string }) {
     const fator = lista?.totp.find((f) => f.status === "verified") ?? null;
     if (!fator) {
       setEnviando(false);
-      router.replace(`/entrar/2fa?proximo=${encodeURIComponent(proximo)}`);
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- recarga completa de propósito: virada de autenticação zera o estado da aba
+      window.location.assign(`/entrar/2fa?proximo=${encodeURIComponent(proximo)}`);
       return;
     }
     const { error } = await supabase.auth.mfa.challengeAndVerify({
@@ -34,8 +33,11 @@ export function Confirmar2fa({ proximo }: { proximo: string }) {
       setErro("Código não confere. Espere o próximo e tente de novo.");
       return;
     }
-    router.replace(proximo);
-    router.refresh();
+    // Recarga completa, não router.replace: a sessão acabou de subir para
+    // aal2 e a aba pode carregar chunks de um deploy anterior — a navegação
+    // client-side é exatamente o elo que vinha morrendo em silêncio.
+     
+    window.location.assign(proximo);
   };
 
   return (
