@@ -157,23 +157,34 @@ export type PerfilInstagram = {
 
 /**
  * Nome, @ e foto de quem escreveu, para o contato não nascer como um número.
+ *
+ * A foto não derruba o nome: um campo que a Graph recusa derruba a chamada
+ * inteira, e o profile_pic depende de permissão e da conta expor a foto.
+ * Se o pedido com a foto falha ou estoura o prazo, sai um segundo só com
+ * nome e @, como a versão anterior pedia, e a foto volta nula. No pior caso
+ * o webhook espera os dois prazos.
  */
 export async function perfilInstagram(igsid: string): Promise<PerfilInstagram> {
+  // Prazo curto: sem perfil o contato só nasce com nome genérico; não vale
+  // segurar o webhook por isso.
+  const pedir = (campos: string) =>
+    graph<{ name?: string; username?: string; profile_pic?: string }>(
+      `/${igsid}?fields=${campos}`,
+      { signal: AbortSignal.timeout(TEMPO_PERFIL_MS) },
+    );
   try {
-    // Prazo curto: sem perfil o contato só nasce com nome genérico; não vale
-    // segurar o webhook por isso.
-    const r = await graph<{
-      name?: string;
-      username?: string;
-      profile_pic?: string;
-    }>(`/${igsid}?fields=name,username,profile_pic`, {
-      signal: AbortSignal.timeout(TEMPO_PERFIL_MS),
-    });
+    const r = await pedir("name,username,profile_pic");
     return {
       nome: r.name ?? null,
       usuario: r.username ?? null,
       foto: r.profile_pic ?? null,
     };
+  } catch {
+    // Segue para o pedido sem a foto.
+  }
+  try {
+    const r = await pedir("name,username");
+    return { nome: r.name ?? null, usuario: r.username ?? null, foto: null };
   } catch {
     // Perfil sem permissão de leitura não impede a conversa de existir.
     return { nome: null, usuario: null, foto: null };

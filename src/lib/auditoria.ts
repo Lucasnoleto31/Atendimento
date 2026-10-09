@@ -9,7 +9,8 @@ import { createServiceClient } from "@/lib/supabase/server";
  * Ações de LEITURA (novas na 0067): viu_ficha, viu_cliente, abriu_conversa,
  * revelou_documento. As de escrita/exportação já existiam. Desde 09/10/2026
  * entram também as mudanças da Administração, com o antes e o depois em
- * detalhes.mudancas; só depois de a gravação dar certo.
+ * detalhes.mudancas, e as ações em massa da lista de contatos, uma linha por
+ * ação; só depois de a gravação dar certo.
  */
 export function registrarAcesso(
   quem: string | null,
@@ -78,6 +79,12 @@ export const ROTULO_ACAO: Record<string, string> = {
   apagou_mensagem: "apagou uma mensagem para a equipe",
   ocultou_mensagem: "ocultou uma mensagem do contato",
   restaurou_mensagem: "restaurou uma mensagem apagada",
+  // Contatos: as ações em massa da lista (e o "Trocar" do responsável na
+  // ficha, que passa pela mesma action). Uma linha por ação, não uma por
+  // contato; na linha do log, a frase diz as etiquetas ou o novo dono e
+  // quantos contatos mudaram (FRASE_EM_MASSA, abaixo).
+  etiquetou_contatos: "mudou as etiquetas de contatos",
+  transferiu_contatos: "transferiu contatos",
   // As mudanças da Administração (desde 09/10/2026). O rótulo é o da lista de
   // filtros e do CSV; na linha do log, o "alguém" e o "uma" dão lugar ao
   // nome gravado em detalhes.alvo (FRASE_COM_ALVO, abaixo).
@@ -142,14 +149,52 @@ const FRASE_COM_ALVO: Record<string, (alvo: string) => string> = {
 };
 
 /**
+ * A frase das ações em massa dos contatos, montada dos detalhes: "pôs a
+ * etiqueta “VIP” em 120 contatos", "transferiu 1 contato para Bia". O
+ * número é o de contatos que mudaram de fato, não o de marcados. Faltando o
+ * que a frase pede, null, e a linha fica com o rótulo.
+ */
+const FRASE_EM_MASSA: Record<
+  string,
+  (d: Record<string, unknown>) => string | null
+> = {
+  etiquetou_contatos: (d) => {
+    if (typeof d.contatos !== "number") return null;
+    const n = contagemContatos(d.contatos);
+    const postas = nomesGravados(d.etiquetas_postas);
+    const tiradas = nomesGravados(d.etiquetas_tiradas);
+    const artigo = (l: string[]) => (l.length === 1 ? "a etiqueta" : "as etiquetas");
+    if (postas.length > 0 && tiradas.length > 0) {
+      return `mudou as etiquetas de ${n}: pôs ${entreAspas(postas)} e tirou ${entreAspas(tiradas)}`;
+    }
+    if (postas.length > 0) return `pôs ${artigo(postas)} ${entreAspas(postas)} em ${n}`;
+    if (tiradas.length > 0) {
+      return `tirou ${artigo(tiradas)} ${entreAspas(tiradas)} de ${n}`;
+    }
+    return null;
+  },
+  transferiu_contatos: (d) => {
+    if (typeof d.contatos !== "number") return null;
+    const n = contagemContatos(d.contatos);
+    if (d.sem_dono === true) return `deixou ${n} sem dono`;
+    const alvo = typeof d.alvo === "string" ? d.alvo.trim() : "";
+    return alvo ? `transferiu ${n} para ${alvo}` : null;
+  },
+};
+
+/**
  * O verbo da linha do log, com o alvo quando há ("mudou o papel de Bia");
  * sem alvo gravado, o rótulo da lista. `comAlvo` avisa que o alvo já está na
- * frase, para a linha de apoio não repetir.
+ * frase (nas ações em massa, também as etiquetas, o novo dono e o número de
+ * contatos), para a linha de apoio não repetir.
  */
 export function fraseDaAcao(
   acao: string,
   d: Record<string, unknown>,
 ): { frase: string; comAlvo: boolean } {
+  const emMassa = FRASE_EM_MASSA[acao];
+  const fraseEmMassa = emMassa ? emMassa(d) : null;
+  if (fraseEmMassa) return { frase: fraseEmMassa, comAlvo: true };
   const montar = FRASE_COM_ALVO[acao];
   const alvo = typeof d.alvo === "string" ? d.alvo.trim() : "";
   if (montar && alvo) return { frase: montar(alvo), comAlvo: true };
@@ -224,11 +269,22 @@ function juntarNomes(nomes: readonly string[]): string {
   return `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
 }
 
+/** “VIP”, “VIP” e “Frio”: nome de coisa vai com as aspas da tela. */
+function entreAspas(nomes: readonly string[]): string {
+  return juntarNomes(nomes.map((n) => `“${n}”`));
+}
+
+/** "1 contato", "1.234 contatos". */
+function contagemContatos(n: number): string {
+  return n === 1 ? "1 contato" : `${n.toLocaleString("pt-BR")} contatos`;
+}
+
 /**
  * O "objeto" da linha: o que dá para dizer a partir dos detalhes gravados.
  * Sem opções, sai tudo e inteiro (o CSV). Na tela: `curto` encurta o texto
- * livre das mudanças e `semAlvo` deixa de fora o alvo que a frase já disse
- * (fraseDaAcao).
+ * livre das mudanças e `semAlvo` deixa de fora o que a frase já disse
+ * (fraseDaAcao): o alvo e, nas ações em massa, as etiquetas e o número de
+ * contatos.
  */
 export function descreverDetalhes(
   d: Record<string, unknown>,
@@ -296,6 +352,29 @@ export function descreverDetalhes(
   if (typeof d.importada_em === "string") {
     partes.push(`importada em ${d.importada_em}`);
   }
+  // As ações em massa dos contatos: as etiquetas que entraram e saíram, o
+  // "sem dono" e quantos contatos mudaram (o novo dono é o alvo, acima). Na
+  // tela a frase já diz isso, e a linha de apoio fica com o caminho: os
+  // marcados ou o filtro inteiro da lista.
+  if (!opcoes.semAlvo) {
+    const postas = nomesGravados(d.etiquetas_postas);
+    if (postas.length > 0) partes.push(`pôs ${entreAspas(postas)}`);
+    const tiradas = nomesGravados(d.etiquetas_tiradas);
+    if (tiradas.length > 0) partes.push(`tirou ${entreAspas(tiradas)}`);
+    if (d.sem_dono === true) partes.push("sem dono");
+    if (typeof d.contatos === "number") partes.push(contagemContatos(d.contatos));
+  }
+  // Etiquetar que parou no meio: no lote que falhou as etiquetas novas
+  // entraram e as outras não saíram. Esses contatos ficam fora do número da
+  // frase, e a linha diz à parte, também na tela.
+  if (typeof d.so_postas === "number" && d.so_postas > 0) {
+    const postas = nomesGravados(d.etiquetas_postas);
+    partes.push(
+      `só pôs ${postas.length > 0 ? entreAspas(postas) : "as etiquetas"} em mais ${contagemContatos(d.so_postas)}`,
+    );
+  }
+  if (d.alcance === "selecao") partes.push("pela seleção");
+  else if (d.alcance === "filtro") partes.push("pelo filtro da lista");
   if (typeof d.lista === "string") partes.push(`lista ${d.lista}`);
   if (typeof d.periodo === "string") partes.push(`período ${d.periodo}`);
   if (typeof d.ip === "string") partes.push(`ip ${d.ip}`);

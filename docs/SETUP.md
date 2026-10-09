@@ -205,3 +205,12 @@ tentativas" na tela e "código de acesso bloqueado" no Log de acesso), o
 `login_tentativas` e na `auditoria` de produção, e "Esqueci a senha" troca a
 senha real da conta e derruba as outras sessões dela. Use uma conta
 descartável.
+
+**Banco de produção ainda com `exigir_2fa` = "1":** a entrada por código no
+e-mail deixa a sessão sem o app autenticador, e as telas locais abrem vazias.
+Enquanto for assim, abra `/autenticador-local` (sem link no app) e digite o
+código do app autenticador: a sessão sobe para o nível que o banco pede. A
+página existe no `npm run dev`; no `npm run build` + `npm run start` local, só
+com `AUTENTICADOR_LOCAL="1"` no `.env.local`. Na Vercel essa variável nunca
+existe, e lá a página responde 404. Ela pode sair do código quando o
+`exigir_2fa` for desligado.

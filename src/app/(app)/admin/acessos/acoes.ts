@@ -71,6 +71,13 @@ export const GRUPOS_ACOES: GrupoAcoes[] = [
     titulo: "Mensagens apagadas",
     acoes: ["apagou_mensagem", "ocultou_mensagem", "restaurou_mensagem"],
   },
+  // As ações em massa da lista de contatos (e o "Trocar" do responsável na
+  // ficha, que passa pela mesma action).
+  {
+    id: "contatos",
+    titulo: "Contatos",
+    acoes: ["etiquetou_contatos", "transferiu_contatos"],
+  },
   // As outras subpáginas da Administração, com o nome delas.
   {
     id: "atendimento",

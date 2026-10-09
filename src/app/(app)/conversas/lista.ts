@@ -97,7 +97,8 @@ export type LinhaConversa = {
   /** Veio pelo Direct (tem IGSID), com @ ou sem: só ele tem foto guardada.
    *  Alimenta o avatar da linha e o do cabeçalho da conversa. */
   direct: boolean;
-  /** Prévia da última mensagem + de quem foi a vez. */
+  /** Prévia da última mensagem + de quem foi a vez. A apagada vem com o
+   *  texto da bolha ("Mensagem apagada", "Apagada por Ana"), nunca o dela. */
   previa: string | null;
   vez: "eles" | "nos" | null;
   ultimaEm: string | null;
@@ -257,6 +258,11 @@ const NENHUM_ID = "00000000-0000-0000-0000-000000000000";
 // atrasados nunca ficam de fora por causa dos próximos.
 const MAX_RECONTATOS = 200;
 
+// A marca de apagada das prévias sai pelos pares (lead_id, criado_em) da
+// página: cada par leva o id e a hora na URL (uns 85 caracteres), e 100
+// ocupam menos que os 300 ids da segunda onda.
+const FATIA_APAGADAS = 100;
+
 // O prazo-sentinela do "até responder" (chat/actions.ts) fica fora da
 // próxima volta: ele nunca vence sozinho.
 const ANTES_DO_SENTINELA = "9000-01-01T00:00:00.000Z";
@@ -291,6 +297,30 @@ type ExtrasLead = {
   chat_adiado_ate: string | null;
   chat_resolvido_em: string | null;
 };
+
+/** A última mensagem de cada conversa, como previas_conversas (0045) dá. */
+type PreviaConversa = {
+  lead_id: string;
+  tipo: string;
+  conteudo: string | null;
+  criado_em: string;
+};
+
+/**
+ * O que a prévia mostra no lugar da mensagem apagada: o mesmo texto da
+ * bolha (TextoApagada, em chat/bolha.tsx), lido como lerApagada lê a marca
+ * (chat/mensagem.ts). null = a marca não é um objeto: não está apagada.
+ */
+function rotuloApagada(bruto: unknown): string | null {
+  if (typeof bruto !== "object" || bruto === null || Array.isArray(bruto)) {
+    return null;
+  }
+  const marca = bruto as { por?: unknown; nome?: unknown };
+  if (marca.por !== "equipe") return "Mensagem apagada";
+  return typeof marca.nome === "string" && marca.nome.trim()
+    ? `Apagada por ${marca.nome}`
+    : "Apagada pela equipe";
+}
 
 const CAMPOS_VIEW =
   "lead_id, nome, telefone_e164, status, responsavel_id, responsavel_nome, ultima_mensagem_em, ultima_recebida_em, horas_esperando, janela_aberta, adiado_vencido, etiqueta_ids, etiquetas";
@@ -963,6 +993,62 @@ export async function carregarListaConversas(
     pendentes === undefined && ids.length > 0
       ? pendentesDosLeads(supabase, ids).catch(() => null)
       : Promise.resolve(null);
+  /** A prévia de cada conversa da página. previas_conversas (0045) devolve
+   *  o texto cru, e a mensagem apagada (para a equipe, ou pelo contato)
+   *  seguia inteira na fila enquanto a bolha a escondia. A marca sai logo
+   *  depois, só das mensagens da prévia, pelos pares (lead_id, criado_em)
+   *  do índice da 0001 e só das que a têm: quase sempre volta vazia. Corre
+   *  junto com o resto da segunda onda. Falha da prévia em si segue como
+   *  antes: linhas sem prévia, fila de pé. */
+  const previasDaPagina = async (ids: string[]): Promise<PreviaConversa[]> => {
+    const { data, error } = await supabase.rpc("previas_conversas", {
+      p_lead_ids: ids,
+    });
+    if (error || !data) return [];
+    const previas = data as PreviaConversa[];
+    const fatias: PreviaConversa[][] = [];
+    for (let i = 0; i < previas.length; i += FATIA_APAGADAS) {
+      fatias.push(previas.slice(i, i + FATIA_APAGADAS));
+    }
+    const marcas = await Promise.all(
+      fatias.map((fatia) =>
+        supabase
+          .from("lead_interactions")
+          .select("lead_id, criado_em, apagada:metadados->apagada")
+          .in("lead_id", fatia.map((p) => p.lead_id))
+          .in("criado_em", fatia.map((p) => p.criado_em))
+          .in("tipo", ["mensagem_recebida", "mensagem_enviada"])
+          .not("metadados->>apagada", "is", null),
+      ),
+    ).catch(() => null);
+    // Sem a marca, a prévia segue como era antes desta conferência: um
+    // defeito aqui não pode apagar a prévia da fila inteira.
+    if (!marcas || marcas.some((r) => r.error)) {
+      console.error("[fila] marca de apagada das prévias não lida");
+      return previas;
+    }
+    // O par casa pela hora em milissegundos: o texto da hora pode não sair
+    // igual da função e da tabela. Os dois `in` cruzam ids e horas de leads
+    // diferentes; o par descarta o que não é a última mensagem do lead.
+    const chave = (leadId: string, quando: string) =>
+      `${leadId} ${Date.parse(quando)}`;
+    const rotulos = new Map<string, string>();
+    for (const r of marcas) {
+      for (const m of (r.data ?? []) as unknown as {
+        lead_id: string;
+        criado_em: string;
+        apagada: unknown;
+      }[]) {
+        const rotulo = rotuloApagada(m.apagada);
+        if (rotulo) rotulos.set(chave(m.lead_id, m.criado_em), rotulo);
+      }
+    }
+    if (rotulos.size === 0) return previas;
+    return previas.map((p) => {
+      const rotulo = rotulos.get(chave(p.lead_id, p.criado_em));
+      return rotulo ? { ...p, conteudo: rotulo } : p;
+    });
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder
   const daVisao = (v: VisaoConversas, campos: string, o?: OpcoesConsulta): any =>
     consultaDaVisao(supabase, v, campos, recorte, o);
@@ -1058,7 +1144,7 @@ export async function carregarListaConversas(
 
   let linhasView: LinhaView[] = [];
   let extras = new Map<string, ExtrasLead>();
-  let previasR: { data: unknown; error: unknown } = { data: [], error: null };
+  let previasLidas: PreviaConversa[] = [];
   let temMais = false;
   // O que a Caixa trouxe (sem repetir) e se a linha além de algum teto
   // ficou de fora: a reserva para quando a contagem falha.
@@ -1100,11 +1186,11 @@ export async function carregarListaConversas(
     if (ids.length > 0) {
       const [viewR, previas, daPagina] = await Promise.all([
         supabase.from("v_leads_listas").select(CAMPOS_VIEW).in("lead_id", ids),
-        supabase.rpc("previas_conversas", { p_lead_ids: ids }),
+        previasDaPagina(ids),
         recontatosDaPagina(ids),
       ]);
       if (viewR.error) return { erro: viewR.error.message };
-      previasR = previas;
+      previasLidas = previas;
       if (daPagina) recontatoDe = recontatosDaFila(daPagina, hoje).porLead;
       const porId = new Map(
         ((viewR.data ?? []) as LinhaView[]).map((l) => [l.lead_id, l]),
@@ -1247,7 +1333,7 @@ export async function carregarListaConversas(
     if (ids.length > 0) {
       const [extrasR, previas, daPagina] = await Promise.all([
         supabase.from("leads").select(CAMPOS_EXTRAS).in("id", ids),
-        supabase.rpc("previas_conversas", { p_lead_ids: ids }),
+        previasDaPagina(ids),
         recontatosDaPagina(ids),
       ]);
       // Sem estas colunas toda linha sairia "não lida" e nenhuma resolvida:
@@ -1256,20 +1342,12 @@ export async function carregarListaConversas(
       extras = new Map(
         ((extrasR.data ?? []) as ExtrasLead[]).map((e) => [e.id, e]),
       );
-      previasR = previas;
+      previasLidas = previas;
       if (daPagina) recontatoDe = recontatosDaFila(daPagina, hoje).porLead;
     }
   }
 
-  const previas = new Map(
-    (
-      (previasR.data ?? []) as {
-        lead_id: string;
-        tipo: string;
-        conteudo: string | null;
-      }[]
-    ).map((p) => [p.lead_id, p]),
-  );
+  const previas = new Map(previasLidas.map((p) => [p.lead_id, p]));
 
   const linhas: LinhaConversa[] = linhasView.map((l) => {
     const ex = extras.get(l.lead_id);

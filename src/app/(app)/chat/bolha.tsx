@@ -405,13 +405,16 @@ function Rabinho({ lado, classeCor }: { lado: Lado; classeCor: string }) {
   );
 }
 
-/** O texto da bolha apagada (pelo contato ou escondida pela equipe). */
+/** O texto da bolha apagada (pelo contato ou escondida pela equipe). Nota
+ *  interna nunca chegou ao contato: sem a linha "Continua no aparelho". */
 export function TextoApagada({
   apagada,
   sobreTinta,
+  nota = false,
 }: {
   apagada: ApagadaMensagem;
   sobreTinta: boolean;
+  nota?: boolean;
 }) {
   const apoio = sobreTinta ? "text-primary-100" : "text-texto-2";
   if (apagada.por === "contato") {
@@ -429,9 +432,11 @@ export function TextoApagada({
         <Ban size={16} strokeWidth={1.75} aria-hidden className="shrink-0" />
         {apagada.nome ? `Apagada por ${apagada.nome}` : "Apagada pela equipe"}
       </span>
-      <span className={cn("tipo-legenda", apoio)}>
-        Continua no aparelho do contato.
-      </span>
+      {nota ? null : (
+        <span className={cn("tipo-legenda", apoio)}>
+          Continua no aparelho do contato.
+        </span>
+      )}
     </>
   );
 }
@@ -970,7 +975,7 @@ const Bolha = memo(
             )}
           >
             {apagada ? (
-              <TextoApagada apagada={apagada} sobreTinta={sobreTinta} />
+              <TextoApagada apagada={apagada} sobreTinta={sobreTinta} nota={nota} />
             ) : naoSuportada ? (
               // Em linha, sem caixa flexível: a hora encosta no fim do texto.
               <span className={apoio}>

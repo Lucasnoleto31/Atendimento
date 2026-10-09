@@ -8,7 +8,7 @@ import { ehAtendente, ehGestao, somenteLeitura, veTudo } from "@/lib/papeis";
 import { veioPeloDirect } from "@/lib/avatar";
 import { lerAviso } from "./aviso-ficha";
 import type { EtiquetaDoCatalogo } from "./etiquetas-contato";
-import { FichaContato } from "./ficha";
+import { FichaContato, type NotaFicha } from "./ficha";
 import { lerVoltar, voltarDiferenteDe } from "../voltar";
 
 export const metadata: Metadata = { title: "Contato · Zeve Atendimento" };
@@ -66,9 +66,32 @@ type Nota = {
   id: string;
   conteudo: string | null;
   criado_em: string;
-  metadados: { sistema?: boolean } | null;
+  metadados: { sistema?: boolean; apagada?: unknown } | null;
   autor: { nome: string } | null;
 };
+
+/**
+ * A nota como a ficha recebe: só o que ela mostra. A apagada no chat
+ * ("Apagar para a equipe", marca em metadados.apagada) segue na lista com a
+ * marca, como a bolha, e o texto não sai do servidor. A marca se lê como
+ * lerApagada lê (chat/mensagem.ts): basta ser um objeto.
+ */
+function paraNotaFicha(n: Nota): NotaFicha {
+  const base = { id: n.id, criado_em: n.criado_em, autor: n.autor };
+  const marca = n.metadados?.apagada;
+  if (typeof marca !== "object" || marca === null || Array.isArray(marca)) {
+    return { ...base, conteudo: n.conteudo };
+  }
+  const { por, nome } = marca as { por?: unknown; nome?: unknown };
+  return {
+    ...base,
+    conteudo: null,
+    apagada: {
+      por: por === "equipe" ? "equipe" : "contato",
+      nome: typeof nome === "string" && nome.trim() ? nome : null,
+    },
+  };
+}
 
 export default async function ContatoPage({
   params,
@@ -142,7 +165,7 @@ export default async function ContatoPage({
       n.metadados?.sistema !== true &&
       !PADROES_NOTA_SISTEMA.some((p) => p.test(n.conteudo ?? "")),
   );
-  const notas = daEquipe.slice(0, 20);
+  const notas = daEquipe.slice(0, 20).map(paraNotaFicha);
   // Há mais do que as 20 na tela (ou a leitura bateu no limite de 40):
   // a ficha leva às outras na conversa.
   const cortadas = daEquipe.length > notas.length || lidas.length >= 40;

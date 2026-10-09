@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { perfilAtivo, perfilQueEscreve, type PerfilSessao } from "@/lib/auth";
+import { registrarAcesso } from "@/lib/auditoria";
 import { ehAtendente, veTudo } from "@/lib/papeis";
 import { donoOculto, donosOcultosParaMim } from "@/lib/privacidade";
 import { consultarContatos, idsDoFiltro } from "./consulta";
@@ -26,6 +27,9 @@ import { lerIds, TETO_SELECAO, type AlcanceContatos } from "./selecao";
  * lista até TETO_FILTRO (idsDoFiltro, em consulta.ts, que diz por que a
  * leitura vai pelo id e só usa a ordem da tela quando há corte) e escreve
  * em lotes de TETO_SELECAO, somando o resultado de todos num aviso só.
+ *
+ * Etiquetar e transferir deixam uma linha no Log de acesso por ação, não uma
+ * por contato (registrarEmMassa, abaixo).
  */
 
 export type ResultadoEmMassa =
@@ -141,6 +145,32 @@ function falhaDoLote(
   );
 }
 
+/**
+ * A linha da ação no Log de acesso: uma por ação, não uma por contato, com
+ * quantos contatos mudaram de fato e por onde a ação foi (os marcados ou o
+ * filtro). Só quando algo mudou: o que não foi gravado não entra. Se a ação
+ * parou no meio, entra o que já tinha ficado gravado até parar, com o
+ * motivo, como na importação de contatos: os lotes de antes e, ao etiquetar,
+ * as etiquetas que o lote que falhou chegou a pôr (etiquetarContatos diz
+ * como, sem dizer que tirou o que ficou).
+ */
+function registrarEmMassa(
+  perfil: PerfilSessao,
+  acao: "etiquetou_contatos" | "transferiu_contatos",
+  alcance: AlcanceContatos,
+  contatos: number,
+  detalhes: Record<string, unknown>,
+  parou = false,
+) {
+  if (contatos <= 0) return;
+  registrarAcesso(perfil.id, acao, {
+    ...detalhes,
+    contatos,
+    alcance: Array.isArray(alcance) ? "selecao" : "filtro",
+    ...(parou ? { motivo: "parou com erro no meio" } : {}),
+  });
+}
+
 /* ── etiquetas ─────────────────────────────────────────────────────────── */
 
 /**
@@ -168,23 +198,54 @@ export async function etiquetarContatos(
 
   const supabase = await createClient();
 
+  // O nome de cada etiqueta, para a linha do Log de acesso.
+  const nomes = new Map<string, string>();
   if (poe.length > 0) {
     const { data: tags, error } = await supabase
       .from("tags")
-      .select("id, ativo")
+      .select("id, nome, ativo")
       .in("id", poe);
     if (error) return falha(`Nada mudou: ${error.message}`);
-    const ativas = new Set(
-      ((tags ?? []) as { id: string; ativo: boolean }[])
-        .filter((t) => t.ativo)
-        .map((t) => t.id),
-    );
+    const lidas = (tags ?? []) as { id: string; nome: string; ativo: boolean }[];
+    const ativas = new Set(lidas.filter((t) => t.ativo).map((t) => t.id));
     if (poe.some((t) => !ativas.has(t))) {
       return falha(
         "Nada mudou: uma das etiquetas foi arquivada ou apagada. Abra a lista de etiquetas de novo.",
       );
     }
+    for (const t of lidas) nomes.set(t.id, t.nome);
   }
+  if (tira.length > 0) {
+    // Só o nome, para o log: tirar não depende dele, e a leitura que falha
+    // não segura a ação (a linha do log sai sem o nome).
+    const { data } = await supabase.from("tags").select("id, nome").in("id", tira);
+    for (const t of (data ?? []) as { id: string; nome: string }[]) {
+      nomes.set(t.id, t.nome);
+    }
+  }
+  const nomesDe = (lista: string[]) =>
+    lista.map((id) => nomes.get(id)).filter((n): n is string => Boolean(n));
+  // `tirou: false` quando nenhuma remoção chegou a valer (o log não diz que
+  // tirou uma etiqueta que ficou); `so_postas`, os contatos que só ganharam
+  // as etiquetas novas, fora do número da linha.
+  const registrar = (
+    contatos: number,
+    extra: { tirou?: boolean; so_postas?: number; parou?: boolean } = {},
+  ) =>
+    registrarEmMassa(
+      perfil,
+      "etiquetou_contatos",
+      alcance,
+      contatos,
+      {
+        ...(poe.length > 0 ? { etiquetas_postas: nomesDe(poe) } : {}),
+        ...(tira.length > 0 && extra.tirou !== false
+          ? { etiquetas_tiradas: nomesDe(tira) }
+          : {}),
+        ...(extra.so_postas ? { so_postas: extra.so_postas } : {}),
+      },
+      extra.parou,
+    );
 
   const ocultos = await donosOcultosParaMim().catch(() => null);
   if (!ocultos) return falha(SEM_PRIVACIDADE);
@@ -195,8 +256,18 @@ export async function etiquetarContatos(
   for (const ids of alvo.lotes) {
     const r = await etiquetarLote(supabase, ids, poe, tira, ocultos);
     if (!r.ok) {
-      // O que entrou antes de parar fica gravado: a lista precisa mostrar.
+      // O que entrou antes de parar fica gravado: a lista precisa mostrar,
+      // e o log também. Os lotes de antes fizeram a ação inteira; o que
+      // falhou só pode ter posto (r.mudaram vem do delete que falhou depois
+      // do upsert), e nesses contatos nada saiu. Por isso eles vão à parte,
+      // em so_postas, ou sozinhos e sem as tiradas quando são tudo o que
+      // mudou.
       if (soma.mudaram + r.mudaram > 0) revalidatePath("/contatos");
+      if (soma.mudaram > 0) {
+        registrar(soma.mudaram, { so_postas: r.mudaram, parou: true });
+      } else {
+        registrar(r.mudaram, { tirou: false, parou: true });
+      }
       return falhaDoLote(r, soma.mudaram);
     }
     soma.mudaram += r.mudaram;
@@ -205,6 +276,7 @@ export async function etiquetarContatos(
   }
 
   if (soma.mudaram > 0) revalidatePath("/contatos");
+  registrar(soma.mudaram);
   return { ok: true, ...soma, cortado: alvo.cortado || undefined };
 }
 
@@ -341,12 +413,26 @@ export async function transferirContatos(
   const alvo = await lerAlcance(supabase, alcance, ocultos);
   if (typeof alvo === "string") return falha(alvo);
 
+  // O novo dono pelo nome (e o id, que não muda com o nome) ou "sem dono".
+  const registrar = (contatos: number, parou?: boolean) =>
+    registrarEmMassa(
+      perfil,
+      "transferiu_contatos",
+      alcance,
+      contatos,
+      para ? { alvo: nome, responsavel_id: para } : { sem_dono: true },
+      parou,
+    );
+
   const soma = { mudaram: 0, iguais: 0, recusados: 0 };
   let semHistorico = false;
   for (const ids of alvo.lotes) {
     const r = await transferirLote(supabase, perfil, ids, para, nome, ocultos);
     if (!r.ok) {
+      // O lote que falhou não gravou nada (o update é uma escrita só); os
+      // de antes ficaram, e o log diz quantos.
       if (soma.mudaram > 0) revalidatePath("/contatos");
+      registrar(soma.mudaram, true);
       return falhaDoLote(r, soma.mudaram);
     }
     soma.mudaram += r.mudaram;
@@ -356,6 +442,7 @@ export async function transferirContatos(
   }
 
   if (soma.mudaram > 0) revalidatePath("/contatos");
+  registrar(soma.mudaram);
   return {
     ok: true,
     ...soma,

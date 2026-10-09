@@ -31,7 +31,7 @@ export const DIAS_PADRAO = 7;
 const MAX_PESSOAS = 40;
 
 /**
- * Teto de ações, acima do total conhecido (61 em 09/10/2026, uns 20
+ * Teto de ações, acima do total conhecido (65 em 09/10/2026, uns 20
  * caracteres cada). Com o teto de 40 de antes, marcar tudo menos "Conversas
  * e fichas" cortava 11 ações em silêncio, as de senha entre elas. Se a
  * lista um dia passar de 120, o teto acompanha.

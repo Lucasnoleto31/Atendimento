@@ -92,7 +92,7 @@ export function TelaImportar({
                 name="somente_novos"
                 value="sim"
                 rotulo="Só telefones novos"
-                ajuda="Quem já é contato fica como está, sem a etiqueta."
+                ajuda="Quem já é contato ou cliente fica como está, sem a etiqueta."
                 defaultChecked
               />
               <CampoInterruptor

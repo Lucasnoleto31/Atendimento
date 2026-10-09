@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { Ban } from "lucide-react";
 import { enviarMensagemLead, type ResultadoEnvio } from "@/app/(app)/chat/actions";
 import { Button } from "@/components/ui/button";
 import { AJUDA, AREA_TEXTO } from "@/components/app/form-styles";
@@ -12,7 +13,16 @@ export type NotaFicha = {
   conteudo: string | null;
   criado_em: string;
   autor: { nome: string } | null;
+  /** Apagada no chat ("Apagar para a equipe"): chega sem o texto e a ficha
+   *  mostra a marca, como a bolha. */
+  apagada?: { por: "contato" | "equipe"; nome: string | null } | null;
 };
+
+/** O texto da nota apagada: o mesmo da bolha (TextoApagada, no chat). */
+function rotuloApagada(apagada: NonNullable<NotaFicha["apagada"]>): string {
+  if (apagada.por === "contato") return "Mensagem apagada";
+  return apagada.nome ? `Apagada por ${apagada.nome}` : "Apagada pela equipe";
+}
 
 const SEM_CONEXAO = "A conexão não respondeu. Confira a internet e tente de novo.";
 
@@ -244,9 +254,21 @@ export function NotasFicha({
               key={n.id}
               className="ml-2 border-t border-fio py-1.5 pr-2 first:border-t-0"
             >
-              <p className="tipo-corpo [overflow-wrap:anywhere] whitespace-pre-wrap text-tinta">
-                {n.conteudo ?? ""}
-              </p>
+              {n.apagada ? (
+                <p className="flex items-center gap-0.5 tipo-corpo text-texto-2">
+                  <Ban
+                    size={16}
+                    strokeWidth={1.75}
+                    aria-hidden
+                    className="shrink-0"
+                  />
+                  {rotuloApagada(n.apagada)}
+                </p>
+              ) : (
+                <p className="tipo-corpo [overflow-wrap:anywhere] whitespace-pre-wrap text-tinta">
+                  {n.conteudo ?? ""}
+                </p>
+              )}
               <p className="mt-0.5 tipo-nota text-texto-2 tabular-nums">
                 {n.autor?.nome ?? "Sem autor"} ·{" "}
                 <time dateTime={n.criado_em}>{dataEHora(n.criado_em)}</time>

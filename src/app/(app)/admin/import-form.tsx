@@ -126,10 +126,23 @@ function PreviaArquivo({
           />
           <ValorLinha>{numero(previa.validos)}</ValorLinha>
         </LinhaInfo>
+        {/* jaContato soma contato e cliente da carteira; o cliente sem
+            contato aparece à parte, como no sistema original. */}
         {previa.jaContato !== null && previa.jaContato !== undefined ? (
           <LinhaInfo>
             <TextoLinha titulo="Já são contato" />
-            <ValorLinha>{numero(previa.jaContato)}</ValorLinha>
+            <ValorLinha>
+              {numero(previa.jaContato - (previa.jaCliente ?? 0))}
+            </ValorLinha>
+          </LinhaInfo>
+        ) : null}
+        {previa.jaCliente ? (
+          <LinhaInfo>
+            <TextoLinha
+              titulo="Já são cliente da carteira"
+              apoio="Com “Só telefones novos”, ficam de fora"
+            />
+            <ValorLinha>{numero(previa.jaCliente)}</ValorLinha>
           </LinhaInfo>
         ) : null}
         {previa.duplicados ? (
@@ -333,7 +346,10 @@ export function ImportForm({
                 <ValorLinha>{numero(estado.leadsNovos)}</ValorLinha>
               </LinhaInfo>
             ) : null}
-            {estado.leadsAtualizados ? (
+            {/* leadsAtualizados inclui o cliente da carteira deixado de
+                fora; ele aparece na linha de baixo. */}
+            {(estado.leadsAtualizados ?? 0) - (estado.jaEramClientes ?? 0) >
+            0 ? (
               <LinhaInfo>
                 <TextoLinha
                   titulo="Já eram contato"
@@ -343,7 +359,21 @@ export function ImportForm({
                       : "Ganharam a etiqueta da lista"
                   }
                 />
-                <ValorLinha>{numero(estado.leadsAtualizados)}</ValorLinha>
+                <ValorLinha>
+                  {numero(
+                    (estado.leadsAtualizados ?? 0) -
+                      (estado.jaEramClientes ?? 0),
+                  )}
+                </ValorLinha>
+              </LinhaInfo>
+            ) : null}
+            {estado.jaEramClientes ? (
+              <LinhaInfo>
+                <TextoLinha
+                  titulo="Já eram cliente da carteira"
+                  apoio="Ficaram de fora"
+                />
+                <ValorLinha>{numero(estado.jaEramClientes)}</ValorLinha>
               </LinhaInfo>
             ) : null}
             {estado.duplicadosNoArquivo ? (

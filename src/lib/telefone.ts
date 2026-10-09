@@ -3,9 +3,8 @@
  *
  * Mora fora do csv.ts porque o webhook do WhatsApp depende de
  * variantesTelefone em toda mensagem recebida; o csv.ts reexporta tudo daqui
- * para quem já importava de lá. Sem import por alias (@/): os núcleos de
- * importação chegam aqui pelo csv.ts e também rodam no node puro
- * (scripts/teste-modelo.mts, com --experimental-strip-types).
+ * para quem já importava de lá. Sem import por alias (@/), para o arquivo
+ * rodar também no node puro, fora do Next.
  */
 
 /**

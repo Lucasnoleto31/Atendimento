@@ -41,9 +41,16 @@ export type ResultadoImport = {
   linhasErro?: number;
   exemplosErro?: string[];
   leadsNovos?: number;
+  /** As linhas válidas que não viraram contato novo: quem já era contato e,
+   *  com "Só telefones novos", o cliente da carteira (também em
+   *  `jaEramClientes`). */
   leadsAtualizados?: number;
-  /** Já eram contato e não foram tocados (nem etiquetados). */
+  /** Já eram contato ou cliente da carteira e não foram tocados (nem
+   *  etiquetados). */
   leadsIntactos?: number;
+  /** Desses, os que estavam só na carteira (customers), sem contato, e
+   *  ficaram de fora da lista. */
+  jaEramClientes?: number;
   etiquetouExistentes?: boolean;
   duplicadosNoArquivo?: number;
   /** Linhas iguais à de exemplo do modelo, deixadas de fora. */
@@ -65,7 +72,8 @@ export type GrupoDaPrevia = {
   campanha: string | null;
   /** Telefones válidos e diferentes entre si. */
   contatos: number;
-  /** Desses, quantos ainda não são contato; null se a conferência falhou. */
+  /** Desses, quantos ainda não são contato nem cliente da carteira; null se
+   *  a conferência falhou. */
   novos: number | null;
 };
 
@@ -76,8 +84,13 @@ export type PreviaImport = {
   linhas?: number;
   /** Telefones válidos e diferentes entre si. */
   validos?: number;
-  /** Desses, quantos já são contato (null se a conferência falhou). */
+  /** Desses, quantos já são contato ou cliente da carteira (null se a
+   *  conferência falhou). */
   jaContato?: number | null;
+  /** Dos de `jaContato`, os que estão só na carteira, sem contato: com "Só
+   *  telefones novos" ficam de fora; sem ele, viram contato novo (null se a
+   *  conferência falhou). */
+  jaCliente?: number | null;
   duplicados?: number;
   /** Linhas iguais à de exemplo do modelo, que a importação deixa de fora. */
   exemplo?: number;
@@ -162,6 +175,34 @@ async function telefonesQueJaSaoContato(
   return jaExiste;
 }
 
+/** Os telefones da lista que já são cliente da carteira (customers), nas
+ *  duas grafias do nono dígito, com o dono de cada um (null quando o
+ *  cliente não tem dono). Só leitura. O contato novo de um cliente se
+ *  vincula a ele pelo gatilho do telefone (0043, t02) e o gatilho da
+ *  carteira (0031) passa o dono do cliente para quem atende o contato: é
+ *  por isso que a importação olha a carteira antes de criar. */
+async function telefonesDaCarteira(
+  service: Service,
+  telefones: string[],
+): Promise<Map<string, string | null>> {
+  const naCarteira = new Map<string, string | null>();
+  for (const parte of blocos(telefones)) {
+    const { data, error } = await service
+      .from("customers")
+      .select("telefone_e164, responsavel_id")
+      .in("telefone_e164", parte.flatMap(variantesTelefone));
+    if (error) throw new Error(error.message);
+    (data ?? []).forEach(
+      (r: { telefone_e164: string; responsavel_id: string | null }) =>
+        variantesTelefone(r.telefone_e164).forEach((v) => {
+          // Dois cadastros no mesmo número: vale o que tem dono.
+          if (!naCarteira.get(v)) naCarteira.set(v, r.responsavel_id);
+        }),
+    );
+  }
+  return naCarteira;
+}
+
 // ===========================================================================
 // Prévia da importação
 // ===========================================================================
@@ -173,7 +214,8 @@ const MAX_GRUPOS_PREVIA = 100;
 
 /**
  * Lê o arquivo escolhido e conta o que vai entrar, sem gravar nada: linhas,
- * telefones válidos, quantos já são contato, as colunas reconhecidas, as
+ * telefones válidos, quantos já são contato ou cliente da carteira (e,
+ * desses, quantos são só cliente), as colunas reconhecidas, as
  * primeiras linhas com problema e os contatos por campanha da linha (o
  * formulário transforma em contatos por etiqueta, pela escolha da tela). A
  * importação lê o arquivo de novo do zero (a prévia não guarda nada).
@@ -201,17 +243,28 @@ export async function previaImportacao(
     tem(COLUNAS_CAMPANHA) ? "campanha" : null,
   ].filter((c): c is string => c !== null);
 
-  let jaExiste: Map<string, string> | null = null;
+  // Já existe quem é contato e quem é cliente da carteira: com "Só
+  // telefones novos", a importação deixa os dois de fora (importarLeads).
+  // O cliente sem contato vem também à parte: sem a caixa, ele vira contato
+  // novo, e a tela pode dizer isso.
+  let jaExiste: Set<string> | null = null;
+  let soCliente: Set<string> | null = null;
   try {
-    jaExiste = await telefonesQueJaSaoContato(
-      createServiceClient(),
-      leads.map((l) => l.telefone),
-    );
+    const service = createServiceClient();
+    const telefones = leads.map((l) => l.telefone);
+    const [contatos, carteira] = await Promise.all([
+      telefonesQueJaSaoContato(service, telefones),
+      telefonesDaCarteira(service, telefones),
+    ]);
+    jaExiste = new Set([...contatos.keys(), ...carteira.keys()]);
+    soCliente = new Set([...carteira.keys()].filter((t) => !contatos.has(t)));
   } catch {
     jaExiste = null;
+    soCliente = null;
   }
 
-  // Os contatos por campanha da linha, com quantos ainda não são contato.
+  // Os contatos por campanha da linha, com quantos ainda não são contato
+  // nem cliente.
   const grupos = new Map<string | null, { contatos: number; novos: number }>();
   for (const lead of leads) {
     const g = grupos.get(lead.campanha) ?? { contatos: 0, novos: 0 };
@@ -233,6 +286,9 @@ export async function previaImportacao(
     validos: leads.length,
     jaContato: jaExiste
       ? leads.filter((l) => jaExiste.has(l.telefone)).length
+      : null,
+    jaCliente: soCliente
+      ? leads.filter((l) => soCliente.has(l.telefone)).length
       : null,
     duplicados,
     exemplo,
@@ -566,8 +622,9 @@ export async function importarLeads(
   const etiquetaExistenteId = String(formData.get("etiqueta_id") ?? "").trim();
   const nomeEtiqueta = String(formData.get("etiqueta") ?? "").trim();
   const distribuir = formData.get("distribuir") === "on";
-  // Caixa marcada (o padrão do formulário): telefone que já é contato fica
-  // exatamente como está, nem etiqueta nova. Desmarcada, o navegador não
+  // Caixa marcada (o padrão do formulário): telefone que já é contato ou
+  // cliente da carteira fica exatamente como está, nem etiqueta nova (nem
+  // contato novo, para o cliente). Desmarcada, o navegador não
   // manda o campo — por isso a comparação é pelo valor presente, não pela
   // ausência dele.
   const somenteNovos = formData.get("somente_novos") === "sim";
@@ -598,7 +655,7 @@ export async function importarLeads(
 
   // Tudo o que pode recusar a importação vem antes de abrir o registro,
   // para o histórico não ficar em "Processando" para sempre: a etiqueta
-  // escolhida, quem já é contato e as etiquetas que faltam criar.
+  // escolhida, quem já é contato ou cliente e as etiquetas que faltam criar.
   let fixa: EtiquetaGravada | null = null;
   if (etiquetaExistenteId) {
     const { data: escolhida } = await service
@@ -619,18 +676,34 @@ export async function importarLeads(
   // Quem já é contato não vira duplicata: só ganha a etiqueta da lista (ou
   // nem isso, com "Só telefones novos"). O mapa guarda as duas grafias do
   // nono dígito, para a planilha (com 9) casar com o contato que o WhatsApp
-  // criou (sem 9).
+  // criou (sem 9). A carteira vem junto, nas mesmas grafias, com o dono de
+  // cada cliente.
   let jaExiste: Map<string, string>;
+  let carteira: Map<string, string | null>;
   try {
-    jaExiste = await telefonesQueJaSaoContato(service, telefones);
+    [jaExiste, carteira] = await Promise.all([
+      telefonesQueJaSaoContato(service, telefones),
+      telefonesDaCarteira(service, telefones),
+    ]);
   } catch {
-    return { erro: "Não deu para conferir quem já é contato. Tente de novo." };
+    return {
+      erro: "Não deu para conferir quem já é contato ou cliente. Tente de novo.",
+    };
   }
 
-  const novos = leads.filter((l) => !jaExiste.has(l.telefone));
-  // "Só números novos": quem já era contato não recebe nem a etiqueta —
-  // entrar numa lista nova É mexer em quem já está sendo atendido, e foi
-  // justamente isso que se pediu para não acontecer.
+  // "Já é contato ou cliente" cobre os dois, como no sistema original: o
+  // telefone que só existe na carteira ainda não tem contato, e criar um
+  // agora seria justamente mexer em quem a lista deveria deixar em paz (o
+  // gatilho da carteira ainda daria o cliente a quem o rodízio escolheu).
+  const eraCliente = (l: LeadImportado) =>
+    somenteNovos && !jaExiste.has(l.telefone) && carteira.has(l.telefone);
+  const jaEramClientes = leads.filter(eraCliente).length;
+  const novos = leads.filter(
+    (l) => !jaExiste.has(l.telefone) && !eraCliente(l),
+  );
+  // "Só números novos": quem já era contato ou cliente não recebe nem a
+  // etiqueta — entrar numa lista nova É mexer em quem já está sendo
+  // atendido, e foi justamente isso que se pediu para não acontecer.
   const aEtiquetar = somenteNovos ? novos : leads;
 
   // Só as etiquetas de quem vai recebê-las: com "Só telefones novos", a
@@ -736,6 +809,11 @@ export async function importarLeads(
       equipe = (data ?? []).map((p: { id: string }) => p.id);
     }
 
+    // O rodízio divide a lista em partes iguais, como no sistema original,
+    // inclusive o cliente da carteira que só chega aqui com "Só telefones
+    // novos" desligado: o gatilho da carteira (0031) passa esse cliente para
+    // quem o rodízio escolheu, como já passava. A /captura entrega ao dono
+    // da carteira; trazer essa regra para cá é decisão em aberto.
     const linhasNovas = novos.map((lead, i) => ({
       nome: lead.nome,
       telefone_e164: lead.telefone,
@@ -784,8 +862,12 @@ export async function importarLeads(
     }
 
     // Quem caiu nessa corrida não voltou do insert: busca o id para a
-    // etiqueta da lista não deixar ninguém de fora.
-    const semId = telefones.filter((t) => !jaExiste.has(t));
+    // etiqueta da lista não deixar ninguém de fora. Só entre os novos: o
+    // resto já tem id ou ficou de fora (o cliente da carteira, com "Só
+    // telefones novos").
+    const semId = novos
+      .map((l) => l.telefone)
+      .filter((t) => !jaExiste.has(t));
     for (const parte of blocos(semId)) {
       const { data } = await service
         .from("leads")
@@ -848,10 +930,12 @@ export async function importarLeads(
       linhasErro: erros.length,
       exemplosErro: erros.slice(0, 5),
       // Os mesmos números do Log: quem entrou de fato é novo; o resto já era
-      // contato (inclusive quem nasceu pelo webhook no meio da importação).
+      // contato (inclusive quem nasceu pelo webhook no meio da importação)
+      // ou, com "Só telefones novos", cliente da carteira deixado de fora.
       leadsNovos: criados,
       leadsAtualizados: leads.length - criados,
       leadsIntactos: somenteNovos ? leads.length - criados : 0,
+      jaEramClientes,
       etiquetouExistentes: !somenteNovos,
       duplicadosNoArquivo: duplicados,
       linhasExemplo: exemplo,

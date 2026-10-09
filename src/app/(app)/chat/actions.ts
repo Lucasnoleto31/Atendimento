@@ -1255,17 +1255,77 @@ export async function alternarEtiquetaChat(
 const MOTIVOS_SEM_MARKETING = ["sem_interesse", "contato_invalido"];
 
 /**
- * Tira o contato de perdido. Sair de perdido apaga o motivo (gatilho t01),
- * e o disparo em massa só barra perdido e marketing_bloqueado_em: a trava
- * de marketing é gravada primeiro, enquanto o motivo ainda está no banco.
- * Os dois updates são condicionais e dispensam leitura prévia — em contato
- * que não é perdido, nenhum dos dois casa com linha alguma.
+ * Os rótulos dos motivos de perda, os mesmos que a equipe escolheu ao marcar
+ * (lib/perda.ts do CRM). Slug fora da lista sai como veio.
+ */
+const ROTULO_MOTIVO_PERDA: Record<string, string> = {
+  sumiu: "Sumiu, parou de responder",
+  nunca_respondeu: "Nunca respondeu",
+  concorrente: "Fechou com concorrente",
+  sem_interesse: "Não quer abrir conta",
+  sem_perfil: "Sem capital ou sem perfil agora",
+  contato_invalido: "Número errado ou engano",
+  outro: "Outro motivo",
+};
+
+type Perda = {
+  status: string;
+  perda_motivo: string | null;
+  perda_detalhe: string | null;
+  perdido_em: string | null;
+};
+
+/** "Saiu de perdido. Motivo: Não quer abrir conta (detalhe). Perdido em
+ *  03/10/2026." Sem detalhe ou sem data, a parte some; sem motivo, sai
+ *  "Motivo não registrado". */
+function textoSaidaDePerdido(perda: Perda): string {
+  const motivo = perda.perda_motivo
+    ? (ROTULO_MOTIVO_PERDA[perda.perda_motivo] ?? perda.perda_motivo)
+    : null;
+  const detalhe =
+    perda.perda_detalhe?.replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "") ||
+    null;
+  const porque = motivo
+    ? `Motivo: ${motivo}${detalhe ? ` (${detalhe})` : ""}.`
+    : detalhe
+      ? `Motivo não registrado (${detalhe}).`
+      : "Motivo não registrado.";
+  const quando = perda.perdido_em
+    ? ` Perdido em ${formatarData(perda.perdido_em)}.`
+    : "";
+  return `Saiu de perdido. ${porque}${quando}`;
+}
+
+/**
+ * Tira o contato de perdido. Sair de perdido apaga motivo, detalhe e data
+ * da perda (gatilho t01, 0063): eles são lidos antes e ficam numa nota de
+ * sistema na conversa (a linha fina do chat, com os valores também em
+ * metadados.saiu_de_perdido), gravada antes do update. A nota não acende
+ * "não lida" (é nota de sistema), não conta como resposta da equipe (o
+ * Relatório conta só mensagem_enviada) e não mexe na fila nem na resposta
+ * automática, que olham as mensagens. Sem a nota, o contato não sai de
+ * perdido: a perda fica no banco e a pessoa tenta de novo.
+ *
+ * O disparo em massa só barra perdido e marketing_bloqueado_em: a trava de
+ * marketing também é gravada antes, enquanto o motivo ainda está no banco.
+ * Contato que não é perdido (ou fora do alcance do RLS) não ganha nota nem
+ * update.
  */
 async function sairDePerdido(
   supabase: ClienteSupabase,
   leadId: string,
   agora: string,
+  autorId: string,
 ) {
+  const { data, error: erroLeitura } = await supabase
+    .from("leads")
+    .select("status, perda_motivo, perda_detalhe, perdido_em")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (erroLeitura) return erroLeitura;
+  const perda = data as Perda | null;
+  if (perda?.status !== "perdido") return null;
+
   const trava = await supabase
     .from("leads")
     .update({ marketing_bloqueado_em: agora })
@@ -1275,6 +1335,24 @@ async function sairDePerdido(
     .is("marketing_bloqueado_em", null);
   // Sem a trava, sair de perdido devolveria o contato ao disparo.
   if (trava.error) return trava.error;
+
+  // Depois da trava: se ela falha, a nova tentativa não repete a nota.
+  const nota = await supabase.from("lead_interactions").insert({
+    lead_id: leadId,
+    tipo: "nota",
+    conteudo: textoSaidaDePerdido(perda),
+    autor_id: autorId,
+    metadados: {
+      via: "crm",
+      sistema: true,
+      saiu_de_perdido: {
+        motivo: perda.perda_motivo,
+        detalhe: perda.perda_detalhe,
+        perdido_em: perda.perdido_em,
+      },
+    },
+  });
+  if (nota.error) return nota.error;
 
   const { error } = await supabase
     .from("leads")
@@ -1319,7 +1397,9 @@ export async function alterarStatusConversaChat(
       )
       .eq("id", leadId)
       .select("id"),
-    status === "open" ? sairDePerdido(supabase, leadId, agora) : null,
+    status === "open"
+      ? sairDePerdido(supabase, leadId, agora, perfil.id)
+      : null,
   ]);
   if (marca.error) return { erro: marca.error.message };
   if (!marca.data?.length) return { erro: "Contato não encontrado." };

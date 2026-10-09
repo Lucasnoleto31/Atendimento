@@ -68,7 +68,7 @@ function mapaDeExistentes(
  * importação (lib/imports/etiqueta.ts): a etiqueta da lista vale para todos;
  * sem ela, o nome escrito; sem nome, a campanha de cada linha e, por último,
  * o nome do arquivo. Com "Só telefones novos", só quem ainda não é contato
- * conta (é quem recebe a etiqueta). O nome que casa com uma arquivada entra
+ * nem cliente da carteira conta (é quem recebe a etiqueta). O nome que casa com uma arquivada entra
  * nela, que volta a valer; com uma ativa e uma arquivada no mesmo nome, vale
  * a ativa, como no servidor.
  */

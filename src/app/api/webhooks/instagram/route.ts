@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { after, NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { escolherVendedor } from "@/lib/distribuicao";
+import { formatarData } from "@/lib/format";
 import {
   baixarFotoInstagram,
   baixarMidiaInstagram,
@@ -487,15 +488,25 @@ function motivoDaFalha(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-type Contato = {
-  id: string;
-  nome: string | null;
+/** O que o contato perdido carrega até sair de perdido (gatilho t01). */
+type Perda = {
   status: string;
   perda_motivo: string | null;
+  perda_detalhe: string | null;
+  perdido_em: string | null;
   marketing_bloqueado_em: string | null;
 };
 
-const CAMPOS_CONTATO = "id, nome, status, perda_motivo, marketing_bloqueado_em";
+type Contato = Perda & {
+  id: string;
+  nome: string | null;
+  primeira_resposta_em: string | null;
+};
+
+const CAMPOS_PERDA =
+  "status, perda_motivo, perda_detalhe, perdido_em, marketing_bloqueado_em";
+
+const CAMPOS_CONTATO = `id, nome, primeira_resposta_em, ${CAMPOS_PERDA}`;
 
 /**
  * Motivos de perda (check leads_perda_motivo_chk, 0038 e 0061) em que o
@@ -505,51 +516,166 @@ const CAMPOS_CONTATO = "id, nome, status, perda_motivo, marketing_bloqueado_em";
 const MOTIVOS_SEM_MARKETING = new Set(["sem_interesse", "contato_invalido"]);
 
 /**
+ * Os rótulos dos motivos de perda, os mesmos que a equipe escolheu ao marcar
+ * (lib/perda.ts do CRM). Slug fora da lista sai como veio.
+ */
+const ROTULO_MOTIVO_PERDA: Record<string, string> = {
+  sumiu: "Sumiu, parou de responder",
+  nunca_respondeu: "Nunca respondeu",
+  concorrente: "Fechou com concorrente",
+  sem_interesse: "Não quer abrir conta",
+  sem_perfil: "Sem capital ou sem perfil agora",
+  contato_invalido: "Número errado ou engano",
+  outro: "Outro motivo",
+};
+
+/** "Saiu de perdido. Motivo: Não quer abrir conta (detalhe). Perdido em
+ *  03/10/2026." Sem detalhe ou sem data, a parte some; sem motivo, sai
+ *  "Motivo não registrado". */
+function textoSaidaDePerdido(perda: Perda): string {
+  const motivo = perda.perda_motivo
+    ? (ROTULO_MOTIVO_PERDA[perda.perda_motivo] ?? perda.perda_motivo)
+    : null;
+  const detalhe =
+    perda.perda_detalhe?.replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "") ||
+    null;
+  const porque = motivo
+    ? `Motivo: ${motivo}${detalhe ? ` (${detalhe})` : ""}.`
+    : detalhe
+      ? `Motivo não registrado (${detalhe}).`
+      : "Motivo não registrado.";
+  const quando = perda.perdido_em
+    ? ` Perdido em ${formatarData(perda.perdido_em)}.`
+    : "";
+  return `Saiu de perdido. ${porque}${quando}`;
+}
+
+/**
+ * A busca do contato é do começo da mensagem: para quem estava perdido, a
+ * perda é relida perto do update. Numa rajada, a mensagem que chega depois
+ * acha o contato já fora de perdido e não repete a nota.
+ */
+async function relerPerda(
+  service: Service,
+  contato: Contato,
+): Promise<Contato> {
+  const { data, error } = await service
+    .from("leads")
+    .select(CAMPOS_PERDA)
+    .eq("id", contato.id)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao reler a perda: ${error.message}`);
+  return data ? { ...contato, ...(data as Perda) } : contato;
+}
+
+/**
+ * Sair de perdido apaga motivo, detalhe e data da perda (gatilho t01, 0063).
+ * Antes do update, a perda vira nota de sistema na conversa (a linha fina
+ * do chat), no formato da reabertura automática do CRM, e os valores vão
+ * também em metadados.saiu_de_perdido. A nota não acende "não lida" (é
+ * nota de sistema), não conta como resposta da equipe (o Relatório conta
+ * só mensagem_enviada), não mexe na fila (a vez e a ordem são das
+ * mensagens) e não dispara resposta automática.
+ *
+ * Sem a nota, o contato não sai de perdido: a falha manda a mensagem para
+ * a passada, que tenta de novo com a perda ainda no banco.
+ */
+async function anotarSaidaDePerdido(service: Service, perda: Contato) {
+  const { error } = await service.from("lead_interactions").insert({
+    lead_id: perda.id,
+    tipo: "nota",
+    conteudo: textoSaidaDePerdido(perda),
+    metadados: {
+      via: "webhook",
+      sistema: true,
+      reabertura: true,
+      saiu_de_perdido: {
+        motivo: perda.perda_motivo,
+        detalhe: perda.perda_detalhe,
+        perdido_em: perda.perdido_em,
+      },
+    },
+  });
+  if (error) {
+    throw new Error(`Falha ao guardar o motivo da perda: ${error.message}`);
+  }
+}
+
+/**
  * Pessoa escreveu: a conversa resolvida ou adiada volta para a caixa de
  * entrada (o prazo do adiamento também zera) e ultima_interacao_em acende o
- * aviso de não lida. Um update só por mensagem.
+ * aviso de não lida. Um update só por mensagem (fora a primeira resposta,
+ * abaixo).
  *
  * Lead marcado perdido aparece como resolvido no chat — a v_leads_listas o
  * tira da Caixa pelo status. Para a conversa voltar, o status sai de
  * perdido no mesmo update.
  *
- * Sair de perdido apaga o motivo (gatilho t01), e o disparo em massa só
- * barra perdido e marketing_bloqueado_em. Quem foi perdido por pedir para
- * parar ou por número errado ganha a trava de marketing neste mesmo update,
- * decidida pelo motivo lido antes de o gatilho limpá-lo — o contato do
- * Direct pode ter telefone e estar no público de uma campanha.
+ * Sair de perdido apaga motivo, detalhe e data da perda (gatilho t01): a
+ * perda é relida e vira nota antes do update (anotarSaidaDePerdido). O
+ * disparo em massa só barra perdido e marketing_bloqueado_em: quem foi
+ * perdido por pedir para parar ou por número errado ganha a trava de
+ * marketing neste mesmo update, decidida pelo motivo relido antes de o
+ * gatilho limpá-lo — o contato do Direct pode ter telefone e estar no
+ * público de uma campanha.
+ *
+ * A primeira resposta (respondeuEm, ver receberDirect) só é gravada se
+ * estava vazia: vai num update à parte, condicionado a ela continuar
+ * vazia, e só quando a busca a leu vazia. Assim nenhuma mensagem
+ * sobrescreve a de outra, nem numa rajada.
  *
  * Na nova tentativa, chat_lido_em também zera (o efeito de "marcar não
  * lida"): a mensagem entra com a hora original, e quem abriu a conversa
  * depois dela não a viu, porque ela ainda não estava gravada.
+ *
+ * Falha nos updates não derruba a mensagem, só fica no log. A nota da
+ * perda, sim (ver anotarSaidaDePerdido).
  */
 async function reabrirConversa(
   service: Service,
-  contato: Contato,
+  lido: Contato,
   agora: string,
+  respondeuEm: string,
   marcarNaoLida = false,
 ) {
+  const contato =
+    lido.status === "perdido" ? await relerPerda(service, lido) : lido;
   const perdido = contato.status === "perdido";
+  if (perdido) await anotarSaidaDePerdido(service, contato);
   const travarMarketing =
     perdido &&
     contato.marketing_bloqueado_em === null &&
     MOTIVOS_SEM_MARKETING.has(contato.perda_motivo ?? "");
 
-  const { error } = await service
-    .from("leads")
-    .update({
-      ultima_interacao_em: agora,
-      chat_resolvido_em: null,
-      chat_adiado_em: null,
-      chat_adiado_ate: null,
-      ...(marcarNaoLida ? { chat_lido_em: null } : {}),
-      ...(perdido ? { status: "em_atendimento" } : {}),
-      ...(travarMarketing ? { marketing_bloqueado_em: agora } : {}),
-    })
-    .eq("id", contato.id);
+  const [{ error }, primeira] = await Promise.all([
+    service
+      .from("leads")
+      .update({
+        ultima_interacao_em: agora,
+        chat_resolvido_em: null,
+        chat_adiado_em: null,
+        chat_adiado_ate: null,
+        ...(marcarNaoLida ? { chat_lido_em: null } : {}),
+        ...(perdido ? { status: "em_atendimento" } : {}),
+        ...(travarMarketing ? { marketing_bloqueado_em: agora } : {}),
+      })
+      .eq("id", contato.id),
+    contato.primeira_resposta_em === null
+      ? service
+          .from("leads")
+          .update({ primeira_resposta_em: respondeuEm })
+          .eq("id", contato.id)
+          .is("primeira_resposta_em", null)
+      : null,
+  ]);
   if (error) {
     console.error(
       `[webhook instagram] conversa ${contato.id} não reabriu: ${error.message}`,
+    );
+  }
+  if (primeira?.error) {
+    console.error(
+      `[webhook instagram] primeira resposta de ${contato.id} não gravada: ${primeira.error.message}`,
     );
   }
 }
@@ -692,20 +818,25 @@ function renovarFoto(service: Service, leadId: string, igsid: string) {
 }
 
 /**
- * Contato novo do Direct, com quem atende escolhido pela distribuição.
- * `criado` = nasceu aqui; falso quando outro POST o criou no meio do
- * caminho (as boas-vindas são de quem criou).
+ * Contato novo do Direct, com quem atende escolhido pela distribuição, e
+ * com a primeira resposta: foi ele quem escreveu. `criado` = nasceu aqui;
+ * falso quando outro POST o criou no meio do caminho (as boas-vindas são de
+ * quem criou).
  */
 async function criarContato(
   service: Service,
   igsid: string,
   agora: string,
+  respondeuEm: string,
 ): Promise<{ id: string; criado: boolean }> {
   // Nome e @ para o contato não nascer como um número opaco. A busca do
-  // perfil (Graph) corre junto com a escolha de quem atende (banco).
-  const [perfil, atendente] = await Promise.all([
+  // perfil (Graph) corre junto com a escolha de quem atende e com o canal
+  // (banco), como no sistema original. Sem a leitura do canal, o contato
+  // nasce sem ele em vez de perder a mensagem.
+  const [perfil, atendente, canal] = await Promise.all([
     perfilInstagram(igsid),
     escolherVendedor(service),
+    service.from("channels").select("id").eq("slug", "instagram").maybeSingle(),
   ]);
 
   const { data: novo, error } = await service
@@ -719,8 +850,10 @@ async function criarContato(
       // Contato do Direct não tem telefone — e não precisa ter para ser
       // atendido.
       telefone_e164: null,
+      channel_id: (canal.data?.id as string | undefined) ?? null,
       entrada_motivo: "webhook_instagram",
       responsavel_id: atendente?.id ?? null,
+      primeira_resposta_em: respondeuEm,
       ultima_interacao_em: agora,
     })
     .select("id")
@@ -741,7 +874,7 @@ async function criarContato(
     if (!corrida) {
       throw new Error(`Não deu para criar o contato do Direct: ${error.message}`);
     }
-    await reabrirConversa(service, corrida as Contato, agora);
+    await reabrirConversa(service, corrida as Contato, agora, respondeuEm);
     return { id: corrida.id as string, criado: false };
   }
 
@@ -847,15 +980,24 @@ async function receberDirect(
     // do banco: com a do evento, quem abrisse a conversa entre o envio e a
     // chegada deixaria a mensagem como lida sem tê-la visto.
     const criadoEm = novaTentativa ? horaOriginal(evento.timestamp) : undefined;
+    // A primeira resposta, se for esta: na nova tentativa, a hora original da
+    // mensagem; na primeira, a hora do evento (a mensagem fica com a do banco).
+    const respondeuEm = criadoEm ?? agora;
 
     let leadId: string;
     let contatoNovo = false;
     if (contato) {
-      await reabrirConversa(service, contato, agora, novaTentativa);
+      await reabrirConversa(
+        service,
+        contato,
+        agora,
+        respondeuEm,
+        novaTentativa,
+      );
       leadId = contato.id;
       renovarFoto(service, leadId, igsid);
     } else {
-      const criado = await criarContato(service, igsid, agora);
+      const criado = await criarContato(service, igsid, agora, respondeuEm);
       leadId = criado.id;
       contatoNovo = criado.criado;
     }

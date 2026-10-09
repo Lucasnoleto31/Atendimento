@@ -71,11 +71,18 @@ function telefoneCsv(e164: string | null): string {
   return `(${ddd}) ${numero.slice(0, corte)}-${numero.slice(corte)}`;
 }
 
+// Canal e Campanha são a origem do contato, como no CSV do sistema original:
+// o canal de entrada (leads.channel_id, a mesma origem da ficha) e
+// leads.campanha, que a importação e a /captura ainda gravam. Status e Etapa
+// eram do funil e ficaram fora. O importador lê a Campanha de volta como a
+// campanha da linha.
 const CABECALHO = [
   "Nome",
   "Telefone",
   "E-mail",
   "Instagram",
+  "Canal",
+  "Campanha",
   "Etiquetas",
   "Responsável",
   "Criado em",
@@ -84,8 +91,8 @@ const CABECALHO = [
 // id e ultima_interacao_em não vão para o arquivo: servem à ordem da tela
 // no CSV do filtro inteiro.
 const CAMPOS =
-  "id, nome, telefone_e164, email, instagram_usuario, criado_em, " +
-  "ultima_interacao_em, " +
+  "id, nome, telefone_e164, email, instagram_usuario, campanha, criado_em, " +
+  "ultima_interacao_em, canal:channels(nome), " +
   "responsavel:profiles(nome), etiquetas:lead_tags(tag:tags(nome))";
 
 /** Quantos lotes de ids do filtro inteiro vão ao banco de uma vez. */
@@ -98,7 +105,9 @@ type Linha = {
   telefone_e164: string | null;
   email: string | null;
   instagram_usuario: string | null;
+  campanha: string | null;
   criado_em: string;
+  canal: { nome: string } | null;
   responsavel: { nome: string } | null;
   etiquetas: { tag: { nome: string } | null }[] | null;
 };
@@ -236,6 +245,8 @@ export async function GET(request: NextRequest) {
     l.email ?? "",
     // Sem a arroba: "@" no começo da célula também é fórmula para o Excel.
     l.instagram_usuario ?? "",
+    l.canal?.nome ?? "",
+    l.campanha ?? "",
     (l.etiquetas ?? [])
       .map((e) => e.tag?.nome)
       .filter(Boolean)

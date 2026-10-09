@@ -18,6 +18,7 @@ import {
 } from "@/app/api/webhooks/lead-ads";
 import { variantesTelefone } from "@/lib/telefone";
 import { escolherVendedor } from "@/lib/distribuicao";
+import { formatarData } from "@/lib/format";
 import { hospedarMidiaMeta } from "@/lib/whatsapp";
 import {
   acharInteracaoPorIdMeta,
@@ -559,17 +560,28 @@ async function registrarQualidadeNumero(
   }
 }
 
-type Contato = {
-  id: string;
-  nome: string | null;
-  telefone_e164: string | null;
+/** O que o contato perdido carrega até sair de perdido (gatilho t01). */
+type Perda = {
   status: string;
   perda_motivo: string | null;
+  perda_detalhe: string | null;
+  perdido_em: string | null;
   marketing_bloqueado_em: string | null;
 };
 
+type Contato = Perda & {
+  id: string;
+  nome: string | null;
+  telefone_e164: string | null;
+  primeira_resposta_em: string | null;
+  whatsapp_instance_id: string | null;
+};
+
+const CAMPOS_PERDA =
+  "status, perda_motivo, perda_detalhe, perdido_em, marketing_bloqueado_em";
+
 const CAMPOS_CONTATO =
-  "id, nome, telefone_e164, status, perda_motivo, marketing_bloqueado_em";
+  `id, nome, telefone_e164, primeira_resposta_em, whatsapp_instance_id, ${CAMPOS_PERDA}`;
 
 /**
  * Motivos de perda (check leads_perda_motivo_chk, 0038 e 0061) em que o
@@ -579,10 +591,97 @@ const CAMPOS_CONTATO =
 const MOTIVOS_SEM_MARKETING = new Set(["sem_interesse", "contato_invalido"]);
 
 /**
+ * Os rótulos dos motivos de perda, os mesmos que a equipe escolheu ao marcar
+ * (lib/perda.ts do CRM). Slug fora da lista sai como veio.
+ */
+const ROTULO_MOTIVO_PERDA: Record<string, string> = {
+  sumiu: "Sumiu, parou de responder",
+  nunca_respondeu: "Nunca respondeu",
+  concorrente: "Fechou com concorrente",
+  sem_interesse: "Não quer abrir conta",
+  sem_perfil: "Sem capital ou sem perfil agora",
+  contato_invalido: "Número errado ou engano",
+  outro: "Outro motivo",
+};
+
+/** "Saiu de perdido. Motivo: Não quer abrir conta (detalhe). Perdido em
+ *  03/10/2026." Sem detalhe ou sem data, a parte some; sem motivo, sai
+ *  "Motivo não registrado". */
+function textoSaidaDePerdido(perda: Perda): string {
+  const motivo = perda.perda_motivo
+    ? (ROTULO_MOTIVO_PERDA[perda.perda_motivo] ?? perda.perda_motivo)
+    : null;
+  const detalhe =
+    perda.perda_detalhe?.replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "") ||
+    null;
+  const porque = motivo
+    ? `Motivo: ${motivo}${detalhe ? ` (${detalhe})` : ""}.`
+    : detalhe
+      ? `Motivo não registrado (${detalhe}).`
+      : "Motivo não registrado.";
+  const quando = perda.perdido_em
+    ? ` Perdido em ${formatarData(perda.perdido_em)}.`
+    : "";
+  return `Saiu de perdido. ${porque}${quando}`;
+}
+
+/**
+ * A busca do contato é do começo da mensagem, antes da mídia: para quem
+ * estava perdido, a perda é relida perto do update. Numa rajada, a mensagem
+ * que chega depois acha o contato já fora de perdido e não repete a nota.
+ */
+async function relerPerda(
+  service: Service,
+  contato: Contato,
+): Promise<Contato> {
+  const { data, error } = await service
+    .from("leads")
+    .select(CAMPOS_PERDA)
+    .eq("id", contato.id)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao reler a perda: ${error.message}`);
+  return data ? { ...contato, ...(data as Perda) } : contato;
+}
+
+/**
+ * Sair de perdido apaga motivo, detalhe e data da perda (gatilho t01, 0063).
+ * Antes do update, a perda vira nota de sistema na conversa (a linha fina
+ * do chat), no formato da reabertura automática do CRM, e os valores vão
+ * também em metadados.saiu_de_perdido. A nota não acende "não lida" (é
+ * nota de sistema), não conta como resposta da equipe (o Relatório conta
+ * só mensagem_enviada), não mexe na fila (a vez e a ordem são das
+ * mensagens) e não dispara resposta automática.
+ *
+ * Sem a nota, o contato não sai de perdido: a falha manda a mensagem para
+ * a passada, que tenta de novo com a perda ainda no banco.
+ */
+async function anotarSaidaDePerdido(service: Service, perda: Contato) {
+  const { error } = await service.from("lead_interactions").insert({
+    lead_id: perda.id,
+    tipo: "nota",
+    conteudo: textoSaidaDePerdido(perda),
+    metadados: {
+      via: "webhook",
+      sistema: true,
+      reabertura: true,
+      saiu_de_perdido: {
+        motivo: perda.perda_motivo,
+        detalhe: perda.perda_detalhe,
+        perdido_em: perda.perdido_em,
+      },
+    },
+  });
+  if (error) {
+    throw new Error(`Falha ao guardar o motivo da perda: ${error.message}`);
+  }
+}
+
+/**
  * Contas WhatsApp BR antigas chegam da Meta sem o nono dígito (55+DDD+8).
- * A busca considera as duas grafias para não duplicar o contato. Status,
- * motivo da perda e trava de marketing vêm só para o caso do lead marcado
- * perdido (ver reabrirConversa).
+ * A busca considera as duas grafias para não duplicar o contato. A perda e
+ * a trava de marketing vêm para o caso do lead marcado perdido, e a
+ * primeira resposta, para gravá-la só se estiver vazia (ver
+ * reabrirConversa).
  */
 async function buscarContato(
   service: Service,
@@ -604,39 +703,43 @@ async function buscarContato(
 }
 
 /**
- * Dono da instância que recebeu: define o responsável do contato novo.
- * Quase toda mensagem chega pelo mesmo número, então a resposta fica um
- * minuto em memória (inclusive a de "sem dono"): trocar o dono em
+ * A instância que recebeu: o contato novo nasce ligado a ela
+ * (whatsapp_instance_id) e o dono dela é o responsável. Quase toda mensagem
+ * chega pelo mesmo número, então a resposta fica um minuto em memória
+ * (inclusive a de "sem instância" e a de "sem dono"): trocar o dono em
  * Configurações leva até um minuto para valer aqui.
  */
-const TTL_INSTANCIA_MS = 60_000;
-const cacheInstancia = new Map<
-  string,
-  { vendedorId: string | null; expira: number }
->();
+type Instancia = { id: string | null; vendedorId: string | null };
 
-async function donoDaInstancia(
+const SEM_INSTANCIA: Instancia = { id: null, vendedorId: null };
+const TTL_INSTANCIA_MS = 60_000;
+const cacheInstancia = new Map<string, Instancia & { expira: number }>();
+
+async function instanciaQueRecebeu(
   service: Service,
   phoneNumberId: string | null,
-): Promise<string | null> {
-  if (!phoneNumberId) return null;
-  const guardado = cacheInstancia.get(phoneNumberId);
-  if (guardado && Date.now() < guardado.expira) return guardado.vendedorId;
+): Promise<Instancia> {
+  if (!phoneNumberId) return SEM_INSTANCIA;
+  const guardada = cacheInstancia.get(phoneNumberId);
+  if (guardada && Date.now() < guardada.expira) return guardada;
 
   const { data, error } = await service
     .from("whatsapp_instances")
-    .select("vendedor_id")
+    .select("id, vendedor_id")
     .eq("meta_phone_number_id", phoneNumberId)
     .maybeSingle();
-  const vendedorId = (data?.vendedor_id as string | null | undefined) ?? null;
+  const instancia: Instancia = {
+    id: (data?.id as string | null | undefined) ?? null,
+    vendedorId: (data?.vendedor_id as string | null | undefined) ?? null,
+  };
   // Falha de leitura não entra no cache: a próxima mensagem tenta de novo.
   if (!error) {
     cacheInstancia.set(phoneNumberId, {
-      vendedorId,
+      ...instancia,
       expira: Date.now() + TTL_INSTANCIA_MS,
     });
   }
-  return vendedorId;
+  return instancia;
 }
 
 /** O anexo como fica em metadados.anexos, que a tela lê (paraMensagem). */
@@ -693,58 +796,103 @@ async function hospedarAnexo(
 /**
  * Cliente escreveu: a conversa resolvida ou adiada volta para a caixa de
  * entrada (o prazo do adiamento também zera) e ultima_interacao_em acende o
- * aviso de não lida. Um update só por mensagem.
+ * aviso de não lida. Um update só por mensagem (fora a primeira resposta,
+ * abaixo).
  *
  * Lead marcado perdido aparece como resolvido no chat — a v_leads_listas o
  * tira da Caixa pelo status. Para a conversa voltar, o status sai de
  * perdido no mesmo update.
  *
- * Sair de perdido apaga o motivo (gatilho t01), e o disparo em massa só
- * barra perdido e marketing_bloqueado_em. Quem foi perdido por pedir para
- * parar ou por número errado ganha a trava de marketing neste mesmo update,
- * decidida pelo motivo lido antes de o gatilho limpá-lo.
+ * Sair de perdido apaga motivo, detalhe e data da perda (gatilho t01): a
+ * perda é relida e vira nota antes do update (anotarSaidaDePerdido). O
+ * disparo em massa só barra perdido e marketing_bloqueado_em: quem foi
+ * perdido por pedir para parar ou por número errado ganha a trava de
+ * marketing neste mesmo update, decidida pelo motivo relido antes de o
+ * gatilho limpá-lo.
+ *
+ * A primeira resposta (respondeuEm, ver receberMensagem) só é gravada se
+ * estava vazia: vai num update à parte, condicionado a ela continuar
+ * vazia, e só quando a busca a leu vazia. Assim nenhuma mensagem
+ * sobrescreve a de outra, nem numa rajada. O número que recebeu
+ * (whatsapp_instance_id) segue a mesma regra, como no sistema original:
+ * só preenche o vazio.
  *
  * Na nova tentativa, chat_lido_em também zera (o efeito de "marcar não
  * lida"): a mensagem entra com a hora original, e quem abriu a conversa
  * depois dela não a viu, porque ela ainda não estava gravada.
  *
- * Falha aqui não derruba a mensagem: ela entra no histórico do mesmo jeito
- * e o motivo fica no log.
+ * Falha nos updates não derruba a mensagem: ela entra no histórico do
+ * mesmo jeito e o motivo fica no log. A nota da perda, sim (ver
+ * anotarSaidaDePerdido).
  */
 async function reabrirConversa(
   service: Service,
-  contato: Contato,
+  lido: Contato,
   agora: string,
+  respondeuEm: string,
   marcarNaoLida: boolean,
+  instanciaId: string | null,
 ) {
+  const contato =
+    lido.status === "perdido" ? await relerPerda(service, lido) : lido;
   const perdido = contato.status === "perdido";
+  if (perdido) await anotarSaidaDePerdido(service, contato);
   const travarMarketing =
     perdido &&
     contato.marketing_bloqueado_em === null &&
     MOTIVOS_SEM_MARKETING.has(contato.perda_motivo ?? "");
 
-  const { error } = await service
-    .from("leads")
-    .update({
-      ultima_interacao_em: agora,
-      chat_resolvido_em: null,
-      chat_adiado_em: null,
-      chat_adiado_ate: null,
-      ...(marcarNaoLida ? { chat_lido_em: null } : {}),
-      ...(perdido ? { status: "em_atendimento" } : {}),
-      ...(travarMarketing ? { marketing_bloqueado_em: agora } : {}),
-    })
-    .eq("id", contato.id);
+  const [{ error }, primeira, numero] = await Promise.all([
+    service
+      .from("leads")
+      .update({
+        ultima_interacao_em: agora,
+        chat_resolvido_em: null,
+        chat_adiado_em: null,
+        chat_adiado_ate: null,
+        ...(marcarNaoLida ? { chat_lido_em: null } : {}),
+        ...(perdido ? { status: "em_atendimento" } : {}),
+        ...(travarMarketing ? { marketing_bloqueado_em: agora } : {}),
+      })
+      .eq("id", contato.id),
+    contato.primeira_resposta_em === null
+      ? service
+          .from("leads")
+          .update({ primeira_resposta_em: respondeuEm })
+          .eq("id", contato.id)
+          .is("primeira_resposta_em", null)
+      : null,
+    contato.whatsapp_instance_id === null && instanciaId
+      ? service
+          .from("leads")
+          .update({ whatsapp_instance_id: instanciaId })
+          .eq("id", contato.id)
+          .is("whatsapp_instance_id", null)
+      : null,
+  ]);
   if (error) {
     console.error(
       `[webhook meta] conversa ${contato.id} não reabriu: ${error.message}`,
+    );
+  }
+  if (primeira?.error) {
+    console.error(
+      `[webhook meta] primeira resposta de ${contato.id} não gravada: ${primeira.error.message}`,
+    );
+  }
+  if (numero?.error) {
+    console.error(
+      `[webhook meta] número que recebeu ${contato.id} não gravado: ${numero.error.message}`,
     );
   }
 }
 
 /**
  * Contato novo. O responsável é o dono da instância; sem dono nela, cai na
- * distribuição automática, e a atribuição fica registrada no fio.
+ * distribuição automática, e a atribuição fica registrada no fio. Nasce no
+ * canal WhatsApp, ligado à instância que recebeu, e com a primeira
+ * resposta: foi ele quem escreveu. Etapa e status ficam com o gatilho
+ * lead_respondeu_avanca (0040), que roda quando a mensagem entra.
  *
  * Quando outro POST criou o mesmo contato no meio do caminho, devolve o
  * contato dele em `existente`: quem chamou reabre a conversa na hora certa,
@@ -755,21 +903,28 @@ async function criarContato(
   dados: {
     telefone: string;
     nomePerfil: string | undefined;
-    donoInstancia: string | null;
+    instancia: Instancia;
     agora: string;
+    respondeuEm: string;
   },
 ): Promise<{ id: string; existente: Contato | null }> {
-  const atendente = dados.donoInstancia
-    ? null
-    : await escolherVendedor(service);
+  // O canal e quem atende não dependem um do outro: saem juntos. Sem a
+  // leitura do canal, o contato nasce sem ele em vez de perder a mensagem.
+  const [canal, atendente] = await Promise.all([
+    service.from("channels").select("id").eq("slug", "whatsapp").maybeSingle(),
+    dados.instancia.vendedorId ? null : escolherVendedor(service),
+  ]);
 
   const { data: novo, error } = await service
     .from("leads")
     .insert({
       nome: dados.nomePerfil || `WhatsApp ${dados.telefone.slice(-4)}`,
       telefone_e164: dados.telefone,
+      channel_id: (canal.data?.id as string | undefined) ?? null,
+      whatsapp_instance_id: dados.instancia.id,
       entrada_motivo: "webhook_meta",
-      responsavel_id: dados.donoInstancia ?? atendente?.id ?? null,
+      responsavel_id: dados.instancia.vendedorId ?? atendente?.id ?? null,
+      primeira_resposta_em: dados.respondeuEm,
       ultima_interacao_em: dados.agora,
     })
     .select("id")
@@ -974,11 +1129,11 @@ async function receberMensagem(
   );
   const phoneNumberId = valor.metadata?.phone_number_id ?? null;
 
-  // O registro do evento (dedup), o dono da instância e o contato não
+  // O registro do evento (dedup), a instância que recebeu e o contato não
   // dependem um do outro: uma ida ao banco em vez de três em fila.
-  const [registro, donoInstancia, busca] = await Promise.all([
+  const [registro, instancia, busca] = await Promise.all([
     reivindicado ?? registrarEvento(service, "meta", mensagem.id, valor),
-    donoDaInstancia(service, phoneNumberId),
+    instanciaQueRecebeu(service, phoneNumberId),
     telefone ? buscarContato(service, telefone) : null,
   ]);
   if (registro.tipo === "duplicado") return;
@@ -1048,6 +1203,19 @@ async function receberMensagem(
         ? "uma"
         : null;
 
+    // Nova tentativa grava a mensagem com a hora em que o cliente mandou:
+    // com a de agora, uma rajada que falhou entraria invertida no chat e a
+    // janela de 24h contaria da nova tentativa. A primeira fica com a hora do
+    // banco: com a do WhatsApp, quem abrisse a conversa entre o envio e a
+    // chegada deixaria a mensagem como lida sem tê-la visto.
+    const criadoEm = novaTentativa
+      ? horaOriginal(Number(mensagem.timestamp) * 1000)
+      : undefined;
+    // A primeira resposta, se for esta: na nova tentativa, a hora original da
+    // mensagem; na primeira, a hora em que o webhook a recebeu, tirada antes
+    // da mídia e por isso alguns segundos antes do criado_em do banco.
+    const respondeuEm = criadoEm ?? new Date().toISOString();
+
     // A mídia (Graph, CDN e Storage, em série) corre junto com a criação do
     // contato novo, que nasce sem chat_lido_em. Contato que já existe
     // (inclusive o que outro POST acabou de criar) só é carimbado depois da
@@ -1064,8 +1232,9 @@ async function receberMensagem(
         : criarContato(service, {
             telefone,
             nomePerfil: valor.contacts?.[0]?.profile?.name?.trim(),
-            donoInstancia,
+            instancia,
             agora: new Date().toISOString(),
+            respondeuEm,
           }),
       citadaId && contato
         ? acharInteracaoPorIdMeta(service, contato.id, citadaId).catch(
@@ -1098,19 +1267,12 @@ async function receberMensagem(
         service,
         alvo.existente,
         new Date().toISOString(),
+        respondeuEm,
         novaTentativa,
+        instancia.id,
       );
     }
     const leadId = alvo.id;
-
-    // Nova tentativa grava a mensagem com a hora em que o cliente mandou:
-    // com a de agora, uma rajada que falhou entraria invertida no chat e a
-    // janela de 24h contaria da nova tentativa. A primeira fica com a hora do
-    // banco: com a do WhatsApp, quem abrisse a conversa entre o envio e a
-    // chegada deixaria a mensagem como lida sem tê-la visto.
-    const criadoEm = novaTentativa
-      ? horaOriginal(Number(mensagem.timestamp) * 1000)
-      : undefined;
 
     const { error: erroInteracao } = await service
       .from("lead_interactions")

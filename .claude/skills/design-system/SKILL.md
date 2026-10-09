@@ -5,11 +5,10 @@ description: Regras de design do projeto Atendimento (Zeve Atendimento) na ficha
 
 # Design System — Zeve Atendimento
 
-> Segue a **ficha padrão do kit estético do Artur** desde 07/10/2026:
-> `C:\Users\artur\OneDrive\3. Claude\design\ficha-padrao.md` (os valores) e
-> `C:\Users\artur\OneDrive\3. Claude\design\kit-estetico.md` (as regras; blocos 0 a 8 e 12
-> valem para tela). A direção da tela está em `.impeccable/surfaces/src-app-app-chat-page-tsx.md`.
-> Nada aqui é gosto: mudar um valor pede medir de novo (regra do kit).
+> Segue a **ficha padrão do kit estético do Artur** desde 07/10/2026 (monocromática, Poppins).
+> Os valores dessa ficha estão nas tabelas abaixo e em `src/app/globals.css`; este arquivo
+> basta, sem consulta a nada de fora do repositório. Nada aqui é gosto: os números saíram de
+> medição, e mudar um valor pede medir de novo.
 
 Fonte única de verdade para a interface. Nenhum valor de cor, tipo, raio ou espaço é
 inventado fora destas tabelas. Os tokens moram em `src/app/globals.css`; os componentes, em
