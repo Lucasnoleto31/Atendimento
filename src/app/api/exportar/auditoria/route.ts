@@ -1,7 +1,8 @@
 import { type NextRequest } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { buscarTudo } from "@/lib/supabase/paginar";
-import { perfilAtual } from "@/lib/auth";
+import { perfilAtivo } from "@/lib/auth";
+import { formatarDataHoraCompleta } from "@/lib/format";
 import { rotuloPapel, veTudo } from "@/lib/papeis";
 import { ROTULO_ACAO, descreverDetalhes } from "@/lib/auditoria";
 
@@ -14,7 +15,8 @@ function celula(valor: unknown): string {
 }
 
 export async function GET(request: NextRequest) {
-  const perfil = await perfilAtual();
+  // perfilAtivo: conta desativada com a aba aberta não baixa o log.
+  const perfil = await perfilAtivo();
   if (!perfil || !veTudo(perfil.papel)) {
     return new Response("Só gestão e compliance exportam o log.", {
       status: 403,
@@ -35,7 +37,7 @@ export async function GET(request: NextRequest) {
     detalhes: Record<string, unknown>;
     autor: { nome: string; papel: string } | null;
   };
-  const { dados } = await buscarTudo((de, ate) => {
+  const { dados, erro } = await buscarTudo((de, ate) => {
     let q = supabase
       .from("auditoria")
       .select("criado_em, acao, detalhes, autor:profiles(nome, papel)")
@@ -47,8 +49,18 @@ export async function GET(request: NextRequest) {
     return q;
   });
 
+  // Lote que falhou no meio: nada de CSV pela metade, e a exportação não
+  // entra no log com uma contagem parcial.
+  if (erro) {
+    return new Response(`Não deu para exportar o log: ${erro}`, {
+      status: 500,
+    });
+  }
+
   const linhas = ((dados ?? []) as unknown as Linha[]).map((r) => [
-    r.criado_em,
+    // Data e hora de Brasília, com o ano: o arquivo é a prova de quem viu o
+    // quê, e o ISO em UTC aparecia 3 h adiantado.
+    formatarDataHoraCompleta(r.criado_em),
     r.autor?.nome ?? "sistema",
     r.autor ? rotuloPapel(r.autor.papel) : "",
     ROTULO_ACAO[r.acao] ?? r.acao,

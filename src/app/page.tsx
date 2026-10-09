@@ -1,27 +1,11 @@
-import { Navbar } from "@/components/site/navbar";
-import { Hero } from "@/components/site/hero";
-import { Features } from "@/components/site/features";
-import { Metrics } from "@/components/site/metrics";
-import { Modules } from "@/components/site/modules";
-import { Footer } from "@/components/site/footer";
+import { redirect } from "next/navigation";
+import { DESTINO_PADRAO } from "@/lib/rotas";
 
-export default function Home() {
-  return (
-    <>
-      <a
-        href="#conteudo"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-1 focus:left-1 focus:z-[60] focus:rounded-md focus:bg-neutral-0 focus:px-2 focus:py-1 focus:text-sm focus:outline-2 focus:outline-primary-500"
-      >
-        Pular para o conteúdo
-      </a>
-      <Navbar />
-      <main id="conteudo" className="flex-1 pt-[64px]">
-        <Hero />
-        <Features />
-        <Metrics />
-        <Modules />
-      </main>
-      <Footer />
-    </>
-  );
+/**
+ * A raiz não tem tela própria: o sistema é de uso interno e começa no chat.
+ * Quem não está logado é desviado pelo middleware para o /entrar, com o
+ * retorno para o chat.
+ */
+export default function Raiz() {
+  redirect(DESTINO_PADRAO);
 }

@@ -1,236 +1,242 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
-import { normalizarTelefone, variantesTelefone } from "@/lib/csv";
+import { normalizarTelefone, variantesTelefone } from "@/lib/telefone";
 import { escolherVendedor } from "@/lib/distribuicao";
+import { registrarAcesso } from "@/lib/auditoria";
+import { chaveDaEtiqueta } from "@/lib/imports/etiqueta";
+import { ipDoCliente, paraFiltro } from "@/app/entrar/freio";
+import { lerRastreio, limpar } from "./rastreio";
 
 /**
- * O POST público da /captura (Fase 7.1). Aqui não existe sessão: o RLS de
- * leads só aceita insert autenticado, então TUDO roda no service role — e
- * por isso TODA validação vive neste arquivo, nada no cliente.
+ * O envio do formulário público /captura. Aqui não existe sessão: o RLS de
+ * leads só aceita gravação de quem está logado, então tudo roda com a chave
+ * de serviço, e por isso toda conferência mora neste arquivo, no servidor.
  *
- * Camadas, na ordem: honeypot (robô burro sai com a tela de sucesso e nada
- * acontece) → rate limit 5/15min por IP ou telefone (0056) → normalização →
- * deduplicação pelas duas grafias do nono dígito (contrato da 0036: jamais
- * dois cards da mesma pessoa) → criação com dono via rodízio oficial.
+ * Na ordem: honeypot (robô sai com a tela de sucesso e nada acontece), freio
+ * de 5 envios em 15 minutos por IP ou telefone (captura_tentativas, 0056),
+ * normalização, telefone que já é contato (as duas grafias do nono dígito)
+ * e o contato novo, no modelo de hoje: sem etapa nem status de funil, com a
+ * origem em leads.campanha e o responsável da carteira ou da distribuição
+ * automática.
  *
- * Quem já é lead ou já é cliente vê a MESMA tela de sucesso — formulário
- * público não confirma para estranhos o que existe na base.
+ * Quem já é contato vê a mesma tela de sucesso: formulário público não
+ * confirma para estranhos quem está na base.
  */
+
+export type EstadoCaptura = {
+  /** O que foi digitado: o campo volta preenchido depois do erro. */
+  nome?: string;
+  telefone?: string;
+  erroNome?: string;
+  erroTelefone?: string;
+  /** O erro que não é de um campo (freio, falha), acima do botão. */
+  erro?: string;
+};
 
 const MAX_ENVIOS = 5;
 const JANELA_MIN = 15;
-const MAX_TEXTO = 120;
+/** O que passou disso sai da tabela no próprio envio (não há cron). */
+const EXPURGO_MS = 24 * 3_600_000;
 
-/** O PostgREST quebra o filtro or= com vírgula/parêntese/aspas no valor. */
-function paraFiltro(valor: string): string {
-  return valor.replaceAll(/[,()"]/g, "");
+const ERRO_FALHA = "O envio falhou do nosso lado. Tente de novo em alguns instantes.";
+
+/** O nome como padrão do LIKE: %, _ e \ valem como texto. */
+function paraLike(texto: string): string {
+  return texto.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
-/** Primeiro salto do x-forwarded-for — é o IP real do cliente na Vercel. */
-async function ipDoCliente(): Promise<string> {
-  const h = await headers();
-  const encadeado = h.get("x-forwarded-for") ?? "";
-  const primeiro = encadeado.split(",")[0]?.trim();
-  return primeiro || h.get("x-real-ip") || "desconhecido";
-}
-
-/** Campo de URL/formulário: curto, sem caracteres de controle. */
-function limpar(valor: unknown): string {
-  return String(valor ?? "")
-    .replaceAll(/[\u0000-\u001F\u007F]/g, "")
-    .trim()
-    .slice(0, MAX_TEXTO);
-}
-
-export async function capturarLead(formData: FormData) {
-  // A volta (sucesso ou erro) preserva os parâmetros de campanha da URL —
-  // quem errar o telefone reenvia sem perder a atribuição.
-  const rastreio = new URLSearchParams();
-  for (const chave of [
-    "campanha",
-    "etiqueta",
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_content",
-  ]) {
-    const valor = limpar(formData.get(chave));
-    if (valor) rastreio.set(chave, valor);
-  }
-  // Function declaration de propósito: chamada com retorno never só encerra
-  // o fluxo para o TypeScript quando o callee tem anotação explícita.
-  function voltar(extra: string): never {
+export async function capturarLead(
+  _estado: EstadoCaptura,
+  formData: FormData,
+): Promise<EstadoCaptura> {
+  // A volta leva os parâmetros de campanha: a página de sucesso fica com a
+  // mesma atribuição do anúncio.
+  const rastreio = new URLSearchParams(
+    lerRastreio((chave) => formData.get(chave)).map(({ chave, valor }) => [
+      chave,
+      valor,
+    ]),
+  );
+  // Declaração de função de propósito: só com a anotação explícita o
+  // TypeScript entende que a chamada encerra o fluxo.
+  function sucesso(): never {
     const query = rastreio.toString();
-    redirect(`/captura?${extra}${query ? `&${query}` : ""}`);
+    redirect(`/captura?ok=1${query ? `&${query}` : ""}`);
   }
 
   // Honeypot: o campo "website" é invisível para gente; preenchido, é robô.
-  // Sai com a tela de sucesso e nenhum lead — descarte em silêncio.
-  if (String(formData.get("website") ?? "").trim() !== "") {
-    voltar("ok=1");
-  }
+  if (limpar(formData.get("website")) !== "") sucesso();
 
   const nome = limpar(formData.get("nome"));
   const telefoneBruto = limpar(formData.get("telefone"));
-  if (!nome) voltar(`erro=${encodeURIComponent("Informe seu nome.")}`);
-  if (!telefoneBruto) {
-    voltar(`erro=${encodeURIComponent("Informe seu WhatsApp com DDD.")}`);
+  const digitado = { nome, telefone: telefoneBruto };
+  if (!nome || !telefoneBruto) {
+    return {
+      ...digitado,
+      ...(nome ? {} : { erroNome: "Escreva seu nome." }),
+      ...(telefoneBruto ? {} : { erroTelefone: "Escreva seu WhatsApp com DDD." }),
+    };
   }
 
-  const service = createServiceClient();
+  let service: ReturnType<typeof createServiceClient>;
+  try {
+    service = createServiceClient();
+  } catch {
+    return { ...digitado, erro: ERRO_FALHA };
+  }
   const ip = paraFiltro(await ipDoCliente());
-  const telefone = normalizarTelefone(telefoneBruto);
+  // Número digitado à mão, como no cadastro de contato: com "+" e outro
+  // país, vale como veio; sem "+", é brasileiro e precisa do DDD.
+  const telefone = normalizarTelefone(telefoneBruto, { aceitarExterior: true });
 
-  // Rate limit ANTES de qualquer trabalho: 5 envios em 15min pelo mesmo IP
-  // ou telefone. Mensagem genérica — não diz o limite nem o tempo restante.
+  // Freio antes de qualquer outra coisa, pelo mesmo IP ou pelo mesmo
+  // telefone. A mensagem não diz o limite nem quanto falta. Sem a tabela
+  // (0056), o formulário segue sem o freio e o honeypot continua de pé.
   const corte = new Date(Date.now() - JANELA_MIN * 60_000).toISOString();
-  const filtroEixos = telefone
+  const eixos = telefone
     ? `ip.eq.${ip},telefone.eq.${paraFiltro(telefone)}`
     : `ip.eq.${ip}`;
-  const { count: recentes, error: erroLimite } = await service
+  const { count: recentes, error: erroFreio } = await service
     .from("captura_tentativas")
     .select("id", { count: "exact", head: true })
-    .or(filtroEixos)
+    .or(eixos)
     .gte("criado_em", corte);
-
-  // Sem a 0056 a tabela não existe: o formulário segue funcionando sem o
-  // limite (o honeypot continua de pé) — convenção da casa.
-  if (!erroLimite && (recentes ?? 0) >= MAX_ENVIOS) {
-    await service.from("auditoria").insert({
-      quem: null,
-      acao: "captura_bloqueada",
-      detalhes: { ip, telefone: telefone ?? telefoneBruto },
-    });
-    voltar(
-      `erro=${encodeURIComponent(
-        "Muitos envios em sequência. Aguarde alguns minutos e tente de novo.",
-      )}`,
-    );
-  }
-  if (!erroLimite) {
-    await service
-      .from("captura_tentativas")
-      .insert({ ip, telefone: telefone ?? null });
-    // Expurgo do que passou de 24h — sem cron, a limpeza mora no caminho.
-    await service
-      .from("captura_tentativas")
-      .delete()
-      .lt("criado_em", new Date(Date.now() - 24 * 3600_000).toISOString());
+  if (erroFreio) {
+    console.warn(`[captura] sem freio: ${erroFreio.message}`);
+  } else {
+    if ((recentes ?? 0) >= MAX_ENVIOS) {
+      registrarAcesso(null, "captura_bloqueada", {
+        ip,
+        telefone: telefone ?? telefoneBruto,
+      });
+      return {
+        ...digitado,
+        erro: "Muitos envios em sequência. Espere alguns minutos e tente de novo.",
+      };
+    }
+    await Promise.all([
+      service.from("captura_tentativas").insert({ ip, telefone }),
+      service
+        .from("captura_tentativas")
+        .delete()
+        .lt("criado_em", new Date(Date.now() - EXPURGO_MS).toISOString()),
+    ]);
   }
 
   if (!telefone) {
-    voltar(
-      `erro=${encodeURIComponent(
-        "Telefone inválido. Use DDD + número, ex.: 62 98181-0004.",
-      )}`,
-    );
+    return {
+      ...digitado,
+      erroTelefone: "Confira o número: DDD e número, como (11) 91234-5678.",
+    };
   }
 
-  // Já é lead (em qualquer das duas grafias do nono dígito)? Não cria nada
-  // e agradece do mesmo jeito — o atendimento continua no card que existe.
+  // Já é contato, em qualquer das duas grafias do nono dígito? Não cria
+  // nada e agradece igual: o atendimento segue no contato que existe. Já é
+  // cliente da carteira com dono? O dono atende: sem isso, o gatilho da
+  // carteira (0031) passaria o cliente para quem a distribuição escolheu, e
+  // um formulário público mudaria o dono de um cliente.
   const variantes = variantesTelefone(telefone);
-  const { data: leadExistente } = await service
-    .from("leads")
-    .select("id")
-    .in("telefone_e164", variantes)
-    .limit(1)
-    .maybeSingle();
-  if (leadExistente) voltar("ok=1");
+  const [{ data: existentes, error: erroBusca }, { data: clientes }] =
+    await Promise.all([
+      service.from("leads").select("id").in("telefone_e164", variantes).limit(1),
+      service
+        .from("customers")
+        .select("responsavel_id")
+        .in("telefone_e164", variantes)
+        .not("responsavel_id", "is", null)
+        .limit(1),
+    ]);
+  if (erroBusca) {
+    console.error(`[captura] busca do contato: ${erroBusca.message}`);
+    return { ...digitado, erro: ERRO_FALHA };
+  }
+  if ((existentes ?? []).length > 0) sucesso();
 
-  // Já é CLIENTE da carteira? O dono do lead novo é o dono da carteira —
-  // sem isso, o gatilho 0031 espelharia o vendedor do rodízio como novo
-  // dono do cliente, e um formulário público roubaria carteira alheia.
-  const { data: clienteExistente } = await service
-    .from("customers")
-    .select("id, responsavel_id")
-    .in("telefone_e164", variantes)
-    .limit(1)
-    .maybeSingle();
-
-  const vendedor = clienteExistente?.responsavel_id
-    ? null
-    : await escolherVendedor(service);
-  const responsavelId = clienteExistente?.responsavel_id ?? vendedor?.id ?? null;
-
-  // Primeira etapa do kanban padrão — igual ao cadastro manual.
-  const { data: etapa } = await service
-    .from("pipeline_stages")
-    .select("id, pipeline:pipelines!inner(padrao)")
-    .eq("pipeline.padrao", true)
-    .order("ordem")
-    .limit(1)
-    .maybeSingle();
-
-  const { data: canal } = await service
-    .from("channels")
-    .select("id")
-    .eq("slug", "site")
-    .maybeSingle();
+  const donoCarteira =
+    ((clientes ?? [])[0] as { responsavel_id: string } | undefined)
+      ?.responsavel_id ?? null;
+  const atendente = donoCarteira ? null : await escolherVendedor(service);
+  const responsavelId = donoCarteira ?? atendente?.id ?? null;
 
   const { data: lead, error } = await service
     .from("leads")
     .insert({
       nome,
       telefone_e164: telefone,
-      channel_id: canal?.id ?? null,
-      campanha: rastreio.get("campanha") ?? null,
-      utm_source: rastreio.get("utm_source") ?? null,
-      utm_medium: rastreio.get("utm_medium") ?? null,
-      utm_campaign: rastreio.get("utm_campaign") ?? null,
-      utm_content: rastreio.get("utm_content") ?? null,
-      stage_id: etapa?.id ?? null,
-      status: "novo",
+      // A origem: a campanha do link e, sem ela, o utm_campaign (a mesma
+      // equivalência da importação, que lê utm_campaign como campanha).
+      campanha: rastreio.get("campanha") ?? rastreio.get("utm_campaign"),
+      utm_source: rastreio.get("utm_source"),
+      utm_medium: rastreio.get("utm_medium"),
+      utm_campaign: rastreio.get("utm_campaign"),
+      utm_content: rastreio.get("utm_content"),
       entrada_motivo: "formulario",
       responsavel_id: responsavelId,
     })
     .select("id")
     .single();
 
-  // Corrida entre dois envios (o índice único parcial não aceita ON
-  // CONFLICT): o segundo perde e agradece igual — o lead vencedor já existe.
   if (error || !lead) {
-    if (error?.code === "23505") voltar("ok=1");
-    voltar(
-      `erro=${encodeURIComponent(
-        "Não deu para enviar agora. Tente de novo em instantes.",
-      )}`,
-    );
+    // Dois envios ao mesmo tempo: o índice único do telefone barra o
+    // segundo, e o contato do primeiro já existe.
+    if (error?.code === "23505") sucesso();
+    console.error(`[captura] contato não gravado: ${error?.message}`);
+    return { ...digitado, erro: ERRO_FALHA };
   }
 
-  // Etiqueta da URL: vincula SÓ se ela já existir com aquele nome — URL
-  // pública não cria etiqueta (vetor de lixo na base).
+  // A etiqueta do link entra só se já existir e estiver ativa: link público
+  // não cria etiqueta, senão qualquer um encheria a lista. A comparação é a
+  // da importação (sem olhar maiúscula, com acento).
   const nomeEtiqueta = rastreio.get("etiqueta");
-  if (nomeEtiqueta) {
-    const { data: tag } = await service
-      .from("tags")
-      .select("id")
-      .eq("nome", nomeEtiqueta)
-      .eq("ativo", true)
-      .maybeSingle();
-    if (tag) {
-      await service
-        .from("lead_tags")
-        .insert({ lead_id: lead.id, tag_id: tag.id });
-    }
+  const [etiquetas, quemAtende] = await Promise.all([
+    nomeEtiqueta
+      ? service
+          .from("tags")
+          .select("id, nome")
+          .ilike("nome", paraLike(nomeEtiqueta))
+          .eq("ativo", true)
+      : null,
+    responsavelId
+      ? service
+          .from("profiles")
+          .select("nome")
+          .eq("id", responsavelId)
+          .maybeSingle()
+      : null,
+  ]);
+  const etiqueta = nomeEtiqueta
+    ? ((etiquetas?.data ?? []) as { id: string; nome: string }[]).find(
+        (t) => chaveDaEtiqueta(t.nome) === chaveDaEtiqueta(nomeEtiqueta),
+      )
+    : undefined;
+
+  // O fio não nasce mudo: quem recebeu o contato fica registrado.
+  const nomeAtendente =
+    (quemAtende?.data as { nome: string | null } | null)?.nome ??
+    atendente?.nome ??
+    null;
+  const gravacoes = await Promise.all([
+    etiqueta
+      ? service
+          .from("lead_tags")
+          .insert({ lead_id: lead.id, tag_id: etiqueta.id })
+      : null,
+    responsavelId
+      ? service.from("lead_interactions").insert({
+          lead_id: lead.id,
+          tipo: "atribuicao",
+          conteudo: `Atendimento atribuído a ${nomeAtendente ?? "alguém da equipe"} (formulário do site)`,
+          metadados: { via: "captura" },
+        })
+      : null,
+  ]);
+  for (const r of gravacoes) {
+    if (r?.error) console.warn(`[captura] ${lead.id}: ${r.error.message}`);
   }
 
-  // O histórico não nasce mudo: registra quem recebeu o lead e por quê.
-  if (responsavelId) {
-    await service.from("lead_interactions").insert({
-      lead_id: lead.id,
-      tipo: "atribuicao",
-      conteudo: clienteExistente?.responsavel_id
-        ? "Atendimento atribuído ao dono da carteira (formulário do site)"
-        : `Atendimento atribuído a ${vendedor?.nome ?? "vendedor"} (formulário do site)`,
-      metadados: { via: "captura" },
-    });
-  }
-
-  revalidatePath("/leads");
-  revalidatePath("/atendimento");
-  voltar("ok=1");
+  revalidatePath("/contatos");
+  sucesso();
 }

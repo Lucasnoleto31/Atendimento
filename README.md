@@ -1,14 +1,22 @@
-# Zeve CRM
+# Zeve Atendimento
 
-CRM de atendimento e carteira da Zeve: leads chegam pelo WhatsApp (e Instagram),
-passam pelo kanban de atendimento e viram clientes acompanhados por giro,
-receita e cadência de follow-up.
+Chat de atendimento da Zeve: as conversas do WhatsApp (Meta Cloud API) e do
+Instagram Direct chegam numa caixa de entrada compartilhada pela equipe, com
+atribuição, etiquetas, templates da Meta, mensagens padrão, anexos e áudio.
+Em volta do chat ficam a lista de contatos (com importação por planilha e
+exportação em CSV), os disparos em massa, o relatório de atendimento da
+equipe e o log de acesso.
 
 ## Stack
 
 - **Next.js 16** (App Router, Server Actions) — aplicação e API em um só deploy.
 - **Supabase** — Postgres com RLS, Auth, Storage e Realtime.
-- **Meta WhatsApp Cloud API** — envio e recebimento direto, sem intermediário.
+- **Resend** — e-mail do código de 6 dígitos da entrada (pedido uma vez por
+  aparelho a cada 30 dias) e da recuperação de senha.
+- **Meta WhatsApp Cloud API** e **API do Instagram** (Direct) — envio e
+  recebimento direto, sem intermediário.
+- **Vercel** — função na região `gru1` (São Paulo), a mesma do Supabase
+  (`vercel.json`).
 
 ## Como começar
 
@@ -24,7 +32,9 @@ npm install
 npm run dev
 ```
 
-A aplicação sobe em [http://localhost:3000](http://localhost:3000).
+A aplicação sobe em [http://localhost:3000](http://localhost:3000). Se o
+`.env.local` apontar para o banco de produção, defina `MOTORES_DESLIGADOS=1`
+antes de abrir qualquer página (ver `.env.local.example`).
 
 ## Scripts úteis
 

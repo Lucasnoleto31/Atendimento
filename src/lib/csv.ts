@@ -1,8 +1,16 @@
 /**
- * Leitura de CSV para as importações diárias.
+ * Leitura de CSV para as importações de planilha.
  * Aceita separador , ou ; (detectado pelo cabeçalho), campos entre aspas,
  * quebra de linha CRLF ou LF e BOM do Excel.
  */
+
+// Telefone e número moram em telefone.ts (o webhook usa sem passar por aqui);
+// a reexportação mantém quem já importava deste arquivo.
+export {
+  normalizarNumero,
+  normalizarTelefone,
+  variantesTelefone,
+} from "./telefone.ts";
 
 export type LinhaCsv = Record<string, string>;
 
@@ -97,27 +105,6 @@ export function campo(linha: LinhaCsv, ...nomes: string[]) {
   return "";
 }
 
-/**
- * Telefone brasileiro para E.164 sem símbolos: 5511988421170.
- * Retorna null quando não dá para confiar no número.
- */
-export function normalizarTelefone(bruto: string): string | null {
-  // Notação científica do Excel ("5,56599E+12"): os dígitos finais foram
-  // perdidos na exportação — número irrecuperável, melhor nulo que errado.
-  if (/e[+-]?\d/i.test(bruto)) return null;
-
-  const d = bruto.replace(/\D/g, "").replace(/^0+/, "");
-  if (!d) return null;
-
-  // Já veio com DDI 55 e DDD.
-  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
-
-  // DDD + número, sem DDI.
-  if (d.length === 10 || d.length === 11) return `55${d}`;
-
-  return null;
-}
-
 /** Datas em dd/mm/aaaa ou aaaa-mm-dd. Retorna aaaa-mm-dd. */
 export function normalizarData(bruto: string): string | null {
   const valor = bruto.trim();
@@ -130,39 +117,4 @@ export function normalizarData(bruto: string): string | null {
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
 
   return null;
-}
-
-/** Aceita 1.234,56 e 1234.56. */
-export function normalizarNumero(bruto: string): number | null {
-  const valor = bruto.trim();
-  if (!valor) return null;
-
-  const limpo =
-    valor.includes(",") && valor.lastIndexOf(",") > valor.lastIndexOf(".")
-      ? valor.replace(/\./g, "").replace(",", ".")
-      : valor.replace(/,/g, "");
-
-  const n = Number(limpo);
-  return Number.isFinite(n) ? n : null;
-}
-
-/**
- * As duas grafias do mesmo CELULAR brasileiro: com e sem o nono dígito.
- * O WhatsApp registra números antigos sem o 9 (wa_id "556296073230"),
- * mas as pessoas digitam com o 9 ("5562996073230") — comparar telefone
- * por igualdade exata separa a mesma pessoa em dois registros.
- */
-export function variantesTelefone(telefone: string): string[] {
-  const variantes = [telefone];
-  if (telefone.startsWith("55")) {
-    // Fixo é 55 + DDD + 8 dígitos começando em 2..5; celular antigo, em 6..9.
-    // Somar um 9 a um fixo inventa o número de outra pessoa.
-    if (telefone.length === 12 && telefone[4] >= "6" && telefone[4] <= "9") {
-      variantes.push(`${telefone.slice(0, 4)}9${telefone.slice(4)}`);
-    }
-    if (telefone.length === 13 && telefone[4] === "9") {
-      variantes.push(telefone.slice(0, 4) + telefone.slice(5));
-    }
-  }
-  return variantes;
 }

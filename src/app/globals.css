@@ -1,38 +1,72 @@
 @import "tailwindcss";
 
+/*
+ * Zeve Atendimento segue a FICHA PADRÃO do kit estético do Artur desde
+ * 07/10/2026 (OneDrive/3. Claude/design/ficha-padrao.md, regras em
+ * kit-estetico.md): preto, branco e cinza, sem acento cromático; a tinta faz o
+ * destaque e só o estado (não lida, janela de 24h, sem dono, falha) ganha
+ * cor, e só em texto curto. Poppins 400, 600 e 700. Cartão chapado; sombra e
+ * vidro só no que flutua.
+ *
+ * A troca foi de VALORES, não de nomes: primary-*, neutral-*, accent-*,
+ * success, warning, danger e info continuam existindo e cada tela antiga já
+ * pinta com a ficha. Os nomes novos (fundo, cartao, tinta, texto-2...) são o
+ * vocabulário das telas redesenhadas; a lista completa está no
+ * .claude/skills/design-system/SKILL.md.
+ */
+
 /* Variante dark dirigida pelo atributo data-theme no <html> (não pelo SO). */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
-  /* Fontes */
-  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* ── Fontes ──────────────────────────────────────────────────────────
+     Uma família, a Poppins (next/font, variável --font-poppins no <html>).
+     --font-mono é LEGADO: as telas antigas usam font-mono em hora, contagem e
+     telefone, e número da tela é Poppins com algarismo tabular, não mono.
+     Código e ID de verdade usam font-codigo (e <code>/<kbd> já vêm nela,
+     pela regra sem camada no fim do arquivo). */
+  --font-sans: var(--font-poppins), system-ui, sans-serif;
+  --font-mono: var(--font-poppins), system-ui, sans-serif;
+  --font-codigo:
+    ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  --default-mono-font-family: var(--font-codigo);
+
+  /* Pesos da ficha: 400, 600 e 700. A Poppins não tem o 500 carregado; o
+     font-medium das telas antigas cai no Regular de propósito (o nome lido
+     contra o não lido da fila é medium contra semibold, e os dois em 600
+     apagariam o estado). */
+  --font-weight-medium: 400;
 
   /* Grid base de 8px: space-1 = 8px, space-0.5 = 4px */
   --spacing: 0.5rem;
 
-  /* Escala tipográfica */
-  --text-display: 48px;
-  --text-display--line-height: 52px;
-  --text-display--font-weight: 600;
+  /* ── Escala tipográfica LEGADA ───────────────────────────────────────
+     Os tamanhos de título acompanham os papéis do bloco 3 do kit (desktop
+     aqui; telefone no bloco de mídia mais abaixo). text-sm e text-base ficam
+     como estavam: as telas densas foram montadas sobre eles. Tela nova usa os
+     utilitários tipo-* (abaixo), não estes. */
+  --text-display: 28px;
+  --text-display--line-height: 34px;
+  --text-display--font-weight: 700;
   --text-display--letter-spacing: -0.02em;
 
-  --text-h1: 32px;
-  --text-h1--line-height: 40px;
+  --text-h1: 24px;
+  --text-h1--line-height: 30px;
   --text-h1--font-weight: 600;
   --text-h1--letter-spacing: -0.015em;
 
-  --text-h2: 24px;
-  --text-h2--line-height: 32px;
+  --text-h2: 20px;
+  --text-h2--line-height: 25px;
   --text-h2--font-weight: 600;
   --text-h2--letter-spacing: -0.01em;
 
-  --text-h3: 20px;
-  --text-h3--line-height: 28px;
+  --text-h3: 17px;
+  --text-h3--line-height: 22px;
   --text-h3--font-weight: 600;
+  --text-h3--letter-spacing: -0.005em;
 
   --text-lg: 18px;
-  --text-lg--line-height: 28px;
+  --text-lg--line-height: 26px;
 
   --text-base: 16px;
   --text-base--line-height: 24px;
@@ -42,175 +76,612 @@
 
   --text-xs: 12px;
   --text-xs--line-height: 16px;
-  --text-xs--font-weight: 500;
-  --text-xs--letter-spacing: 0.01em;
+  --text-xs--font-weight: 400;
 
-  /* Primária — azul-tinta */
-  --color-primary-50: #f1f5fa;
-  --color-primary-100: #dee9f4;
-  --color-primary-300: #91b4d7;
-  --color-primary-500: #3a6da3;
-  --color-primary-600: #275685;
-  --color-primary-700: #1d4369;
-  --color-primary-900: #12293f;
+  /* ── Cor: vocabulário da ficha (tema claro) ──────────────────────────
+     Contas de contraste (WCAG, luminância relativa), texto sobre fundo:
+       tinta #111111   18,9:1 no fundo, 17,0:1 no cartão, 15,8:1 na seleção
+       texto-2 #555555  7,5:1 no fundo,  6,7:1 no cartão,  6,3:1 na seleção
+       texto-3 #666666  5,7:1 no fundo,  5,2:1 no cartão,  4,8:1 na seleção
+                        (placeholder e ícone inativo: passa AA nos três)
+       fundo sobre a tinta (botão principal) 18,9:1; sobre o hover #2E2E2E 13,6:1
+       bom #2E6F40 6,1:1 · atenção #A14A17 6,0:1 · erro #B22222 6,7:1 no
+       fundo (5,4 / 5,4 / 6,0 no cartão); fundo sobre o erro (destrutivo) 6,7:1
+     O #7A7A7A da ficha (4,3:1) não entra em texto de tela: não passa AA. */
+  --color-fundo: #ffffff;
+  --color-cartao: #f3f3f3;
+  --color-flutuante: #ffffff;
+  /* Superfície que sobe acima do trilho: segmento ativo, pílula da cápsula. */
+  --color-elevado: #ffffff;
+  --color-tinta: #111111;
+  --color-tinta-hover: #2e2e2e;
+  --color-texto-2: #555555;
+  --color-texto-3: #666666;
+  --color-fio: #e4e4e4;
+  /* Borda de campo e de botão secundário. 1,7:1: o campo se identifica pelo
+     rótulo e pelo foco na tinta, não pela borda. */
+  --color-fio-forte: #c4c4c4;
+  /* Estados por tinta translúcida, para valer sobre qualquer superfície (o
+     kit pede hover a 5,5% e toque a 7%; aqui 6, 10 e 8). */
+  --color-realce: color-mix(in srgb, var(--color-tinta) 6%, transparent);
+  --color-pressionado: color-mix(in srgb, var(--color-tinta) 10%, transparent);
+  --color-selecao: color-mix(in srgb, var(--color-tinta) 8%, transparent);
+  /* Fundo da seleção de texto (opaco: ::selection ignora translucidez em
+     alguns motores). */
+  --color-selecao-texto: #dedede;
+  --color-bom: #2e6f40;
+  --color-atencao: #a14a17;
+  --color-erro: #b22222;
 
-  /* Neutra — cinzas quentes */
+  /* Avatar sem foto: quatro tons de cinza por nome, com as iniciais na tinta
+     (16,0 a 11,1:1). Cor de matiz por pessoa seria o "selo colorido em cada
+     linha" que a direção recusa. */
+  --color-avatar-1: #ececec;
+  --color-avatar-2: #e0e0e0;
+  --color-avatar-3: #d3d3d3;
+  --color-avatar-4: #c6c6c6;
+
+  /* ── Cor: escala LEGADA, com os valores da ficha ─────────────────────
+     primary = a tinta. A 500 é o anel de foco das telas antigas
+     (focus-visible:outline-primary-500), por isso é a tinta exata. */
+  /* O selecionado fica um degrau abaixo do hover (neutral-100, #EBEBEB):
+     com os dois no mesmo cinza e o font-medium em 400, o filtro escolhido e
+     o vizinho sob o mouse ficavam idênticos. Tinta sobre ele 14,3:1, texto-2
+     5,6:1. */
+  --color-primary-50: #e0e0e0; /* fundo de selecionado */
+  --color-primary-100: #d6d6d6; /* hover sobre selecionado; texto sobre a
+                                   tinta (hora da bolha enviada: 13,0:1) */
+  --color-primary-300: #a3a3a3;
+  --color-primary-500: #111111;
+  --color-primary-600: #111111; /* fundo do botão principal */
+  --color-primary-700: #2e2e2e; /* hover do botão principal */
+  --color-primary-900: #111111; /* texto sobre primary-50 (14,3:1) */
+
+  /* neutral = cinzas puros. 0 é a superfície (cartão branco, campo, menu);
+     50 é a zona de fundo cinza (cabeçalho de tabela, área do chat, hover de
+     menu); 100 é o hover e o chip. O fundo da página é --color-fundo. */
   --color-neutral-0: #ffffff;
-  --color-neutral-50: #fafaf9;
-  --color-neutral-100: #f4f3f1;
-  --color-neutral-200: #e7e5e1;
-  --color-neutral-300: #d3d0cb;
-  --color-neutral-400: #a8a49d;
-  --color-neutral-600: #57534e;
-  --color-neutral-800: #292725;
-  --color-neutral-900: #1a1917;
+  --color-neutral-50: #f3f3f3;
+  --color-neutral-100: #ebebeb;
+  --color-neutral-200: #e4e4e4; /* fio */
+  --color-neutral-300: #c4c4c4; /* borda de campo, desativado */
+  --color-neutral-400: #666666; /* placeholder, ícone inativo: 5,7:1 */
+  --color-neutral-600: #555555; /* texto secundário: 7,5:1 */
+  --color-neutral-800: #111111; /* texto principal: 18,9:1 */
+  --color-neutral-900: #111111; /* título */
 
-  /* Destaque — âmbar */
-  --color-accent-100: #fdf0dc;
-  --color-accent-300: #f5c888;
-  --color-accent-500: #e08a2b;
-  --color-accent-700: #b06818;
+  /* accent = a semântica de atenção (a ficha não tem acento cromático). */
+  --color-accent-100: #f3f3f3; /* fundo: cinza, a cor fica no texto */
+  --color-accent-300: #e3c4ae; /* fio de destaque (nota interna) */
+  --color-accent-500: #b8561c; /* indicador (janela fechada): 4,8:1 */
+  --color-accent-700: #a14a17; /* texto de atenção: 6,0:1 no fundo */
 
-  /* Semânticas */
-  --color-success: #1e7a4d;
-  --color-success-bg: #e9f4ee;
-  --color-warning: #b5730c;
-  --color-warning-bg: #fdf2e0;
-  --color-danger: #b3261e;
-  --color-danger-bg: #fbeae9;
-  --color-info: #3a6da3;
-  --color-info-bg: #eef3f9;
+  /* Semânticas. O par -bg é cinza de propósito: na ficha a semântica vive
+     no texto curto, e chip tintado em cada linha é o que a direção recusa. */
+  --color-success: #2e6f40;
+  --color-success-bg: #f3f3f3;
+  --color-warning: #a14a17;
+  --color-warning-bg: #f3f3f3;
+  --color-danger: #b22222;
+  --color-danger-bg: #f3f3f3;
+  --color-info: #111111;
+  --color-info-bg: #f3f3f3;
 
-  /* Overlay de modal/diálogo (design system §4) */
-  --color-overlay: rgba(26, 25, 23, 0.4);
+  /* Overlay de diálogo e folha */
+  --color-overlay: rgb(0 0 0 / 0.4);
 
-  /* Raio */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  /* ── Raio: uma escala, base 10 no controle (kit, bloco 0) ────────────
+     célula 6 · chip 8 · controle 10 · painel 12 · folha 16. Os nomes em
+     português são os da tela nova; xs/sm/md/lg/xl são os mesmos valores
+     para as telas antigas (rounded-md era o controle, rounded-lg o cartão). */
+  --radius-celula: 6px;
+  --radius-chip: 8px;
+  --radius-controle: 10px;
+  --radius-painel: 12px;
+  --radius-folha: 16px;
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
-  /* Sombra — sempre neutra */
-  --shadow-sm: 0 1px 2px rgba(26, 25, 23, 0.06);
-  --shadow-md: 0 4px 12px rgba(26, 25, 23, 0.08);
-  --shadow-lg: 0 12px 32px rgba(26, 25, 23, 0.12);
+  /* ── Sombra: só no que flutua ────────────────────────────────────────
+     Cartão é chapado: shadow-sm (que as telas antigas põem em todo cartão)
+     não desenha nada. md e lg ficam para menu, popover e diálogo;
+     flutuante para folha e vidro. */
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.12);
+  --shadow-flutuante: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 32px rgb(0 0 0 / 0.12);
+
+  /* ── Movimento (kit, bloco 6) ──────────────────────────────────────── */
+  --ease-padrao: cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-entrada: entrada 180ms ease-out both;
+
+  @keyframes entrada {
+    from {
+      opacity: 0;
+    }
+  }
 }
 
 /*
- * Tema escuro — ativado por data-theme="dark" no <html> (SSR lê o cookie
- * `tema`; o AlternadorTema troca atributo + cookie sem reload).
+ * Tema escuro: data-theme="dark" no <html> (o SSR lê o cookie `tema`; o
+ * AlternadorTema troca atributo e cookie sem recarregar). Os utilitários
+ * resolvem para var(--color-*), então basta REDEFINIR as variáveis aqui. Fora
+ * de @layer de propósito: regra sem camada vence o :root que o @theme emite
+ * dentro de @layer theme.
  *
- * Os utilitários do Tailwind 4 resolvem para var(--color-*), então basta
- * REDEFINIR as variáveis aqui: escala neutra invertida com o viés quente
- * preservado, primária clareada (o fundo de botão vira azul claro com texto
- * escuro) e semânticas claras sobre fundos -bg escuros. Todos os pares de
- * texto abaixo foram calculados ≥ 4.5:1 (AA); bordas/ícones funcionais ≥ 3:1.
- * Este bloco fica fora de @layer de propósito: regra sem camada vence a
- * emissão de :root que o @theme faz dentro de @layer theme.
+ * Derivado pela regra do bloco 1 do kit: cartão = fundo +4 de luminosidade,
+ * flutuante = fundo +6, texto secundário a 62%, fio a 15%. Semânticas do
+ * Habitto (bom 152 60% 48%, atenção 38 92% 55%); o erro dele (#DF3A3A) dava
+ * 4,2:1 no cartão e subiu para 65% de luminosidade.
+ *
+ * Contas, texto sobre fundo #0B0B0B / cartão #151515 / flutuante #1A1A1A:
+ *   tinta #F5F5F5   18,1 / 16,8 / 16,0 (13,2 na seleção)
+ *   texto-2 #9E9E9E  7,4 /  6,8 /  6,5 (5,4 na seleção)
+ *   texto-3 #8A8A8A  5,7 /  5,3 /  5,0 (placeholder; 4,7 no hover #212121)
+ *   fundo sobre a tinta (botão principal) 18,1:1; sobre o hover #D6D6D6 13,5:1
+ *   bom #31C47F 8,8 / 8,1 · atenção #F6A823 9,9 / 9,2 · erro #E86464 6,0 / 5,6
+ *   (4,9 no hover); fundo sobre o erro (destrutivo) 6,0:1
  */
 :root {
   color-scheme: light;
 }
 
 [data-theme="dark"] {
-  /* Inputs nativos, scrollbars e form controls seguem o tema. */
   color-scheme: dark;
 
-  /* Neutra invertida (viés quente preservado) */
-  --color-neutral-0: #232120; /* superfície elevada (card, modal) */
-  --color-neutral-50: #1a1917; /* fundo de página */
-  --color-neutral-100: #2e2b29; /* área secundária, hover, zebra */
-  --color-neutral-200: #3b3835; /* bordas e divisores */
-  --color-neutral-300: #4c4844; /* borda de input, desativado */
-  --color-neutral-400: #8a857d; /* placeholder, ícone inativo */
-  --color-neutral-600: #b3ada5; /* texto secundário — 7.2:1 sobre neutral-0 */
-  --color-neutral-800: #e7e5e1; /* texto primário — 12.7:1 sobre neutral-0 */
-  --color-neutral-900: #fafaf9; /* títulos */
+  --color-fundo: #0b0b0b;
+  --color-cartao: #151515;
+  --color-flutuante: #1a1a1a;
+  --color-elevado: #2a2a2a;
+  --color-tinta: #f5f5f5;
+  --color-tinta-hover: #d6d6d6;
+  --color-texto-2: #9e9e9e;
+  --color-texto-3: #8a8a8a;
+  --color-fio: #262626;
+  --color-fio-forte: #3a3a3a;
+  --color-selecao-texto: #333333;
+  --color-bom: #31c47f;
+  --color-atencao: #f6a823;
+  --color-erro: #e86464;
 
-  /* Primária clareada */
-  --color-primary-50: #142c44; /* fundo de estado selecionado */
-  --color-primary-100: #1d3c5c; /* hover sutil, ::selection */
-  --color-primary-300: #4f7ca8; /* bordas, ícones — 3.7:1 sobre neutral-0 */
-  --color-primary-500: #7aa7d4; /* marca, links — 7.0:1 sobre neutral-50 */
-  --color-primary-600: #8db8e0; /* botão primário: texto neutral-0 dá 7.7:1 */
-  --color-primary-700: #a3c7e8; /* hover do botão (clareia um passo) */
-  --color-primary-900: #cfe1f2; /* texto sobre primary-50 — 10.7:1 */
+  --color-avatar-1: #232323;
+  --color-avatar-2: #2c2c2c;
+  --color-avatar-3: #363636;
+  --color-avatar-4: #404040; /* iniciais na tinta: 14,4 a 9,5:1 */
 
-  /* Destaque — âmbar ajustado */
-  --color-accent-100: #3a2b12; /* fundo de destaque */
-  --color-accent-300: #c1955a; /* borda de destaque */
-  --color-accent-500: #e59b45; /* indicador de atenção */
-  --color-accent-700: #f2c98d; /* texto sobre accent-100 — 8.8:1 */
+  /* A tinta clara: o botão principal vira claro com texto escuro. */
+  --color-primary-50: #2a2a2a; /* selecionado: tinta 13,2:1 */
+  --color-primary-100: #333333; /* texto sobre a bolha clara: 11,6:1 */
+  --color-primary-300: #6b6b6b;
+  --color-primary-500: #f5f5f5;
+  --color-primary-600: #f5f5f5;
+  --color-primary-700: #d6d6d6;
+  --color-primary-900: #f5f5f5;
 
-  /* Semânticas: texto claro sobre -bg escuro */
-  --color-success: #6ec296; /* 6.6:1 sobre success-bg */
-  --color-success-bg: #17301f;
-  --color-warning: #dfa244; /* 6.4:1 sobre warning-bg */
-  --color-warning-bg: #362808;
-  --color-danger: #ec7d72; /* 6.0:1 sobre danger-bg */
-  --color-danger-bg: #3c1210;
-  --color-info: #7aa7d4; /* 5.6:1 sobre info-bg */
-  --color-info-bg: #142c44;
+  /* 0 é o cartão (um tom acima do fundo), 50 a zona de fundo, 100 o hover. */
+  --color-neutral-0: #151515;
+  --color-neutral-50: #0b0b0b;
+  --color-neutral-100: #212121;
+  --color-neutral-200: #262626;
+  --color-neutral-300: #3a3a3a;
+  --color-neutral-400: #8a8a8a;
+  --color-neutral-600: #9e9e9e;
+  --color-neutral-800: #f5f5f5;
+  --color-neutral-900: #f5f5f5;
 
-  /* Overlay mais denso para segurar contraste do fundo escuro */
-  --color-overlay: rgba(0, 0, 0, 0.6);
+  --color-accent-100: #212121;
+  --color-accent-300: #6e5122;
+  --color-accent-500: #e0961c;
+  --color-accent-700: #f6a823; /* 8,1:1 no hover; fundo sobre ele 9,9:1 */
 
-  /* Sombras mais discretas (referenciadas por CSS custom) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --color-success: #31c47f;
+  --color-success-bg: #212121;
+  --color-warning: #f6a823;
+  --color-warning-bg: #212121;
+  --color-danger: #e86464;
+  --color-danger-bg: #212121;
+  --color-info: #f5f5f5;
+  --color-info-bg: #212121;
+
+  --color-overlay: rgb(0 0 0 / 0.6);
+
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.5);
+  --shadow-flutuante: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 32px rgb(0 0 0 / 0.55);
 }
 
 /*
- * As utilities shadow-* do Tailwind 4 CONGELAM o valor na compilação
- * (--tw-shadow: 0 1px 2px var(--tw-shadow-color, #1a19170f)) — redefinir
- * --shadow-sm acima não as alcança. Sobrescreve-se o --tw-shadow por classe;
- * fora de @layer, vence a camada utilities. Só sm/md/lg existem no projeto.
+ * Os utilitários shadow-* do Tailwind 4 CONGELAM o valor na compilação
+ * (--tw-shadow: 0 4px 12px var(--tw-shadow-color, #00000014)), e redefinir
+ * --shadow-md acima não os alcança. Sobrescreve-se o --tw-shadow por classe;
+ * fora de @layer, vence a camada utilities.
  */
-[data-theme="dark"] .shadow-sm {
-  --tw-shadow: 0 1px 2px var(--tw-shadow-color, rgba(0, 0, 0, 0.3));
-}
-
 [data-theme="dark"] .shadow-md {
-  --tw-shadow: 0 4px 12px var(--tw-shadow-color, rgba(0, 0, 0, 0.35));
+  --tw-shadow: 0 4px 12px var(--tw-shadow-color, rgb(0 0 0 / 0.4));
 }
 
 [data-theme="dark"] .shadow-lg {
-  --tw-shadow: 0 12px 32px var(--tw-shadow-color, rgba(0, 0, 0, 0.45));
+  --tw-shadow: 0 12px 32px var(--tw-shadow-color, rgb(0 0 0 / 0.5));
+}
+
+[data-theme="dark"] .shadow-flutuante {
+  --tw-shadow:
+    0 1px 2px var(--tw-shadow-color, rgb(0 0 0 / 0.4)),
+    0 8px 32px var(--tw-shadow-color, rgb(0 0 0 / 0.55));
+}
+
+/*
+ * Papéis tipográficos do bloco 3 do kit (tamanho/entrelinha). O mesmo papel
+ * tem um tamanho no telefone e outro do tablet para cima; a troca é no
+ * breakpoint de tablet (48rem), com o bloco do telefone escrito como
+ * complemento exato do min-width ("not all and"), nunca como max-width: em
+ * largura fracionária com zoom, max-width: 767px e min-width: 768px deixam de
+ * casar ao mesmo tempo. Os valores do desktop são o padrão.
+ * NÃO MEDIDOS com a Poppins (o kit mediu com a fonte do sistema).
+ */
+:root {
+  --tipo-titulo-grande: 28px;
+  --tipo-titulo-grande--entrelinha: 34px;
+  --tipo-titulo-1: 24px;
+  --tipo-titulo-1--entrelinha: 30px;
+  --tipo-titulo-2: 20px;
+  --tipo-titulo-2--entrelinha: 25px;
+  --tipo-titulo-3: 17px;
+  --tipo-titulo-3--entrelinha: 22px;
+  --tipo-destaque: 14px;
+  --tipo-destaque--entrelinha: 19px;
+  --tipo-corpo: 14px;
+  --tipo-corpo--entrelinha: 20px;
+  --tipo-chamada: 13px;
+  --tipo-chamada--entrelinha: 18px;
+  --tipo-subtitulo: 13px;
+  --tipo-subtitulo--entrelinha: 18px;
+  --tipo-nota: 12px;
+  --tipo-nota--entrelinha: 16px;
+  --tipo-legenda: 11px;
+  --tipo-legenda--entrelinha: 14px;
+  --tipo-legenda-2: 10px;
+  --tipo-legenda-2--entrelinha: 13px;
+  --tipo-rotulo-aba: 10px;
+  --tipo-rotulo-aba--entrelinha: 12px;
+}
+
+@media not all and (min-width: 48rem) {
+  :root {
+    --tipo-titulo-grande: 34px;
+    --tipo-titulo-grande--entrelinha: 41px;
+    --tipo-titulo-1: 28px;
+    --tipo-titulo-1--entrelinha: 34px;
+    --tipo-titulo-2: 22px;
+    --tipo-titulo-2--entrelinha: 28px;
+    --tipo-titulo-3: 20px;
+    --tipo-titulo-3--entrelinha: 25px;
+    --tipo-destaque: 17px;
+    --tipo-destaque--entrelinha: 22px;
+    --tipo-corpo: 17px;
+    --tipo-corpo--entrelinha: 22px;
+    --tipo-chamada: 16px;
+    --tipo-chamada--entrelinha: 21px;
+    --tipo-subtitulo: 15px;
+    --tipo-subtitulo--entrelinha: 20px;
+    --tipo-nota: 13px;
+    --tipo-nota--entrelinha: 18px;
+    --tipo-legenda: 12px;
+    --tipo-legenda--entrelinha: 16px;
+    --tipo-legenda-2: 11px;
+    --tipo-legenda-2--entrelinha: 13px;
+  }
+
+  /* Os títulos das telas antigas acompanham os papéis no telefone. */
+  :root {
+    --text-display: 34px;
+    --text-display--line-height: 41px;
+    --text-h1: 28px;
+    --text-h1--line-height: 34px;
+    --text-h2: 22px;
+    --text-h2--line-height: 28px;
+    --text-h3: 20px;
+    --text-h3--line-height: 25px;
+  }
+}
+
+/*
+ * Os utilitários de papel. Peso, entrelinha e aperto saem por var(--tw-*) com
+ * o valor do papel como reserva, do jeito que o Tailwind faz no text-*: um
+ * font-semibold, leading-* ou tracking-* na mesma classe vence o papel em
+ * qualquer ordem. O prefixo é tipo-, e não text-, porque o tailwind-merge
+ * (cn) lê qualquer text-<nome> desconhecido como COR e apagaria o text-tinta
+ * ao lado.
+ */
+@utility tipo-titulo-grande {
+  font-size: var(--tipo-titulo-grande);
+  line-height: var(--tw-leading, var(--tipo-titulo-grande--entrelinha));
+  font-weight: var(--tw-font-weight, 700);
+  letter-spacing: var(--tw-tracking, -0.02em);
+  text-wrap: balance;
+}
+
+@utility tipo-titulo-1 {
+  font-size: var(--tipo-titulo-1);
+  line-height: var(--tw-leading, var(--tipo-titulo-1--entrelinha));
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, -0.015em);
+  text-wrap: balance;
+}
+
+@utility tipo-titulo-2 {
+  font-size: var(--tipo-titulo-2);
+  line-height: var(--tw-leading, var(--tipo-titulo-2--entrelinha));
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, -0.01em);
+  text-wrap: balance;
+}
+
+@utility tipo-titulo-3 {
+  font-size: var(--tipo-titulo-3);
+  line-height: var(--tw-leading, var(--tipo-titulo-3--entrelinha));
+  font-weight: var(--tw-font-weight, 600);
+  letter-spacing: var(--tw-tracking, -0.005em);
+}
+
+@utility tipo-destaque {
+  font-size: var(--tipo-destaque);
+  line-height: var(--tw-leading, var(--tipo-destaque--entrelinha));
+  font-weight: var(--tw-font-weight, 600);
+}
+
+@utility tipo-corpo {
+  font-size: var(--tipo-corpo);
+  line-height: var(--tw-leading, var(--tipo-corpo--entrelinha));
+  font-weight: var(--tw-font-weight, 400);
+}
+
+@utility tipo-chamada {
+  font-size: var(--tipo-chamada);
+  line-height: var(--tw-leading, var(--tipo-chamada--entrelinha));
+  font-weight: var(--tw-font-weight, 400);
+}
+
+@utility tipo-subtitulo {
+  font-size: var(--tipo-subtitulo);
+  line-height: var(--tw-leading, var(--tipo-subtitulo--entrelinha));
+  font-weight: var(--tw-font-weight, 400);
+}
+
+@utility tipo-nota {
+  font-size: var(--tipo-nota);
+  line-height: var(--tw-leading, var(--tipo-nota--entrelinha));
+  font-weight: var(--tw-font-weight, 400);
+}
+
+@utility tipo-legenda {
+  font-size: var(--tipo-legenda);
+  line-height: var(--tw-leading, var(--tipo-legenda--entrelinha));
+  font-weight: var(--tw-font-weight, 400);
+}
+
+@utility tipo-legenda-2 {
+  font-size: var(--tipo-legenda-2);
+  line-height: var(--tw-leading, var(--tipo-legenda-2--entrelinha));
+  font-weight: var(--tw-font-weight, 400);
+}
+
+/* O kit pede 500 no rótulo de aba; sem o 500 da Poppins, 600, que a 10px lê
+   melhor que o Regular. */
+@utility tipo-rotulo-aba {
+  font-size: var(--tipo-rotulo-aba);
+  line-height: var(--tw-leading, var(--tipo-rotulo-aba--entrelinha));
+  font-weight: var(--tw-font-weight, 600);
+}
+
+/*
+ * A casca (components/app/app-shell.tsx) publica no elemento [data-casca]
+ * quanto ela ocupa: --casca-topo (a faixa de somente leitura do compliance,
+ * em qualquer largura) e --casca-pe (a barra de abas do celular e do tablet,
+ * com a área segura e um respiro). No desktop o menu é lateral e não come
+ * altura nenhuma. Tela de altura travada, como o chat, usa h-util; elemento
+ * fixo no pé usa bottom-[calc(var(--casca-pe)+16px)].
+ */
+[data-casca] {
+  --casca-topo: 0px;
+  --casca-pe: calc(64px + max(12px, env(safe-area-inset-bottom)) + 8px);
+}
+
+[data-casca][data-compliance] {
+  --casca-topo: 40px;
+}
+
+@media (min-width: 64rem) {
+  [data-casca] {
+    --casca-pe: 0px;
+  }
+}
+
+/* Teclado aberto ou conversa pedindo a tela inteira: a barra some (ver
+   app-shell.tsx) e o conteúdo perde o recuo dela. */
+html[data-teclado="aberto"] [data-casca],
+html:has([data-sem-abas]) [data-casca] {
+  --casca-pe: 0px;
+}
+
+html[data-teclado="aberto"] [data-barra-abas],
+html:has([data-sem-abas]) [data-barra-abas] {
+  display: none;
+}
+
+/* Diálogo aberto (o painel do contato no chat, a paleta, um modal futuro):
+   a barra de abas está em z-40 e vem depois no DOM, então pintava por cima
+   do diálogo e seguia clicável atrás dele. Só a barra some; o --casca-pe
+   fica, porque zerá-lo esticaria o h-util da tela de trás e mexeria na
+   rolagem da conversa por baixo do diálogo. A folha do "Mais" é a exceção:
+   ela nasce da barra e devolve o foco ao botão dela no Esc. */
+html:has([aria-modal="true"]:not(#folha-mais)) [data-barra-abas] {
+  display: none;
+}
+
+/* Altura útil: a janela menos a casca e menos o teclado (que só conta quando
+   aberto; --teclado vem medido pelo visualViewport na casca). */
+@utility h-util {
+  height: calc(
+    100dvh - var(--casca-topo, 0px) - var(--casca-pe, 0px) -
+      var(--teclado, 0px)
+  );
+}
+
+@utility min-h-util {
+  min-height: calc(
+    100dvh - var(--casca-topo, 0px) - var(--casca-pe, 0px) -
+      var(--teclado, 0px)
+  );
+}
+
+/*
+ * Vidro, só no que flutua (barra de abas, folha, cabeçalho ao rolar). O
+ * desfoque vai por backdrop-blur-[16px] backdrop-saturate-150 NO ELEMENTO, e
+ * não aqui: backdrop-filter escrito em classe própria sumiu do CSS servido
+ * num projeto irmão com Tailwind 4, sem erro nenhum. Use as três juntas:
+ *   className="vidro backdrop-blur-[16px] backdrop-saturate-150"
+ * O fundo fica a 90% de opacidade para o texto passar AA sobre a cor
+ * composta no pior caso (texto da cor oposta passando por baixo): texto-2
+ * 6,0:1 no claro e 4,9:1 no escuro.
+ */
+@utility vidro {
+  background-color: color-mix(in srgb, var(--color-flutuante) 90%, transparent);
+  border: 1px solid var(--color-fio);
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 8px 32px rgb(0 0 0 / 0.12);
 }
 
 @layer base {
   html {
     scroll-behavior: smooth;
+    background-color: var(--color-fundo);
+    /* Caixa de seleção, rádio e barra de progresso nativos na tinta. */
+    accent-color: var(--color-tinta);
+    /* O realce cinza do toque no Safari soma com o :active dos controles. */
+    -webkit-tap-highlight-color: transparent;
+    /* Barras de rolagem finas, no cinza da ficha. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-fio-forte) transparent;
   }
 
   body {
-    background-color: var(--color-neutral-50);
-    color: var(--color-neutral-800);
+    background-color: var(--color-fundo);
+    color: var(--color-tinta);
     font-family: var(--font-sans);
   }
 
-  /* Âncoras não somem atrás da navbar fixa (64px) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-fio-forte) transparent;
+  }
+
+  /* Âncoras não somem atrás da casca */
   [id] {
-    scroll-margin-top: 80px;
+    scroll-margin-top: calc(var(--casca-topo, 0px) + 16px);
   }
 
   ::selection {
-    background-color: var(--color-primary-100);
-    color: var(--color-primary-900);
+    background-color: var(--color-selecao-texto);
+    color: var(--color-tinta);
+  }
+
+  input,
+  textarea,
+  [contenteditable] {
+    caret-color: var(--color-tinta);
+  }
+
+  /* Foco padrão para o que não traz o próprio: anel de 2px na tinta, a 2px. */
+  :focus-visible {
+    outline: 2px solid var(--color-tinta);
+    outline-offset: 2px;
+  }
+
+  a {
+    text-underline-offset: 0.2em;
+  }
+
+  /* Link no meio do texto corrido sublinhado: com o primary na tinta, o
+     "Limpar filtros" dentro de um parágrafo em texto-2 só se separava do
+     texto pela cor (2,5:1, abaixo dos 3:1 do WCAG 1.4.1). Botão em forma de
+     link tem raio e fica de fora; lista de navegação não está em <p>. */
+  :where(p) a:not([class*="rounded"]) {
+    text-decoration-line: underline;
+  }
+
+  /* Número que muda não dança: algarismo tabular em tabela, hora e campo. */
+  table,
+  time,
+  output,
+  kbd,
+  input[type="number"],
+  input[type="tel"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A seta do select de CAMPO_SELECT (form-styles), no cinza de cada tema. */
+  :root {
+    --seta-select: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23555555' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
+  [data-theme="dark"] {
+    --seta-select: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239E9E9E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   }
 }
 
 /*
+ * Código e ID ficam no monoespaçado mesmo com font-mono na classe (o
+ * font-mono legado é Poppins). Sem camada, vence o utilitário.
+ */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-codigo);
+}
+
+/* O font-mono legado marcava número: continua tabular. */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
  * Safari do iPhone dá zoom automático (e permanente) na página ao focar
- * qualquer campo com fonte menor que 16px — e o zoom desalinha o layout
+ * qualquer campo com fonte menor que 16px, e o zoom desalinha o layout
  * inteiro. Em telas de toque, os controles sobem para 16px; fora de camada
  * (@layer), esta regra vence as utilities text-sm/text-xs dos componentes.
+ * Campo que já nasce maior que 16px (o do código de 6 dígitos) leva
+ * data-texto-grande e fica com o tamanho dele.
  */
 @media (pointer: coarse) {
-  input,
+  input:not([data-texto-grande]),
   select,
   textarea {
     font-size: 16px;
+  }
+}
+
+/*
+ * Navegador sem color-mix (iOS 16.0 e 16.1, Chrome antes do 111): o Tailwind
+ * deixa para ele um valor fixo do tema claro nos tons translúcidos e no
+ * vidro, e o tema escuro não os redefine. Sem isto, no escuro, a barra de
+ * abas ficava branca e o hover sumia.
+ */
+@supports not (color: color-mix(in lab, red, red)) {
+  [data-theme="dark"] {
+    --color-realce: #f5f5f50f;
+    --color-pressionado: #f5f5f51a;
+    --color-selecao: #f5f5f514;
+  }
+
+  [data-theme="dark"] .vidro {
+    background-color: #1a1a1ae6;
   }
 }
 

@@ -1,198 +1,290 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { perfilAtual } from "@/lib/auth";
+import { perfilAtivo } from "@/lib/auth";
 import { normalizarNumero, normalizarTelefone } from "@/lib/csv";
-import { criarTemplateResumoMeta } from "@/lib/whatsapp";
+import {
+  CHAVE_HORARIO,
+  CHAVE_RESPOSTA,
+  ehTipoAutomatica,
+  horarioCurto,
+  lerHorario,
+  lerResposta,
+  LIMITE_TEXTO,
+  normalizarDias,
+  normalizarHora,
+  ROTULO_AUTOMATICA,
+  textoDaResposta,
+} from "@/lib/automaticas";
+import { registrarAcesso, soMudou, type Mudanca } from "@/lib/auditoria";
+import { CORES_ETIQUETA } from "@/lib/etiquetas";
+import { tetoDeEnvios } from "@/lib/envios";
+import { formatarTelefone } from "@/lib/format";
+import { contagem, type ResultadoAcao } from "./resultado";
+
+/*
+ * As actions das subpáginas da Administração que eram Configurações
+ * (mensagens prontas, etiquetas, atendimento e números de WhatsApp). Todas
+ * devolvem { ok, erro } para o editor da tela (editor.tsx), sem
+ * redirecionar: deu certo, o aviso curto aparece e o editor fecha; deu
+ * errado, o erro fica no formulário com o que foi digitado.
+ */
 
 const MAX_INSTANCIAS = 10;
 
-async function exigirGestor() {
-  const perfil = await perfilAtual();
+const SEM_PERMISSAO: ResultadoAcao = {
+  erro: "Só a administração e a gestão mudam as configurações.",
+};
+
+/** Gestão com conta ativa. Conta desativada com a aba ainda aberta não grava
+ *  nada: o layout só barra a tela na próxima carga. */
+async function gestorAtivo() {
+  const perfil = await perfilAtivo();
   if (!perfil || (perfil.papel !== "admin" && perfil.papel !== "gestor")) {
-    redirect("/hoje");
+    return null;
   }
   return perfil;
 }
 
-function terminar(aviso?: string): never {
-  revalidatePath("/configuracoes");
-  // O carimbo t= muda a URL a cada volta: os formulários com estado de
-  // cliente (anexos das mensagens padrão) usam-no como key para resetar —
-  // sem ele, os chips da mensagem recém-criada sobravam no formulário
-  // "nova" e grudavam na próxima.
-  const t = `t=${Date.now()}`;
-  redirect(
-    aviso
-      ? `/configuracoes?aviso=${encodeURIComponent(aviso)}&${t}`
-      : `/configuracoes?${t}`,
-  );
+/** Gravou: a Administração inteira relê (o índice mostra as contagens e o
+ *  estado de cada subpágina). */
+function pronto(ok: string): ResultadoAcao {
+  revalidatePath("/admin", "layout");
+  return { ok };
 }
 
 function amigavel(codigo: string | undefined, mensagem: string) {
-  if (codigo === "23505") return "Já existe um registro com esse valor único.";
+  if (codigo === "23505") return "Já existe um registro com esse valor.";
   if (codigo === "23503")
-    return "Este item está em uso (há registros ligados a ele). Desative em vez de excluir.";
+    return "Há registros ligados a este item. Desative em vez de excluir.";
   return mensagem;
 }
 
-// ===========================================================================
-// Produtos
-// ===========================================================================
+/*
+ * O Log de acesso registra cada mudança destas subpáginas com o antes e o
+ * depois (registrarAcesso, lib/auditoria.ts), sempre depois de a gravação
+ * dar certo. Salvar sem mudar nada não vira registro.
+ */
 
-function lerProduto(formData: FormData) {
-  const codigo = String(formData.get("codigo") ?? "")
-    .trim()
-    .toUpperCase();
-  const nome = String(formData.get("nome") ?? "").trim();
-  const recorrencia = String(formData.get("recorrencia") ?? "unica");
-  const valor = normalizarNumero(String(formData.get("valor") ?? ""));
-
-  if (!codigo || !nome) return { erro: "Código e nome são obrigatórios." };
-  if (valor === null || valor < 0)
-    return { erro: "Valor de comissão inválido. Use algo como 15,00." };
-  if (!["unica", "recorrente", "por_operacao"].includes(recorrencia))
-    return { erro: "Recorrência inválida." };
-
-  return {
-    dados: {
-      codigo,
-      nome,
-      recorrencia,
-      valor_comissao_centavos: Math.round(valor * 100),
-    },
-  };
+/** O nome da cor como a tela mostra ("azul" é "Grafite" desde a ficha). */
+function rotuloCor(cor: string | null | undefined): string {
+  return CORES_ETIQUETA.find((c) => c.chave === cor)?.rotulo ?? String(cor ?? "");
 }
 
-export async function criarProduto(formData: FormData) {
-  await exigirGestor();
-  const lido = lerProduto(formData);
-  if ("erro" in lido) terminar(lido.erro);
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("products").insert(lido.dados);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
-
-/** Produtos que o sistema procura pelo código: renomear desligaria motor. */
-const CODIGOS_DE_SISTEMA = new Set(["ABERTURA", "ATIVACAO"]);
-
-export async function atualizarProduto(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
-  const lido = lerProduto(formData);
-  if ("erro" in lido) terminar(lido.erro);
-
-  const supabase = await createClient();
-  // Código de sistema não muda pela tela — o valor e o nome, sim.
-  const { data: atual } = await supabase
-    .from("products")
-    .select("codigo")
-    .eq("id", id)
+/** O valor de um parâmetro em settings antes de gravar (valor null sem
+ *  linha); null quando a leitura falhou e o antes não é sabido. */
+async function valorAtual(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  chave: string,
+): Promise<{ valor: unknown } | null> {
+  const { data, error } = await supabase
+    .from("settings")
+    .select("valor")
+    .eq("chave", chave)
     .maybeSingle();
-  const dados =
-    atual && CODIGOS_DE_SISTEMA.has(atual.codigo)
-      ? { ...lido.dados, codigo: atual.codigo }
-      : lido.dados;
-  const { error } = await supabase.from("products").update(dados).eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
-
-export async function alternarProduto(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
-
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("products")
-    .select("ativo")
-    .eq("id", id)
-    .single();
-  const { error } = await supabase
-    .from("products")
-    .update({ ativo: !data?.ativo })
-    .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
-
-export async function excluirProduto(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
-
-  const supabase = await createClient();
-  const { data: atual } = await supabase
-    .from("products")
-    .select("codigo")
-    .eq("id", id)
-    .maybeSingle();
-  if (atual && CODIGOS_DE_SISTEMA.has(atual.codigo)) {
-    terminar(
-      "Este produto é usado pelo sistema (abertura/ativação): desative em vez de excluir.",
-    );
-  }
-  const { error } = await supabase.from("products").delete().eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
+  if (error) return null;
+  return { valor: data?.valor ?? null };
 }
 
 // ===========================================================================
-// Tags
+// Etiquetas
 // ===========================================================================
 
 const CORES_VALIDAS = new Set(["azul", "ambar", "verde", "vermelho", "neutro"]);
 
-export async function criarTag(formData: FormData) {
-  await exigirGestor();
+export async function criarTag(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
   const nome = String(formData.get("nome") ?? "").trim();
   const cor = String(formData.get("cor") ?? "neutro");
-  if (!nome) terminar("Dê um nome à tag.");
-  if (!CORES_VALIDAS.has(cor)) terminar("Cor inválida.");
+  if (!nome) return { erro: "Dê um nome à etiqueta." };
+  if (!CORES_VALIDAS.has(cor)) return { erro: "Escolha uma das cores." };
 
   const supabase = await createClient();
   const { error } = await supabase.from("tags").insert({ nome, cor });
   if (error) {
-    terminar(
-      error.code === "23505"
-        ? `A tag “${nome}” já existe.`
-        : error.message.includes("cor")
-          ? "Cores de etiqueta dependem da migração 0016 — rode-a no SQL Editor."
-          : error.message,
-    );
+    return {
+      erro:
+        error.code === "23505"
+          ? `A etiqueta “${nome}” já existe.`
+          : error.message.includes("cor")
+            ? "Cores de etiqueta dependem da migração 0016. Rode-a no SQL Editor."
+            : error.message,
+    };
   }
-  terminar();
+  registrarAcesso(perfil.id, "criou_etiqueta", {
+    alvo: nome,
+    mudancas: [{ campo: "cor", depois: rotuloCor(cor) }],
+  });
+  return pronto(`Etiqueta “${nome}” criada`);
 }
 
-/** Troca a cor da etiqueta — o rótulo continua sendo o nome. */
-export async function alterarCorTag(formData: FormData) {
-  await exigirGestor();
+/**
+ * Muda o nome da etiqueta, com a mesma permissão da cor. Contatos e
+ * campanhas apontam para ela pelo id: o público da campanha e a fila
+ * filtrada continuam iguais. Nome que já é de outra etiqueta (sem olhar
+ * maiúscula) é recusado: duas "VIP" na lista confundiriam o filtro.
+ */
+export async function renomearTag(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
+  const id = String(formData.get("id") ?? "");
+  const nome = String(formData.get("nome") ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!id) return { erro: "Etiqueta não informada." };
+  if (!nome) return { erro: "Dê um nome à etiqueta." };
+  if (nome.length > 60) {
+    return { erro: "O nome pode ter no máximo 60 caracteres." };
+  }
+
+  const supabase = await createClient();
+  // % e _ são curingas do ilike: escapados, valem como letra.
+  const { data: outra } = await supabase
+    .from("tags")
+    .select("id")
+    .ilike("nome", nome.replace(/[\\%_]/g, "\\$&"))
+    .neq("id", id)
+    .limit(1);
+  if ((outra ?? []).length > 0) {
+    return { erro: `A etiqueta “${nome}” já existe.` };
+  }
+
+  // O nome de antes, para o log.
+  const { data: antes } = await supabase
+    .from("tags")
+    .select("nome")
+    .eq("id", id)
+    .maybeSingle();
+
+  const { data, error } = await supabase
+    .from("tags")
+    .update({ nome })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    return {
+      erro:
+        error.code === "23505"
+          ? `A etiqueta “${nome}” já existe.`
+          : amigavel(error.code, error.message),
+    };
+  }
+  if (!data) {
+    return { erro: "Não deu para renomear. Recarregue a página e tente de novo." };
+  }
+  if (antes?.nome !== nome) {
+    // Sem alvo: a linha diz "renomeou uma etiqueta" e o apoio, de qual
+    // nome para qual.
+    registrarAcesso(perfil.id, "renomeou_etiqueta", {
+      tag_id: id,
+      mudancas: [{ antes: antes?.nome, depois: nome, texto: true }],
+    });
+  }
+  return pronto(`Etiqueta renomeada para “${nome}”`);
+}
+
+/** Troca a cor da etiqueta; o rótulo continua sendo o nome. */
+export async function alterarCorTag(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
   const id = String(formData.get("id") ?? "");
   const cor = String(formData.get("cor") ?? "");
-  if (!id) terminar("Etiqueta não informada.");
-  if (!CORES_VALIDAS.has(cor)) terminar("Cor inválida.");
+  if (!id) return { erro: "Etiqueta não informada." };
+  if (!CORES_VALIDAS.has(cor)) return { erro: "Escolha uma das cores." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("tags").update({ cor }).eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
+  const { data: antes } = await supabase
+    .from("tags")
+    .select("nome, cor")
+    .eq("id", id)
+    .maybeSingle();
+  const { data: gravada, error } = await supabase
+    .from("tags")
+    .update({ cor })
+    .eq("id", id)
+    .select("nome")
+    .maybeSingle();
+  if (error) return { erro: amigavel(error.code, error.message) };
+  if (gravada && antes?.cor !== cor) {
+    registrarAcesso(perfil.id, "mudou_cor_etiqueta", {
+      tag_id: id,
+      alvo: gravada.nome,
+      mudancas: [
+        {
+          antes: antes ? rotuloCor(antes.cor) : undefined,
+          depois: rotuloCor(cor),
+        },
+      ],
+    });
+  }
+  return pronto("Cor salva");
 }
 
-export async function excluirTag(formData: FormData) {
-  await exigirGestor();
+export async function excluirTag(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
   const id = String(formData.get("id") ?? "");
+  if (!id) return { erro: "Etiqueta não informada." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("tags").delete().eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
+
+  // A etiqueta é o público das campanhas (FK com on delete set null): apagada,
+  // a campanha que ainda manda ficava "Enviando" para sempre, sem ninguém
+  // para quem enviar, e o motor pulava ela calado. Enquanto houver campanha
+  // ativa ou pausada com ela, a exclusão espera. Tabela de campanhas ausente
+  // (migração 0021 não rodada) não trava nada.
+  const { data: emUso, error: erroUso } = await supabase
+    .from("campanhas")
+    .select("nome")
+    .eq("etiqueta_id", id)
+    .in("status", ["ativa", "pausada"])
+    .limit(1);
+  if (erroUso && erroUso.code !== "42P01" && erroUso.code !== "PGRST205") {
+    return { erro: `Não deu para conferir as campanhas: ${erroUso.message}` };
+  }
+  const campanha = (emUso ?? [])[0] as { nome: string } | undefined;
+  if (campanha) {
+    return {
+      erro: `A etiqueta é o público da campanha “${campanha.nome}”. Conclua ou exclua a campanha antes.`,
+    };
+  }
+
+  const { data: excluida, error } = await supabase
+    .from("tags")
+    .delete()
+    .eq("id", id)
+    .select("nome")
+    .maybeSingle();
+  if (error) return { erro: amigavel(error.code, error.message) };
+  // Sem linha de volta, nada foi apagado (já tinha saído): não vira registro.
+  if (excluida) {
+    registrarAcesso(perfil.id, "excluiu_etiqueta", {
+      tag_id: id,
+      alvo: excluida.nome,
+    });
+  }
+  return pronto(
+    excluida?.nome ? `Etiqueta “${excluida.nome}” excluída` : "Etiqueta excluída",
+  );
 }
 
 // ===========================================================================
-// Mensagens padrão
+// Mensagens prontas
 // ===========================================================================
 
 const MAX_ANEXOS_MENSAGEM = 5;
@@ -200,9 +292,9 @@ const MAX_ANEXOS_MENSAGEM = 5;
 /**
  * Os anexos chegam como JSON num campo escondido (o componente cliente sobe
  * os arquivos por URL assinada e só manda os metadados). Valida forma,
- * quantidade e — o essencial — que cada URL aponta para o NOSSO bucket:
- * campo escondido é editável por quem souber, e mensagem padrão vai para
- * lead; URL alheia aqui viraria vetor de phishing com a nossa cara.
+ * quantidade e, o essencial, que cada URL aponta para o NOSSO bucket: campo
+ * escondido é editável por quem souber, e mensagem pronta vai para lead; URL
+ * alheia aqui viraria vetor de phishing com a nossa cara.
  */
 function lerAnexosMensagem(
   bruto: string,
@@ -212,7 +304,7 @@ function lerAnexosMensagem(
   try {
     lista = JSON.parse(bruto);
   } catch {
-    return { erro: "Anexos inválidos — recarregue a página e tente de novo." };
+    return { erro: "Anexos inválidos. Recarregue a página e tente de novo." };
   }
   if (!Array.isArray(lista)) return { erro: "Anexos inválidos." };
   if (lista.length > MAX_ANEXOS_MENSAGEM) {
@@ -225,7 +317,7 @@ function lerAnexosMensagem(
   for (const item of lista) {
     const a = item as { tipo?: unknown; url?: unknown; nome?: unknown };
     // startsWith cru é contornável com ../ (o navegador normaliza os
-    // dot-segments ANTES do fetch): compara origem + caminho JÁ normalizado
+    // dot-segments ANTES do fetch): compara origem e caminho JÁ normalizado
     // pelo parser, e recusa qualquer resquício de escape.
     let u: URL | null = null;
     try {
@@ -242,11 +334,11 @@ function lerAnexosMensagem(
       typeof a.tipo !== "string" ||
       !["image", "audio", "video", "file"].includes(a.tipo)
     ) {
-      return { erro: "Anexo fora do padrão — envie os arquivos de novo." };
+      return { erro: "Anexo fora do padrão. Envie os arquivos de novo." };
     }
     anexos.push({
       tipo: a.tipo,
-      // u só existe quando a.url era string — o guard acima garante.
+      // u só existe quando a.url era string: o guard acima garante.
       url: a.url as string,
       nome: String(a.nome ?? "anexo").slice(0, 120),
     });
@@ -254,11 +346,11 @@ function lerAnexosMensagem(
   return { anexos };
 }
 
-/** URL assinada para o navegador subir o anexo da mensagem padrão. */
+/** URL assinada para o navegador subir o anexo da mensagem pronta. */
 export async function prepararUploadMensagemPadrao(
   nome: string,
 ): Promise<{ caminho?: string; token?: string; erro?: string }> {
-  await exigirGestor();
+  if (!(await gestorAtivo())) return { erro: SEM_PERMISSAO.erro };
   const limpo = nome.replace(/[^\w.\-]+/g, "_").slice(-80);
   const caminho = `mensagens-padrao/${crypto.randomUUID()}-${limpo}`;
   const service = createServiceClient();
@@ -266,85 +358,166 @@ export async function prepararUploadMensagemPadrao(
     .from("midia-whatsapp")
     .createSignedUploadUrl(caminho);
   if (error) {
-    return { erro: `Não deu para preparar o upload: ${error.message}` };
+    return { erro: `Não deu para preparar o envio: ${error.message}` };
   }
   return { caminho, token: data.token };
 }
 
-export async function criarMensagem(formData: FormData) {
-  await exigirGestor();
+/** Título, texto e anexos do formulário, já conferidos. */
+function lerMensagem(
+  formData: FormData,
+): { payload: Record<string, unknown> } | { erro: string } {
   const titulo = String(formData.get("titulo") ?? "").trim();
   const corpo = String(formData.get("corpo") ?? "").trim();
-  if (!titulo || !corpo) terminar("Título e mensagem são obrigatórios.");
+  if (!titulo) return { erro: "Dê um título à mensagem." };
+  if (!corpo) return { erro: "Escreva o texto da mensagem." };
 
-  // O campo só existe no form quando a coluna existe (0060) — presente,
+  // O campo só existe no formulário quando a coluna existe (0060). Presente,
   // sempre grava (inclusive [] para limpar).
-  const brutoAnexos = formData.get("anexos");
   const payload: Record<string, unknown> = { titulo, corpo };
+  const brutoAnexos = formData.get("anexos");
   if (brutoAnexos !== null) {
     const lidos = lerAnexosMensagem(String(brutoAnexos));
-    if ("erro" in lidos) terminar(lidos.erro);
+    if ("erro" in lidos) return { erro: lidos.erro };
     payload.anexos = lidos.anexos;
   }
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("quick_replies").insert(payload);
-  if (error) {
-    terminar(
-      error.code === "42703" || error.code === "PGRST204"
-        ? "Rode a migração 0060 para anexos nas mensagens padrão existirem."
-        : amigavel(error.code, error.message),
-    );
-  }
-  terminar();
+  return { payload };
 }
 
-export async function atualizarMensagem(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
-  const titulo = String(formData.get("titulo") ?? "").trim();
-  const corpo = String(formData.get("corpo") ?? "").trim();
-  if (!id || !titulo || !corpo) terminar("Título e mensagem são obrigatórios.");
+function erroMensagem(codigo: string | undefined, mensagem: string) {
+  return codigo === "42703" || codigo === "PGRST204"
+    ? "Rode a migração 0060 para os anexos das mensagens prontas existirem."
+    : amigavel(codigo, mensagem);
+}
 
-  const brutoAnexos = formData.get("anexos");
-  const payload: Record<string, unknown> = { titulo, corpo };
-  if (brutoAnexos !== null) {
-    const lidos = lerAnexosMensagem(String(brutoAnexos));
-    if ("erro" in lidos) terminar(lidos.erro);
-    payload.anexos = lidos.anexos;
-  }
+/** As URLs dos anexos gravados (sem a coluna, ou fora do formato, vazio). */
+function urlsDosAnexos(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((a) => (a as { url?: unknown } | null)?.url)
+    .filter((u): u is string => typeof u === "string");
+}
+
+export async function criarMensagem(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
+  const lida = lerMensagem(formData);
+  if ("erro" in lida) return { erro: lida.erro };
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { error } = await supabase.from("quick_replies").insert(lida.payload);
+  if (error) return { erro: erroMensagem(error.code, error.message) };
+  const anexos = urlsDosAnexos(lida.payload.anexos).length;
+  registrarAcesso(perfil.id, "criou_mensagem_padrao", {
+    alvo: lida.payload.titulo,
+    mudancas: [
+      { campo: "texto", depois: String(lida.payload.corpo), texto: true },
+      ...(anexos > 0 ? [{ depois: contagem(anexos, "anexo", "anexos") }] : []),
+    ],
+  });
+  return pronto("Mensagem criada");
+}
+
+export async function atualizarMensagem(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { erro: "Mensagem não informada." };
+  const lida = lerMensagem(formData);
+  if ("erro" in lida) return { erro: lida.erro };
+
+  const supabase = await createClient();
+  // Como estava, para o log ("*": a coluna dos anexos pode não existir).
+  const { data: antes } = await supabase
     .from("quick_replies")
-    .update(payload)
-    .eq("id", id);
-  if (error) {
-    terminar(
-      error.code === "42703" || error.code === "PGRST204"
-        ? "Rode a migração 0060 para anexos nas mensagens padrão existirem."
-        : amigavel(error.code, error.message),
-    );
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  const { data: gravada, error } = await supabase
+    .from("quick_replies")
+    .update(lida.payload)
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (error) return { erro: erroMensagem(error.code, error.message) };
+
+  if (gravada) {
+    const titulo = String(lida.payload.titulo);
+    const mudancas: Mudanca[] = soMudou([
+      { campo: "título", antes: antes?.titulo, depois: titulo, texto: true },
+      {
+        campo: "texto",
+        antes: antes?.corpo,
+        depois: String(lida.payload.corpo),
+        texto: true,
+      },
+    ]);
+    // Os anexos pela lista de arquivos: mesma quantidade com arquivo
+    // trocado também é mudança. Sem o campo no formulário, ficaram como
+    // estavam.
+    if (antes && lida.payload.anexos !== undefined) {
+      const eram = urlsDosAnexos(antes.anexos);
+      const ficam = urlsDosAnexos(lida.payload.anexos);
+      if (eram.join("\n") !== ficam.join("\n")) {
+        mudancas.push(
+          eram.length === ficam.length
+            ? { campo: "anexos", depois: "trocados" }
+            : { campo: "anexos", antes: eram.length, depois: ficam.length },
+        );
+      }
+    }
+    if (mudancas.length > 0) {
+      registrarAcesso(perfil.id, "mudou_mensagem_padrao", {
+        quick_reply_id: id,
+        alvo: titulo,
+        mudancas,
+      });
+    }
   }
-  terminar();
+  return pronto("Mensagem salva");
 }
 
-export async function excluirMensagem(formData: FormData) {
-  await exigirGestor();
+export async function excluirMensagem(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
   const id = String(formData.get("id") ?? "");
+  if (!id) return { erro: "Mensagem não informada." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("quick_replies").delete().eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
+  const { data: excluida, error } = await supabase
+    .from("quick_replies")
+    .delete()
+    .eq("id", id)
+    .select("titulo, corpo")
+    .maybeSingle();
+  if (error) return { erro: amigavel(error.code, error.message) };
+  // O texto vai junto: depois de excluída, o log é o único lugar que diz
+  // o que ela dizia.
+  if (excluida) {
+    registrarAcesso(perfil.id, "excluiu_mensagem_padrao", {
+      quick_reply_id: id,
+      alvo: excluida.titulo,
+      mudancas: [{ campo: "texto", antes: excluida.corpo, texto: true }],
+    });
+  }
+  return pronto("Mensagem excluída");
 }
 
 // ===========================================================================
-// Instâncias de WhatsApp
+// Números de WhatsApp (instâncias)
 // ===========================================================================
 
 /**
- * Leads que chegaram pelo webhook da Meta antes de o phone_number_id ser
+ * Contatos que chegaram pelo webhook da Meta antes de o phone_number_id ser
  * cadastrado ficam sem vínculo com instância. Ao conectar a instância, adota
  * os órfãos cujas mensagens chegaram por esse número.
  */
@@ -370,15 +543,41 @@ async function adotarLeadsOrfaos(
     .is("whatsapp_instance_id", null);
 }
 
-export async function criarInstancia(formData: FormData) {
-  await exigirGestor();
+/** Os nomes da equipe pelos ids pedidos (o atendente fixo do número). */
+async function nomesDaEquipe(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ids: (string | null | undefined)[],
+): Promise<Map<string, string>> {
+  const validos = [...new Set(ids.filter((i): i is string => Boolean(i)))];
+  if (validos.length === 0) return new Map();
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, nome")
+    .in("id", validos);
+  return new Map(
+    ((data ?? []) as { id: string; nome: string }[]).map((p) => [p.id, p.nome]),
+  );
+}
+
+export async function criarInstancia(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
   const nome = String(formData.get("nome") ?? "").trim();
   const telefone = normalizarTelefone(String(formData.get("telefone") ?? ""));
   const vendedorId = String(formData.get("vendedor_id") ?? "");
+  const phoneNumberId = String(
+    formData.get("meta_phone_number_id") ?? "",
+  ).trim();
 
-  if (!nome) terminar("Dê um nome à instância.");
-  if (!telefone)
-    terminar("Telefone inválido. Use DDD + número, ex.: 11 98842-1170.");
+  if (!nome) return { erro: "Dê um nome ao número." };
+  if (!telefone) {
+    return {
+      erro: "Telefone inválido. Use DDD e número, por exemplo 11 98842-1170.",
+    };
+  }
 
   const supabase = await createClient();
 
@@ -386,12 +585,8 @@ export async function criarInstancia(formData: FormData) {
     .from("whatsapp_instances")
     .select("id", { count: "exact", head: true });
   if ((count ?? 0) >= MAX_INSTANCIAS) {
-    terminar(`Limite de ${MAX_INSTANCIAS} instâncias atingido.`);
+    return { erro: `O limite é de ${MAX_INSTANCIAS} números.` };
   }
-
-  const phoneNumberId = String(
-    formData.get("meta_phone_number_id") ?? "",
-  ).trim();
 
   const { data: nova, error } = await supabase
     .from("whatsapp_instances")
@@ -403,352 +598,344 @@ export async function criarInstancia(formData: FormData) {
     })
     .select("id")
     .single();
-  if (error)
-    terminar(
-      error.code === "23505"
-        ? "Já existe uma instância com esse telefone."
-        : error.message,
-    );
+  if (error) {
+    return {
+      erro:
+        error.code === "23505"
+          ? "Esse telefone já está cadastrado."
+          : error.message,
+    };
+  }
   if (phoneNumberId && nova) {
     await adotarLeadsOrfaos(supabase, nova.id, phoneNumberId);
   }
-  terminar();
+  const atendente = vendedorId
+    ? (await nomesDaEquipe(supabase, [vendedorId])).get(vendedorId)
+    : undefined;
+  registrarAcesso(perfil.id, "criou_numero", {
+    instancia_id: nova?.id,
+    alvo: nome,
+    mudancas: [
+      { campo: "telefone", depois: formatarTelefone(telefone) },
+      ...(atendente ? [{ campo: "atendente", depois: atendente }] : []),
+      ...(phoneNumberId ? [{ campo: "ID da Meta", depois: phoneNumberId }] : []),
+    ],
+  });
+  return pronto(`Número “${nome}” adicionado`);
 }
 
-export async function atualizarInstancia(formData: FormData) {
-  await exigirGestor();
+export async function atualizarInstancia(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
   const id = String(formData.get("id") ?? "");
   const nome = String(formData.get("nome") ?? "").trim();
   const vendedorId = String(formData.get("vendedor_id") ?? "");
-  if (!id || !nome) terminar("Nome inválido.");
-
   const phoneNumberId = String(
     formData.get("meta_phone_number_id") ?? "",
   ).trim();
+  if (!id) return { erro: "Número não informado." };
+  if (!nome) return { erro: "Dê um nome ao número." };
 
   const supabase = await createClient();
-  const { error } = await supabase
+  // Como estava, para o log.
+  const { data: antes } = await supabase
+    .from("whatsapp_instances")
+    .select("nome, vendedor_id, meta_phone_number_id")
+    .eq("id", id)
+    .maybeSingle();
+  const { data: gravada, error } = await supabase
     .from("whatsapp_instances")
     .update({
       nome,
       vendedor_id: vendedorId || null,
       meta_phone_number_id: phoneNumberId || null,
     })
-    .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  if (phoneNumberId) await adotarLeadsOrfaos(supabase, id, phoneNumberId);
-  terminar();
-}
-
-export async function alternarInstancia(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
-
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("whatsapp_instances")
-    .select("ativa")
     .eq("id", id)
-    .single();
-  const { error } = await supabase
-    .from("whatsapp_instances")
-    .update({ ativa: !data?.ativa })
-    .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
+    .select("id")
+    .maybeSingle();
+  if (error) return { erro: amigavel(error.code, error.message) };
+  if (phoneNumberId) await adotarLeadsOrfaos(supabase, id, phoneNumberId);
 
-export async function excluirInstancia(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
-
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("whatsapp_instances")
-    .delete()
-    .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
-
-// ===========================================================================
-// Metas do mês (só admin — RLS de profiles exige)
-// ===========================================================================
-
-export async function salvarMeta(formData: FormData) {
-  const perfil = await exigirGestor();
-  if (perfil.papel !== "admin") terminar("Só o admin altera metas.");
-
-  const id = String(formData.get("id") ?? "");
-  const valor = normalizarNumero(String(formData.get("meta") ?? ""));
-  if (!id || valor === null || valor < 0) {
-    terminar("Meta inválida. Use algo como 5.000,00 (ou 0 para sem meta).");
-  }
-
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("profiles")
-    .update({ meta_mensal_centavos: Math.round(valor * 100) })
-    .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  // A meta em R$ aparece na barra de progresso de /pagamentos — revalida lá
-  // também (o terminar genérico só cuida de /configuracoes).
-  revalidatePath("/pagamentos");
-  terminar();
-}
-
-/**
- * Metas mensais por TIPO (contas abertas, ativações) — inteiros, 0 = sem
- * meta. Mesma regra da meta em R$: só o admin altera (o gatilho da 0050
- * garante isso também no banco).
- */
-export async function salvarMetaTipo(formData: FormData) {
-  const perfil = await exigirGestor();
-  if (perfil.papel !== "admin") terminar("Só o admin altera metas.");
-
-  const id = String(formData.get("id") ?? "");
-  const campo = String(formData.get("campo") ?? "");
-  const bruto = String(formData.get("meta") ?? "").trim();
-  const valor = Number(bruto);
-
-  if (!id || (campo !== "contas" && campo !== "ativacoes")) {
-    terminar("Meta inválida.");
-  }
-  if (!Number.isInteger(valor) || valor < 0 || valor > 10_000) {
-    terminar("Meta inválida. Use um número inteiro (0 para sem meta).");
-  }
-
-  const coluna = campo === "contas" ? "meta_contas_mes" : "meta_ativacoes_mes";
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("profiles")
-    .update({ [coluna]: valor })
-    .eq("id", id);
-  if (error) {
-    // UPDATE em coluna ausente volta PGRST204 (schema cache do PostgREST),
-    // não só o 42703 do Postgres — os dois significam "sem a 0050".
-    terminar(
-      error.code === "42703" || error.code === "PGRST204"
-        ? "Rode a migração 0050 para as metas por tipo existirem."
-        : amigavel(error.code, error.message),
-    );
-  }
-  // As metas por tipo aparecem no placar de /pagamentos — revalida lá
-  // também (o terminar genérico só cuida de /configuracoes).
-  revalidatePath("/pagamentos");
-  terminar();
-}
-
-/** WhatsApp da própria equipe (7.2): destino do resumo diário do gestor. */
-export async function salvarWhatsapp(formData: FormData) {
-  const perfil = await exigirGestor();
-  if (perfil.papel !== "admin")
-    terminar("Só o admin altera o WhatsApp da equipe.");
-
-  const id = String(formData.get("id") ?? "");
-  if (!id) terminar("Perfil inválido.");
-  const bruto = String(formData.get("whatsapp") ?? "").trim();
-  let numero: string | null = null;
-  if (bruto) {
-    numero = normalizarTelefone(bruto);
-    if (!numero) {
-      terminar("WhatsApp inválido. Use DDD + número, ex.: 62 98181-0004.");
+  // Gravou, registra. Se a leitura de antes falhou, as mudanças vão só com o
+  // depois, como em mudarPapel e alterarCorTag: o número mudou e o Log não
+  // pode ficar sem a linha.
+  if (gravada) {
+    const nomes = await nomesDaEquipe(supabase, [antes?.vendedor_id, vendedorId]);
+    const atendente = (v: string | null | undefined) =>
+      (v && nomes.get(v)) || (v ? "pessoa removida" : "ninguém");
+    const mudancas = soMudou([
+      { campo: "nome", antes: antes?.nome, depois: nome, texto: true },
+      {
+        campo: "atendente",
+        antes: antes ? atendente(antes.vendedor_id) : undefined,
+        depois: atendente(vendedorId || null),
+      },
+      {
+        campo: "ID da Meta",
+        antes: antes ? antes.meta_phone_number_id || "nenhum" : undefined,
+        depois: phoneNumberId || "nenhum",
+      },
+    ]);
+    if (mudancas.length > 0) {
+      registrarAcesso(perfil.id, "mudou_numero", {
+        instancia_id: id,
+        alvo: nome,
+        mudancas,
+      });
     }
   }
-
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("profiles")
-    .update({ whatsapp_e164: numero })
-    .eq("id", id);
-  if (error) {
-    // UPDATE com coluna desconhecida volta PGRST204 (schema cache do
-    // PostgREST), não o 42703 do Postgres — os dois significam "sem a 0057".
-    terminar(
-      error.code === "42703" || error.code === "PGRST204"
-        ? "Rode a migração 0057 para o WhatsApp da equipe existir."
-        : amigavel(error.code, error.message),
-    );
-  }
-  terminar();
+  return pronto(`Número “${nome}” salvo`);
 }
 
-/**
- * Cria o template resumo_diario direto na WABA (7.2) — o gestor não
- * conseguiu pelo WhatsApp Manager; o token do app tem a permissão de
- * gestão de templates (é a mesma que lista os aprovados nas Campanhas).
- */
-export async function criarTemplateResumo() {
-  await exigirGestor();
-  // terminar() NUNCA pode ficar dentro do try: redirect() do Next funciona
-  // LANÇANDO um erro interno (NEXT_REDIRECT) — o catch o engolia e mostrava
-  // o sucesso como "A Meta recusou: NEXT_REDIRECT".
-  let aviso: string;
-  try {
-    const status = await criarTemplateResumoMeta();
-    aviso =
-      status === "APPROVED"
-        ? "Template resumo_diario criado e já aprovado."
-        : `Template resumo_diario criado (status ${status}). A Meta ainda vai aprovar — horas a dias; o resumo passa a sair sozinho depois disso.`;
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    aviso = /already exists|já existe/i.test(m)
-      ? "O template resumo_diario já existe na WABA — se ainda não chegou nada, ele deve estar aguardando a aprovação da Meta."
-      : `A Meta recusou a criação: ${m}`;
+export async function alternarInstancia(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { erro: "Número não informado." };
+
+  const supabase = await createClient();
+  const { data, error: erroLeitura } = await supabase
+    .from("whatsapp_instances")
+    .select("nome, ativa")
+    .eq("id", id)
+    .single();
+  if (erroLeitura || !data) {
+    return { erro: "Esse número não existe mais. Recarregue a página." };
   }
-  terminar(aviso);
+  // Estado pedido pelo formulário (1 ou 0), não "inverter": o duplo toque
+  // na chave não desfaz o primeiro.
+  const pedido = formData.get("ativa");
+  const ativa = pedido === null ? !data.ativa : pedido === "1";
+  const { data: gravada, error } = await supabase
+    .from("whatsapp_instances")
+    .update({ ativa })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (error) return { erro: amigavel(error.code, error.message) };
+  // O segundo toque de um duplo clique não muda nada e não vira registro.
+  if (gravada && data.ativa !== ativa) {
+    registrarAcesso(perfil.id, ativa ? "ativou_numero" : "desativou_numero", {
+      instancia_id: id,
+      alvo: data.nome,
+    });
+  }
+  return pronto(`“${data.nome}” ${ativa ? "ativado" : "desativado"}`);
+}
+
+export async function excluirInstancia(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { erro: "Número não informado." };
+
+  const supabase = await createClient();
+  const { data: excluida, error } = await supabase
+    .from("whatsapp_instances")
+    .delete()
+    .eq("id", id)
+    .select("nome, telefone_e164")
+    .maybeSingle();
+  if (error) return { erro: amigavel(error.code, error.message) };
+  if (excluida) {
+    registrarAcesso(perfil.id, "excluiu_numero", {
+      instancia_id: id,
+      alvo: excluida.nome,
+      mudancas: [
+        { campo: "telefone", antes: formatarTelefone(excluida.telefone_e164) },
+      ],
+    });
+  }
+  return pronto("Número excluído");
 }
 
 // ===========================================================================
-// Parâmetros de reativação
+// Atendimento (parâmetros)
 // ===========================================================================
 
 const PARAMETROS_VALIDOS = new Set([
-  "queda_lotes_percentual",
-  "dias_sem_giro",
-  "dias_sem_resposta",
-  "minutos_alerta_espera",
   "distribuicao_automatica",
-  "dias_churn",
-  "receita_por_lote",
-  // As três abaixo SEMPRE estiveram na tela, mas faltavam aqui: salvar
-  // falhava com "Parâmetro desconhecido" desde que os campos nasceram.
   "envios_teto_dia",
-  "cadencia_por_dia",
-  "custo_template_centavos",
-  "resumo_gestor_ativo",
-  // Réguas de conversão (0069).
-  "sla_atencao_min",
-  "sla_horario_comercial",
-  "reabrir_perdido_ao_responder",
-  "nutrir_perdido_apos_dias",
-  "travar_cpf_duplicado",
 ]);
 
 // Parâmetros liga/desliga aceitam 0; os demais exigem número positivo.
-const PARAMETROS_BINARIOS = new Set([
-  "distribuicao_automatica",
-  "resumo_gestor_ativo",
-  "sla_horario_comercial",
-  "reabrir_perdido_ao_responder",
-  "travar_cpf_duplicado",
-]);
-// Zero desliga o recurso (ex.: receita por lote sem taxa definida).
-const PARAMETROS_ZERO_OK = new Set([
-  "receita_por_lote",
-  "custo_template_centavos",
-]);
+const PARAMETROS_BINARIOS = new Set(["distribuicao_automatica"]);
 
-export async function salvarParametro(formData: FormData) {
-  await exigirGestor();
+export async function salvarParametro(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
   const chave = String(formData.get("chave") ?? "");
-  const valor = normalizarNumero(String(formData.get("valor") ?? ""));
+  const bruto = String(formData.get("valor") ?? "").trim();
+  // Contagem se digita como se lê: "1.000" é mil, não um (o
+  // normalizarNumero leria o ponto como decimal).
+  const valor = PARAMETROS_BINARIOS.has(chave)
+    ? normalizarNumero(bruto)
+    : /^\d+$|^\d{1,3}(\.\d{3})+$/.test(bruto)
+      ? Number(bruto.replace(/\./g, ""))
+      : null;
 
-  if (!PARAMETROS_VALIDOS.has(chave)) terminar("Parâmetro desconhecido.");
+  if (!PARAMETROS_VALIDOS.has(chave)) return { erro: "Parâmetro desconhecido." };
   if (PARAMETROS_BINARIOS.has(chave)) {
-    if (valor !== 0 && valor !== 1)
-      terminar("Use 0 (desligado) ou 1 (ligado).");
-  } else if (PARAMETROS_ZERO_OK.has(chave)) {
-    if (valor === null || valor < 0) terminar("Informe um número (0 desliga).");
+    if (valor !== 0 && valor !== 1) {
+      return { erro: "Use 0 (desligado) ou 1 (ligado)." };
+    }
   } else if (valor === null || valor <= 0) {
-    terminar("Informe um número maior que zero.");
+    return { erro: "Use um número inteiro maior que zero, como 250." };
   }
 
   const supabase = await createClient();
+  const lido = await valorAtual(supabase, chave);
   // Upsert: chaves novas ainda não têm linha na tabela settings.
   const { error } = await supabase
     .from("settings")
     .upsert({ chave, valor, atualizado_em: new Date().toISOString() });
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
+  if (error) return { erro: amigavel(error.code, error.message) };
 
-// ===========================================================================
-// Cadência de follow-up
-// ===========================================================================
-
-const ANCORAS_VALIDAS = new Set([
-  "lead_criado",
-  "conta_aberta",
-  "sem_giro",
-  "queda_lotes",
-]);
-
-export async function criarRegraCadencia(formData: FormData) {
-  await exigirGestor();
-  const dias = Number(formData.get("dias"));
-  const escolha = String(formData.get("template") ?? "");
-  const ancora = String(formData.get("ancora") ?? "lead_criado");
-  const [nome, idioma] = escolha.split("|");
-
-  if (!Number.isInteger(dias) || dias <= 0 || dias > 90) {
-    terminar("Dias inválidos: use um número inteiro entre 1 e 90.");
-  }
-  if (!nome || !idioma) terminar("Escolha um template aprovado.");
-  if (!ANCORAS_VALIDAS.has(ancora)) terminar("Gatilho inválido.");
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("followup_rules").insert({
-    dias,
-    template_nome: nome,
-    template_idioma: idioma,
-    ancora,
-  });
-  if (error) {
-    terminar(
-      error.message.includes("ancora")
-        ? "Gatilhos de cliente dependem da migração 0015 — rode-a no SQL Editor."
-        : amigavel(error.code, error.message),
+  if (chave === "distribuicao_automatica") {
+    // Sem linha, a distribuição está desligada (a mesma leitura da tela).
+    const estava = lido ? Number(lido.valor ?? 0) === 1 : null;
+    if (estava !== (valor === 1)) {
+      registrarAcesso(
+        perfil.id,
+        valor === 1 ? "ligou_distribuicao" : "desligou_distribuicao",
+      );
+    }
+    return pronto(
+      valor === 1
+        ? "Distribuição automática ligada"
+        : "Distribuição automática desligada",
     );
   }
-  terminar();
+  // Sem linha, vale o teto padrão (lib/envios.ts), que é o que a tela mostra.
+  const tetoAntes = lido ? tetoDeEnvios(lido.valor) : undefined;
+  if (tetoAntes !== valor) {
+    registrarAcesso(perfil.id, "mudou_teto_envios", {
+      mudancas: [{ antes: tetoAntes, depois: valor ?? 0 }],
+    });
+  }
+  return pronto(`Teto salvo: ${contagem(valor ?? 0, "envio", "envios")} por dia`);
 }
 
-export async function alternarRegraCadencia(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
+// ===========================================================================
+// Respostas automáticas (regra em lib/automaticas.ts; quem manda é o webhook)
+// ===========================================================================
+
+/** Dias e horas do atendimento, em Brasília. */
+export async function salvarHorario(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
+  const dias = normalizarDias(formData.getAll("dias"));
+  const inicio = normalizarHora(String(formData.get("inicio") ?? ""));
+  const fim = normalizarHora(String(formData.get("fim") ?? ""));
+  if (dias.length === 0) return { erro: "Marque pelo menos um dia." };
+  if (!inicio || !fim) {
+    return { erro: "Preencha o início e o fim, como 09:00 e 18:00." };
+  }
+  // "HH:MM" com zero à esquerda: a ordem do texto é a da hora.
+  if (fim <= inicio) return { erro: "O fim precisa ser depois do início." };
+
+  const horario = { dias, inicio, fim };
+  const supabase = await createClient();
+  const lido = await valorAtual(supabase, CHAVE_HORARIO);
+  const { error } = await supabase.from("settings").upsert({
+    chave: CHAVE_HORARIO,
+    valor: horario,
+    atualizado_em: new Date().toISOString(),
+  });
+  if (error) return { erro: amigavel(error.code, error.message) };
+  // Comparado pelo resumo da tela: mesmo resumo, mesmo horário. Sem linha,
+  // vale o padrão (lerHorario).
+  const antes = lido ? horarioCurto(lerHorario(lido.valor)) : undefined;
+  const depois = horarioCurto(horario);
+  if (antes !== depois) {
+    registrarAcesso(perfil.id, "mudou_horario", {
+      mudancas: [{ antes, depois, texto: true }],
+    });
+  }
+  return pronto(`Horário salvo: ${depois}`);
+}
+
+/**
+ * Liga, desliga e muda o texto da resposta de fora do horário ou das
+ * boas-vindas. Texto vazio não liga. O tamanho conta o texto como sai para
+ * o contato, com o horário por extenso no lugar do {horario}.
+ */
+export async function salvarRespostaAutomatica(
+  _estado: ResultadoAcao,
+  formData: FormData,
+): Promise<ResultadoAcao> {
+  const perfil = await gestorAtivo();
+  if (!perfil) return SEM_PERMISSAO;
+  const tipo = formData.get("tipo");
+  if (!ehTipoAutomatica(tipo)) return { erro: "Resposta desconhecida." };
   const ativo = formData.get("ativo") === "1";
-  if (!id) terminar("Regra não informada.");
+  // As quebras de linha do meio ficam; só as pontas saem.
+  const texto = String(formData.get("texto") ?? "")
+    .replace(/\r\n?/g, "\n")
+    .trim();
+  if (ativo && !texto) return { erro: "Escreva o texto antes de ligar." };
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("followup_rules")
-    .update({ ativo })
-    .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
-
-export async function excluirRegraCadencia(formData: FormData) {
-  await exigirGestor();
-  const id = String(formData.get("id") ?? "");
-  if (!id) terminar("Regra não informada.");
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("followup_rules").delete().eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  terminar();
-}
-
-/** Meta diária de contatos por pessoa (coluna da migração 0013). */
-export async function salvarMetaContatos(formData: FormData) {
-  const perfil = await exigirGestor();
-  if (perfil.papel !== "admin") terminar("Só o admin altera metas.");
-
-  const id = String(formData.get("id") ?? "");
-  const contatos = Number(formData.get("contatos"));
-  if (!id || !Number.isInteger(contatos) || contatos < 0 || contatos > 500) {
-    terminar("Meta de contatos inválida: use um número inteiro (0 desliga).");
+  const { data: linhaHorario, error: erroHorario } = await supabase
+    .from("settings")
+    .select("valor")
+    .eq("chave", CHAVE_HORARIO)
+    .maybeSingle();
+  if (erroHorario) {
+    return { erro: `Não deu para ler o horário: ${erroHorario.message}` };
+  }
+  const saida = textoDaResposta(texto, lerHorario(linhaHorario?.valor));
+  if (saida.length > LIMITE_TEXTO) {
+    return {
+      erro: `Texto longo demais: com o horário por extenso, passa de ${LIMITE_TEXTO.toLocaleString("pt-BR")} caracteres.`,
+    };
   }
 
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("profiles")
-    .update({ meta_contatos_dia: contatos })
-    .eq("id", id);
-  if (error) terminar(amigavel(error.code, error.message));
-  // A meta de contatos alimenta o placar de /hoje — revalida lá também
-  // (o terminar genérico só cuida de /configuracoes).
-  revalidatePath("/hoje");
-  terminar();
+  const lido = await valorAtual(supabase, CHAVE_RESPOSTA[tipo]);
+  const { error } = await supabase.from("settings").upsert({
+    chave: CHAVE_RESPOSTA[tipo],
+    valor: { ativo, texto },
+    atualizado_em: new Date().toISOString(),
+  });
+  if (error) return { erro: amigavel(error.code, error.message) };
+
+  // Uma linha por gravação: ligou ou desligou (com o texto, se mudou junto)
+  // ou só mudou o texto. Sem linha, a resposta estava desligada com o texto
+  // padrão (lerResposta), que é o que a tela mostrava.
+  const estava = lido ? lerResposta(lido.valor, tipo) : null;
+  const mudouTexto = !estava || estava.texto.trim() !== texto;
+  const mudancas: Mudanca[] = mudouTexto
+    ? [{ campo: "texto", antes: estava?.texto, depois: texto, texto: true }]
+    : [];
+  const acao =
+    !estava || estava.ativo !== ativo
+      ? ativo
+        ? "ligou_resposta_automatica"
+        : "desligou_resposta_automatica"
+      : mudouTexto
+        ? "mudou_resposta_automatica"
+        : null;
+  if (acao) {
+    registrarAcesso(perfil.id, acao, {
+      alvo: ROTULO_AUTOMATICA[tipo],
+      ...(mudancas.length > 0 ? { mudancas } : {}),
+    });
+  }
+  const nome = tipo === "fora_do_horario" ? "Fora do horário" : "Boas-vindas";
+  return pronto(`${nome}: ${ativo ? "ligada" : "desligada"}`);
 }

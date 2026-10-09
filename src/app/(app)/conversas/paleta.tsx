@@ -1,221 +1,324 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  useComandosDaTela,
+  type ComandoPaleta,
+} from "@/components/app/paleta-global";
+import type { PrazoRapido } from "./ferramentas-palco";
+import type { VisaoConversas } from "./lista";
 
-type Comando = {
-  rotulo: string;
-  tecla: string;
-  acao: () => void;
-  precisaConversa?: boolean;
-};
-type Grupo = { grupo: string; itens: Comando[] };
-
-/**
- * A paleta ⌘K do Chat da Mesa: comandos filtráveis pelo teclado. Enter
- * executa o selecionado; setas navegam; Esc fecha (o pai cuida do atalho de
- * abrir). Sem conversa aberta, os comandos "desta conversa" ficam apagados.
+/*
+ * Os comandos do chat na paleta global (⌘K, Ctrl+K). A paleta própria do
+ * chat saiu: a casca monta uma só, com a busca de pessoas e as áreas, e o
+ * chat registra aqui o que vale na tela dele (useComandosDaTela). O que
+ * depende da conversa aberta só entra com ela aberta. O compliance (só
+ * leitura) não recebe comando que grava: só andar, ler, buscar e filtrar.
  */
-export function PaletaComandos({
-  aberta,
-  aoFechar,
-  temConversa,
-  comandos,
-}: {
-  aberta: boolean;
-  aoFechar: () => void;
-  temConversa: boolean;
-  comandos: Grupo[];
-}) {
-  const [filtro, setFiltro] = useState("");
-  const [idx, setIdx] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const listaRef = useRef<HTMLDivElement>(null);
-  // Quem tinha o foco antes de a paleta roubá-lo (quase sempre o compositor).
-  const focoAnteriorRef = useRef<HTMLElement | null>(null);
 
-  const planos = useMemo(() => {
-    const f = filtro.trim().toLowerCase();
-    return comandos.flatMap((g) =>
-      g.itens
-        .filter((c) => !f || c.rotulo.toLowerCase().includes(f))
-        .map((c) => ({ ...c, grupo: g.grupo })),
-    );
-  }, [comandos, filtro]);
+export type ContextoComandos = {
+  /** Há conversa em cena. */
+  conversa: boolean;
+  /** Ela está sem dono e o papel assume (assessor, gestor, admin). */
+  podeAssumir: boolean;
+  /** Adiada no prazo: trazer de volta à Caixa. */
+  adiada: boolean;
+  /** Resolvida: reabrir. */
+  resolvida: boolean;
+  /** O compositor está na tela (conversa carregada, com mensagens). */
+  compositor: boolean;
+  /** O papel só lê (compliance): nada que grave entra na lista. */
+  somenteLeitura: boolean;
+  /** O ⋯ da conversa está na tela com a equipe: "Transferir para…". */
+  podeTransferir: boolean;
+  /** O ⋯ da conversa está na tela com etiquetas: "Etiquetas…". */
+  podeEtiquetar: boolean;
+  visao: VisaoConversas;
+  /** O papel age em massa (todos, menos o compliance). */
+  podeSelecionar: boolean;
+  /** A seleção em massa está ligada. */
+  selecionando: boolean;
+  /** Quantas linhas a fila mostra (o "Selecionar todas"). */
+  linhasNaFila: number;
+  /** "Só não lidas" está ligado. */
+  naoLidas: boolean;
+  /** Quantos filtros finos estão ligados. */
+  filtrosAtivos: number;
+  /** A conversa tem recontato pendente (a faixa no topo). */
+  recontato: boolean;
+  /** E o recontato leva um template que dá para enviar daqui. */
+  recontatoComTemplate: boolean;
+  acoes: {
+    resolver: () => void;
+    adiar: (prazo: PrazoRapido) => void;
+    /** "Escolher data e hora" do adiar: abre o diálogo. */
+    adiarData: () => void;
+    agendarRecontato: () => void;
+    enviarTemplateRecontato: () => void;
+    recontatoFeito: () => void;
+    reagendarRecontato: () => void;
+    cancelarRecontato: () => void;
+    assumir: () => void;
+    reativar: () => void;
+    reabrir: () => void;
+    resumir: () => void;
+    marcarNaoLida: () => void;
+    /** Abre o ⋯ da conversa na seção Atendente. */
+    transferir: () => void;
+    /** Abre o ⋯ da conversa na seção Etiquetas. */
+    etiquetar: () => void;
+    dadosContato: () => void;
+    verFicha: () => void;
+    inserirPronta: () => void;
+    irPara: (visao: VisaoConversas) => void;
+    proxima: () => void;
+    anterior: () => void;
+    selecionar: () => void;
+    selecionarTodas: () => void;
+    sairDaSelecao: () => void;
+    buscarNaFila: () => void;
+    abrirFiltros: () => void;
+    alternarNaoLidas: () => void;
+    limparFiltros: () => void;
+  };
+};
 
-  // Índices que a seta pode alcançar: item sem conversa aberta não executa,
-  // e parar nele fazia o Enter morrer em silêncio.
-  const navegaveis = useMemo(
-    () =>
-      planos.flatMap((c, i) => (c.precisaConversa && !temConversa ? [] : [i])),
-    [planos, temConversa],
-  );
+const NOMES_VISOES: { visao: VisaoConversas; rotulo: string; atalho?: string }[] =
+  [
+    { visao: "caixa", rotulo: "Caixa", atalho: "G C" },
+    { visao: "aguardando", rotulo: "Aguardando", atalho: "G A" },
+    { visao: "adiadas", rotulo: "Adiadas" },
+    { visao: "recontatos", rotulo: "Recontatos" },
+    { visao: "resolvidas", rotulo: "Resolvidas" },
+    { visao: "tudo", rotulo: "Tudo" },
+  ];
 
-  // Reabrir zera busca e seleção (estado derivado no render).
-  const [abertaAntes, setAbertaAntes] = useState(aberta);
-  if (aberta !== abertaAntes) {
-    setAbertaAntes(aberta);
-    if (aberta) {
-      setFiltro("");
-      setIdx(navegaveis[0] ?? 0);
+const GRUPO_CONVERSA = "Esta conversa";
+const GRUPO_FILA = "Fila";
+
+/** A lista de comandos do momento. Os ids são estáveis: a paleta só se
+ *  redesenha quando entra ou sai um comando. */
+export function comandosDoChat(ctx: ContextoComandos): ComandoPaleta[] {
+  const { acoes } = ctx;
+  const lista: ComandoPaleta[] = [];
+  const conversa = (c: Omit<ComandoPaleta, "grupo">) =>
+    lista.push({ ...c, grupo: GRUPO_CONVERSA });
+  const fila = (c: Omit<ComandoPaleta, "grupo">) =>
+    lista.push({ ...c, grupo: GRUPO_FILA });
+
+  if (ctx.conversa) {
+    const grava = !ctx.somenteLeitura;
+    if (ctx.podeAssumir && grava) {
+      conversa({
+        id: "chat-assumir",
+        rotulo: "Assumir a conversa",
+        atalho: "A",
+        executar: acoes.assumir,
+      });
     }
+    if (!ctx.resolvida && grava) {
+      conversa({
+        id: "chat-resolver",
+        rotulo: "Resolver e ir para a próxima",
+        atalho: "E",
+        executar: acoes.resolver,
+      });
+      conversa({
+        id: "chat-adiar-responder",
+        rotulo: "Adiar até a pessoa responder",
+        executar: () => acoes.adiar("responder"),
+      });
+      conversa({
+        id: "chat-adiar-1hora",
+        rotulo: "Adiar por 1 hora",
+        executar: () => acoes.adiar("1hora"),
+      });
+      conversa({
+        id: "chat-adiar-amanha",
+        rotulo: "Adiar até amanhã",
+        atalho: "H",
+        executar: () => acoes.adiar("amanha"),
+      });
+      conversa({
+        id: "chat-adiar-3dias",
+        rotulo: "Adiar por 3 dias",
+        executar: () => acoes.adiar("3dias"),
+      });
+      conversa({
+        id: "chat-adiar-semana",
+        rotulo: "Adiar por 1 semana",
+        executar: () => acoes.adiar("1semana"),
+      });
+      conversa({
+        id: "chat-adiar-data",
+        rotulo: "Adiar: escolher data e hora…",
+        executar: acoes.adiarData,
+      });
+    }
+    if (grava) {
+      conversa({
+        id: "chat-recontato-agendar",
+        rotulo: "Agendar recontato…",
+        executar: acoes.agendarRecontato,
+      });
+    }
+    if (ctx.recontato && grava) {
+      if (ctx.recontatoComTemplate) {
+        conversa({
+          id: "chat-recontato-template",
+          rotulo: "Recontato: enviar o template…",
+          executar: acoes.enviarTemplateRecontato,
+        });
+      }
+      conversa({
+        id: "chat-recontato-feito",
+        rotulo: "Recontato: marcar como feito",
+        executar: acoes.recontatoFeito,
+      });
+      conversa({
+        id: "chat-recontato-reagendar",
+        rotulo: "Recontato: reagendar…",
+        executar: acoes.reagendarRecontato,
+      });
+      conversa({
+        id: "chat-recontato-cancelar",
+        rotulo: "Recontato: cancelar",
+        executar: acoes.cancelarRecontato,
+      });
+    }
+    if (ctx.adiada && grava) {
+      conversa({
+        id: "chat-reativar",
+        rotulo: "Voltar para a Caixa agora",
+        executar: acoes.reativar,
+      });
+    }
+    if (ctx.resolvida && grava) {
+      conversa({
+        id: "chat-reabrir",
+        rotulo: "Reabrir a conversa",
+        executar: acoes.reabrir,
+      });
+    }
+    if (ctx.podeTransferir && grava) {
+      conversa({
+        id: "chat-transferir",
+        rotulo: "Transferir para…",
+        executar: acoes.transferir,
+      });
+    }
+    if (ctx.podeEtiquetar && grava) {
+      conversa({
+        id: "chat-etiquetas",
+        rotulo: "Etiquetas…",
+        executar: acoes.etiquetar,
+      });
+    }
+    if (ctx.compositor && grava) {
+      conversa({
+        id: "chat-pronta",
+        rotulo: "Inserir mensagem pronta",
+        atalho: "/",
+        executar: acoes.inserirPronta,
+      });
+    }
+    conversa({
+      id: "chat-resumo",
+      rotulo: "Resumo da conversa",
+      executar: acoes.resumir,
+    });
+    if (grava) {
+      conversa({
+        id: "chat-nao-lida",
+        rotulo: "Marcar como não lida",
+        executar: acoes.marcarNaoLida,
+      });
+    }
+    conversa({
+      id: "chat-dados",
+      rotulo: "Dados do contato",
+      executar: acoes.dadosContato,
+    });
+    conversa({
+      id: "chat-ficha",
+      rotulo: "Abrir a ficha do contato",
+      executar: acoes.verFicha,
+    });
   }
 
-  useEffect(() => {
-    if (!aberta) return;
-    focoAnteriorRef.current = document.activeElement as HTMLElement | null;
-    inputRef.current?.focus();
-    // Ao fechar, o foco VOLTA para quem abriu. Solto no body, a próxima
-    // letra digitada viraria atalho do palco (E resolve a conversa).
-    // isConnected: um comando pode ter trocado a conversa e levado embora o
-    // elemento de origem — aí não há para onde voltar.
-    return () => {
-      const origem = focoAnteriorRef.current;
-      if (origem?.isConnected) origem.focus();
-    };
-  }, [aberta]);
+  fila({
+    id: "chat-proxima",
+    rotulo: "Próxima conversa da fila",
+    atalho: "J",
+    executar: acoes.proxima,
+  });
+  fila({
+    id: "chat-anterior",
+    rotulo: "Conversa anterior da fila",
+    atalho: "K",
+    executar: acoes.anterior,
+  });
+  fila({
+    id: "chat-buscar-fila",
+    rotulo: "Buscar na fila",
+    executar: acoes.buscarNaFila,
+  });
+  fila({
+    id: "chat-filtros",
+    rotulo: "Filtros da fila",
+    executar: acoes.abrirFiltros,
+  });
+  fila({
+    id: "chat-nao-lidas",
+    rotulo: ctx.naoLidas ? "Mostrar lidas e não lidas" : "Só não lidas",
+    executar: acoes.alternarNaoLidas,
+  });
+  if (ctx.filtrosAtivos > 0) {
+    fila({
+      id: "chat-limpar-filtros",
+      rotulo: "Limpar filtros da fila",
+      executar: acoes.limparFiltros,
+    });
+  }
+  for (const v of NOMES_VISOES) {
+    if (v.visao === ctx.visao) continue;
+    fila({
+      id: `chat-visao-${v.visao}`,
+      rotulo: `Ver ${v.rotulo}`,
+      atalho: v.atalho,
+      executar: () => acoes.irPara(v.visao),
+    });
+  }
+  if (ctx.podeSelecionar && !ctx.selecionando) {
+    fila({
+      id: "chat-selecionar",
+      rotulo: "Selecionar conversas",
+      executar: acoes.selecionar,
+    });
+  }
+  if (ctx.selecionando) {
+    if (ctx.linhasNaFila > 0) {
+      fila({
+        id: "chat-selecionar-todas",
+        rotulo: `Selecionar todas (${ctx.linhasNaFila.toLocaleString("pt-BR")})`,
+        executar: acoes.selecionarTodas,
+      });
+    }
+    fila({
+      id: "chat-sair-selecao",
+      rotulo: "Sair da seleção",
+      atalho: "Esc",
+      executar: acoes.sairDaSelecao,
+    });
+  }
+  return lista;
+}
 
-  // Mantém a linha selecionada à vista: a seleção é só pintura, o navegador
-  // não rola nada porque o foco nunca sai do campo de busca.
-  useEffect(() => {
-    if (!aberta) return;
-    listaRef.current
-      ?.querySelector('[data-ativo="1"]')
-      ?.scrollIntoView({ block: "nearest" });
-  }, [aberta, idx, filtro]);
-
-  if (!aberta) return null;
-
-  // -1 quando nada é executável: sem isto o realce caía num item cinza e o
-  // Enter morria sem dizer por quê.
-  const ativo = navegaveis.includes(idx) ? idx : (navegaveis[0] ?? -1);
-
-  const mover = (passo: 1 | -1) => {
-    if (navegaveis.length === 0) return;
-    const pos = navegaveis.indexOf(ativo);
-    const proximo =
-      pos === -1
-        ? navegaveis[0]
-        : navegaveis[Math.min(Math.max(pos + passo, 0), navegaveis.length - 1)];
-    setIdx(proximo);
-  };
-
-  const executar = (c: Comando) => {
-    if (c.precisaConversa && !temConversa) return;
-    aoFechar();
-    c.acao();
-  };
-
-  let grupoAnterior = "";
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Paleta de comandos"
-      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay pt-[12vh]"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) aoFechar();
-      }}
-      onKeyDown={(e) => {
-        // Contenção de foco do diálogo: no wrapper, não só no campo — depois
-        // de arrastar a barra de rolagem o foco fica no fundo, e daí o Tab
-        // levava para a tela DE TRÁS do overlay.
-        if (e.key === "Tab") {
-          e.preventDefault();
-          inputRef.current?.focus();
-        }
-      }}
-    >
-      <div className="w-full max-w-[480px] overflow-hidden rounded-lg border border-neutral-300 bg-neutral-0 shadow-lg">
-        <label className="flex h-[48px] items-center gap-1 border-b border-neutral-200 px-1.5">
-          <Search
-            size={16}
-            strokeWidth={1.7}
-            aria-hidden
-            className="text-neutral-400"
-          />
-          <input
-            ref={inputRef}
-            value={filtro}
-            onChange={(e) => {
-              setFiltro(e.target.value);
-              setIdx(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                mover(1);
-              }
-              if (e.key === "ArrowUp") {
-                e.preventDefault();
-                mover(-1);
-              }
-              if (e.key === "Enter") {
-                e.preventDefault();
-                const c = planos[ativo];
-                if (c) executar(c);
-              }
-            }}
-            placeholder="Digite um comando…"
-            className="h-full min-w-0 flex-1 bg-transparent text-sm text-neutral-800 placeholder:text-neutral-400 focus:outline-none"
-          />
-          <kbd className="rounded-sm border border-neutral-200 bg-neutral-50 px-0.5 font-mono text-xs text-neutral-600">
-            esc
-          </kbd>
-        </label>
-        <div ref={listaRef} className="max-h-[300px] overflow-y-auto p-0.5">
-          {planos.length === 0 ? (
-            <p className="px-1.5 py-2 text-sm text-neutral-600">
-              Nada encontrado para “{filtro}”.
-            </p>
-          ) : navegaveis.length === 0 ? (
-            <p className="px-1.5 py-2 text-sm text-neutral-600">
-              Estes comandos precisam de uma conversa aberta. Escolha uma na
-              lista (ou aperte J) e volte aqui.
-            </p>
-          ) : (
-            planos.map((c, i) => {
-              const mostraGrupo = c.grupo !== grupoAnterior;
-              grupoAnterior = c.grupo;
-              const desabilitado = Boolean(c.precisaConversa && !temConversa);
-              return (
-                <div key={`${c.grupo}-${c.rotulo}`}>
-                  {mostraGrupo ? (
-                    <p className="px-1.5 pt-1 pb-0.5 text-xs font-semibold tracking-[0.06em] text-neutral-600 uppercase">
-                      {c.grupo}
-                    </p>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={desabilitado}
-                    data-ativo={i === ativo ? "1" : undefined}
-                    onMouseEnter={() => {
-                      if (!desabilitado) setIdx(i);
-                    }}
-                    onClick={() => executar(c)}
-                    className={cn(
-                      "flex h-[40px] w-full items-center gap-1 rounded-md px-1.5 text-left text-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-500",
-                      i === ativo && !desabilitado
-                        ? "bg-primary-50 text-primary-900"
-                        : "text-neutral-800",
-                      desabilitado && "cursor-not-allowed text-neutral-400",
-                    )}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{c.rotulo}</span>
-                    {c.tecla ? (
-                      <kbd className="shrink-0 rounded-sm border border-neutral-200 bg-neutral-50 px-0.5 font-mono text-xs text-neutral-600">
-                        {c.tecla}
-                      </kbd>
-                    ) : null}
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-    </div>
-  );
+/**
+ * Registra os comandos do chat enquanto a tela está montada. É um
+ * componente (e não uma chamada no meio do render do chat) porque as ações
+ * são funções do chat que só rodam quando alguém escolhe o comando.
+ */
+export function ComandosDoChat(props: ContextoComandos) {
+  useComandosDaTela(comandosDoChat(props));
+  return null;
 }

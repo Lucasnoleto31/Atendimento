@@ -1,9 +1,20 @@
 "use server";
 
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { destinoSeguro } from "@/lib/rotas";
+import {
+  aparelhoConfirmado,
+  COOKIE_APARELHO,
+  COOKIE_CODIGO,
+  lerCodigoPendente,
+  REENVIO_MS,
+} from "@/lib/codigo-login";
+import { ipDoCliente, JANELA_MIN, MAX_FALHAS, paraFiltro } from "./freio";
+import { emitirCodigo } from "./emissao";
+import { COOKIE_ATIVIDADE } from "./atividade";
 
 export type EstadoLogin = {
   erro?: string;
@@ -15,33 +26,16 @@ export type EstadoLogin = {
   ir?: string;
 };
 
-const MAX_FALHAS = 5;
-const JANELA_MIN = 15;
-
-/**
- * Valor seguro para o filtro or= do PostgREST: vírgula, parêntese e aspas
- * quebram a sintaxe — e-mail com esses caracteres nem é válido de qualquer
- * forma, então remover não bloqueia ninguém legítimo.
- */
-function paraFiltro(valor: string): string {
-  return valor.replaceAll(/[,()"]/g, "");
-}
-
-/** Primeiro salto do x-forwarded-for — é o IP real do cliente na Vercel. */
-async function ipDoCliente(): Promise<string> {
-  const h = await headers();
-  const encadeado = h.get("x-forwarded-for") ?? "";
-  const primeiro = encadeado.split(",")[0]?.trim();
-  return primeiro || h.get("x-real-ip") || "desconhecido";
-}
-
 export async function entrar(
   _estado: EstadoLogin,
   formData: FormData,
 ): Promise<EstadoLogin> {
   const email = String(formData.get("email") ?? "").trim();
   const senha = String(formData.get("senha") ?? "");
-  const proximo = String(formData.get("proximo") ?? "/hoje");
+  // O campo oculto vem do formulário, que qualquer um monta: esta é a
+  // barreira de verdade do ?proximo=. A tela do código valida de novo o que
+  // recebe, e só então o navegador vai até lá.
+  const destino = destinoSeguro(formData.get("proximo"));
 
   if (!email || !senha) {
     return { erro: "Informe e-mail e senha." };
@@ -81,7 +75,7 @@ export async function entrar(
     password: senha,
   });
 
-  if (error) {
+  if (error || !sessao.user) {
     // Grava a falha para o contador — e mantém a mensagem genérica.
     await service
       .from("login_tentativas")
@@ -95,48 +89,55 @@ export async function entrar(
 
   // Login correto zera o contador do e-mail e do IP, e aproveita a passagem
   // para expurgar registros velhos (a tabela nunca acumula mais que 1 dia).
-  await service
-    .from("login_tentativas")
-    .delete()
-    .or(`email.eq."${paraFiltro(emailNorm)}",ip.eq."${paraFiltro(ip)}"`)
-    .then(
-      () => {},
-      () => {},
-    );
-  await service
-    .from("login_tentativas")
-    .delete()
-    .lt("criado_em", new Date(Date.now() - 86_400_000).toISOString())
-    .then(
-      () => {},
-      () => {},
-    );
+  // Depois da resposta (after): o freio só lê o contador na PRÓXIMA tentativa
+  // de senha, e quem acabou de acertar não precisa esperar duas idas ao banco.
+  after(async () => {
+    await Promise.all([
+      service
+        .from("login_tentativas")
+        .delete()
+        .or(`email.eq."${paraFiltro(emailNorm)}",ip.eq."${paraFiltro(ip)}"`),
+      service
+        .from("login_tentativas")
+        .delete()
+        .lt("criado_em", new Date(Date.now() - 86_400_000).toISOString()),
+    ]).catch(() => {});
+  });
 
   revalidatePath("/", "layout");
-  const destino =
-    proximo.startsWith("/") && !proximo.startsWith("//") ? proximo : "/hoje";
-  // Senha certa = sessão aal1. Com 2FA obrigatório, o próximo passo é o
-  // código (ou o cadastro do fator) — o destino vai DIRETO para lá: se
-  // fosse /hoje, o middleware desviaria por dentro e a tela do código
-  // apareceria com /hoje na barra.
-  if (process.env.EXIGIR_2FA !== "0") {
-    const temFator = (sessao.user?.factors ?? []).some(
-      (f) => f.status === "verified",
-    );
-    return {
-      ir: `/entrar/${temFator ? "codigo" : "2fa"}?proximo=${encodeURIComponent(destino)}`,
-    };
+
+  // Senha certa. Aparelho que já confirmou o código para esta pessoa segue
+  // direto para o destino. Aparelho novo recebe o código no e-mail, e o
+  // destino aponta DIRETO para a tela do código: se fosse a tela final, o
+  // middleware desviaria por dentro e a tela do código apareceria com o
+  // endereço da tela final na barra.
+  const usuario = sessao.user;
+  const jarro = await cookies();
+  // Carimbo de um login anterior (Sair, troca de conta, sessão revogada em
+  // outro aparelho) não pode derrubar a sessão que acabou de nascer. Sem
+  // ele, o middleware conta a atividade a partir do primeiro request.
+  jarro.delete(COOKIE_ATIVIDADE);
+  if (await aparelhoConfirmado(jarro.get(COOKIE_APARELHO)?.value, usuario.id)) {
+    return { ir: destino };
   }
-  return { ir: destino };
-}
 
-export async function sair() {
-  const supabase = await createClient();
-  // Escopo global explícito: revoga o refresh token NO SERVIDOR, em todos
-  // os aparelhos — sair não é só apagar o cookie deste navegador. O token
-  // de acesso morre em minutos e o getUser() do middleware (que valida no
-  // servidor a cada request) derruba antes disso.
-  await supabase.auth.signOut({ scope: "global" });
-  revalidatePath("/", "layout");
-  redirect("/entrar");
+  let telaCodigo = `/entrar/codigo?proximo=${encodeURIComponent(destino)}`;
+  // Dois cliques em Entrar, ou voltar e entrar de novo logo em seguida, não
+  // mandam dois e-mails: o código do último minuto continua valendo. Se o
+  // envio falhar, a tela do código abre no botão de enviar, e o ?falha= diz
+  // o motivo (só a chave; o texto mora em emissao.ts e a URL não injeta
+  // frase nenhuma na tela).
+  const pendente = await lerCodigoPendente(
+    jarro.get(COOKIE_CODIGO)?.value,
+    usuario.id,
+  );
+  const recente = pendente && Date.now() - pendente.enviadoEm < REENVIO_MS;
+  if (!recente && usuario.email) {
+    const envio = await emitirCodigo(
+      { id: usuario.id, email: usuario.email },
+      ip,
+    );
+    if ("erro" in envio) telaCodigo += `&falha=${envio.motivo}`;
+  }
+  return { ir: telaCodigo };
 }

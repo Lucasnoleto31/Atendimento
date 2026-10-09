@@ -2,48 +2,52 @@ import type { createServiceClient } from "@/lib/supabase/server";
 import { agoraEmBrasilia } from "@/lib/format";
 
 /**
- * Orçamento ÚNICO de envios automáticos por dia.
+ * Teto diário de envios automáticos do número.
  *
  * O incidente de 24/08 (1.015 templates num dia, qualidade do número caiu
- * para amarelo) aconteceu porque cada motor tinha teto próprio e ninguém
- * somava: cadência + campanhas + disparo manual saíram juntos. A resposta da
- * época — desligar a cadência de aquisição — parou o follow-up de 1.949
- * leads.
- *
- * Agora todos os envios automáticos debitam do MESMO orçamento
- * (settings.envios_teto_dia). A rampa de aquecimento é manual e deliberada:
- * o gestor sobe o teto em Configurações conforme a qualidade se mantém
- * verde (60 → 100 → 150), em vez de um algoritmo decidir sozinho.
+ * para amarelo) mostrou que o limite precisa ser do NÚMERO, não de cada
+ * disparo: várias campanhas ativas somam no mesmo dia. Todo envio
+ * automático debita de settings.envios_teto_dia. A rampa de aquecimento é
+ * manual e deliberada: o gestor sobe o teto em Configurações conforme a
+ * qualidade se mantém verde (60 → 100 → 150), em vez de um algoritmo decidir
+ * sozinho.
  */
 
-const TETO_PADRAO = 100;
+const TETO_ENVIOS_PADRAO = 100;
 
-type Service = ReturnType<typeof createServiceClient>;
+/** Marca gravada em lead_interactions.metadados.via pelo disparo em massa. */
+export const VIA_DISPARO = "campanha";
 
-/** Quantos envios automáticos ainda cabem hoje (Brasília). */
-export async function orcamentoEnviosRestante(service: Service): Promise<number> {
-  const { data: cfg } = await service
-    .from("settings")
-    .select("valor")
-    .eq("chave", "envios_teto_dia")
-    .maybeSingle();
-  const teto = Number(cfg?.valor ?? TETO_PADRAO) || TETO_PADRAO;
+type Cliente = ReturnType<typeof createServiceClient>;
 
-  const inicioDia = agoraEmBrasilia().inicioDoDia;
-  const { count } = await service
+/** settings.envios_teto_dia como número; ausente ou inválido vira o padrão. */
+export function tetoDeEnvios(valor: unknown): number {
+  return Number(valor ?? TETO_ENVIOS_PADRAO) || TETO_ENVIOS_PADRAO;
+}
+
+/**
+ * Envios automáticos desde o começo do dia (Brasília). É a mesma conta no
+ * motor e na tela de disparos, por isso mora aqui: contada no banco, nunca em
+ * memória, porque cada instância da Vercel tem a sua.
+ */
+export function contarEnviosDesde(cliente: Cliente, inicioDoDia: string) {
+  return cliente
     .from("lead_interactions")
     .select("id", { count: "exact", head: true })
     .eq("tipo", "mensagem_enviada")
-    .gte("criado_em", inicioDia)
-    .in("metadados->>via", ["cadencia", "campanha", "disparo"]);
+    .gte("criado_em", inicioDoDia)
+    .eq("metadados->>via", VIA_DISPARO);
+}
 
-  // O resumo diário do gestor (7.2) não tem lead — não vira interação. O
-  // débito dele vive na trilha de auditoria e entra na mesma conta.
-  const { count: resumos } = await service
-    .from("auditoria")
-    .select("id", { count: "exact", head: true })
-    .eq("acao", "resumo_gestor")
-    .gte("criado_em", inicioDia);
-
-  return Math.max(0, teto - (count ?? 0) - (resumos ?? 0));
+/** Quantos envios automáticos ainda cabem hoje (Brasília). */
+export async function orcamentoEnviosRestante(service: Cliente): Promise<number> {
+  const [{ data: cfg }, { count }] = await Promise.all([
+    service
+      .from("settings")
+      .select("valor")
+      .eq("chave", "envios_teto_dia")
+      .maybeSingle(),
+    contarEnviosDesde(service, agoraEmBrasilia().inicioDoDia),
+  ]);
+  return Math.max(0, tetoDeEnvios(cfg?.valor) - (count ?? 0));
 }
