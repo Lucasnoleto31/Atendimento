@@ -154,8 +154,11 @@ As chaves vão direto no painel da Vercel. Não passe por chat nem por e-mail.
    Região: São Paulo.
 3. O Resend mostra os registros de DNS: um MX e um TXT (SPF) no subdomínio
    `send`, e um TXT de DKIM em `resend._domainkey`. Cadastre os três onde o DNS
-   do domínio é gerenciado (registro.br, Cloudflare…). Um TXT de DMARC em
-   `_dmarc` com `v=DMARC1; p=none;` ajuda a não cair no spam.
+   do domínio é gerenciado (o do `zeve.com.br` fica na Cloudflare). Eles não
+   mexem no e-mail do Microsoft 365, que usa a raiz do domínio. **Não crie
+   outro registro de DMARC:** o `zeve.com.br` já tem um (`p=quarantine`), e
+   dois registros em `_dmarc` invalidam a política. Com o DKIM do Resend
+   verificado, o e-mail passa nesse DMARC.
 4. Espere o domínio ficar **Verified** no Resend (minutos, às vezes algumas
    horas, conforme o DNS).
 5. **API Keys > Create API Key**: permissão **Sending access**, restrita ao
