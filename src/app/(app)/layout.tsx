@@ -1,86 +1,105 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { AppShell, type Perfil } from "@/components/app/app-shell";
-import { processarCadencia } from "@/lib/cadencia";
-import { processarAgendadas } from "@/lib/agendadas";
+import { LogOut } from "lucide-react";
+import { idDaSessao, perfilAtual } from "@/lib/auth";
+import { AppShell } from "@/components/app/app-shell";
+import { Button } from "@/components/ui/button";
+import { Moldura } from "@/app/entrar/moldura";
+import { fotosDaEquipe } from "@/lib/fotos-equipe";
 import { processarCampanhas } from "@/lib/campanhas";
-import { garantirGiroFresco } from "@/lib/giro";
-import { sincronizarGenial } from "@/lib/genial";
-import { processarResumoGestor } from "@/lib/resumo-gestor";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
-  const supabase = await createClient();
+  // Mesmo perfil (em cache) que a página e os loaders do request vão ler:
+  // uma verificação de sessão e uma consulta a profiles para a tela toda.
+  // A foto vem do cache entre requests (fotosDaEquipe): não pesa na tela.
+  const [perfil, fotos] = await Promise.all([perfilAtual(), fotosDaEquipe()]);
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/entrar");
-  }
-
-  const { data: perfil } = await supabase
-    .from("profiles")
-    .select("nome, email, papel, ativo")
-    .eq("id", user.id)
-    .single();
-
-  if (perfil && !perfil.ativo) {
-    return (
-      <main className="flex flex-1 items-center justify-center px-2 py-8">
-        <div className="max-w-[68ch] rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm">
-          <h1 className="text-h3 text-neutral-900">Acesso desativado</h1>
-          <p className="mt-1 text-sm text-neutral-600">
-            Sua conta foi desativada pela administração. Fale com o gestor da
-            equipe para reativar.
-          </p>
-        </div>
-      </main>
-    );
-  }
-
-  // Usuário existe no Auth mas sem perfil: o gatilho não rodou ou foi apagado.
   if (!perfil) {
+    if (!(await idDaSessao())) {
+      redirect("/entrar");
+    }
+
+    // Usuário existe no Auth mas sem perfil: o gatilho não rodou ou foi apagado.
     return (
-      <main className="flex flex-1 items-center justify-center px-2 py-8">
-        <div className="max-w-[68ch] rounded-lg border border-neutral-200 bg-neutral-0 p-3 shadow-sm">
-          <h1 className="text-h3 text-neutral-900">Perfil não encontrado</h1>
-          <p className="mt-1 text-sm text-neutral-600">
-            Sua conta existe na autenticação, mas não tem perfil na tabela{" "}
-            <code className="font-mono text-xs">profiles</code>. Peça à
-            administração para recriar o usuário ou inserir o perfil
-            manualmente.
-          </p>
-        </div>
-      </main>
+      <TelaSemAcesso titulo="Perfil não encontrado">
+        Sua conta existe na autenticação, mas não tem perfil na tabela{" "}
+        <code className="text-xs">profiles</code>. Peça à administração para
+        recriar o usuário ou inserir o perfil.
+      </TelaSemAcesso>
     );
   }
 
-  // O batimento das automações morava só no /chat: cadência e campanha
-  // paravam se ninguém abrisse aquela tela (e o dono optou por não usar cron
-  // externo). Daqui, QUALQUER página aberta por QUALQUER pessoa alimenta os
-  // motores — o freio de 5 min dentro de cada processador evita repetição.
-  after(async () => {
-    // Genial antes do giro: se o dia trouxe arquivo novo, o giro que os
-    // motores leem já sai atualizado por ele.
-    await sincronizarGenial().catch(() => {});
-    await garantirGiroFresco();
-    await processarCadencia().catch(() => {});
-    await processarAgendadas().catch(() => {});
-    await processarCampanhas().catch(() => {});
-    await processarResumoGestor().catch(() => {});
-  });
+  if (!perfil.ativo) {
+    return (
+      <TelaSemAcesso titulo="Acesso desativado">
+        A administração desativou esta conta. Para voltar a usar o sistema, fale
+        com o gestor da equipe.
+      </TelaSemAcesso>
+    );
+  }
+
+  // Batimento das campanhas: elas mandam a cota do dia aos poucos e não há
+  // cron externo (a rota /api/cron/campanhas existe, mas é opcional). Daqui,
+  // QUALQUER página aberta por QUALQUER pessoa alimenta o motor — o freio de
+  // 5 min dentro de processarCampanhas evita repetição. Roda depois da
+  // resposta (after), sem atrasar a tela.
+  // MOTORES_DESLIGADOS=1 é para a máquina de desenvolvimento ligada no banco
+  // de produção: sem isto, abrir uma página local dispararia campanhas reais
+  // com o envio desligado, e os envios seriam gravados como falha.
+  if (process.env.MOTORES_DESLIGADOS !== "1") {
+    after(async () => {
+      await processarCampanhas().catch(() => {});
+    });
+  }
 
   // Preferência "menu cheio no chat" no cookie (padrão do tema): o SSR já
-  // pinta a largura certa e a sidebar não pula depois da hidratação.
+  // pinta a largura certa e o menu lateral não pula depois da hidratação.
   const jarro = await cookies();
   const menuChatExpandido = jarro.get("menu-chat")?.value === "expandido";
 
   return (
-    <AppShell perfil={perfil as Perfil} menuChatExpandido={menuChatExpandido}>
+    <AppShell
+      perfil={{
+        nome: perfil.nome,
+        email: perfil.email,
+        papel: perfil.papel,
+        foto: fotos[perfil.id] ?? null,
+      }}
+      menuChatExpandido={menuChatExpandido}
+    >
       {children}
     </AppShell>
+  );
+}
+
+/**
+ * As duas telas acima trocam o app inteiro (sem menu), no desenho da tela de
+ * entrada (duas metades no desktop, faixa no topo no celular). A saída é o
+ * Sair, sem ela quem está logado fica preso até apagar os cookies. Posta
+ * para /entrar/sair, como todo Sair do app: é formulário comum, e não
+ * server action, que o middleware barra para conta desativada.
+ */
+function TelaSemAcesso({
+  titulo,
+  children,
+}: {
+  titulo: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Moldura titulo={titulo} descricao={children}>
+      <form action="/entrar/sair" method="post">
+        <Button
+          type="submit"
+          variant="secondary"
+          size="lg"
+          className="w-full"
+          icone={<LogOut size={18} strokeWidth={1.75} aria-hidden />}
+        >
+          Sair
+        </Button>
+      </form>
+    </Moldura>
   );
 }

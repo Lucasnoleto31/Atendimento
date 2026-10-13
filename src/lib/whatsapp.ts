@@ -10,8 +10,6 @@ export type TemplateWhatsapp = {
   parametros: string[];
 };
 
-export type StatusConversa = "open" | "resolved" | "pending" | "snoozed";
-
 /**
  * Cliente da WhatsApp Cloud API (Meta), usado quando META_WHATSAPP_TOKEN
  * está configurado — o canal direto, sem Chatwoot no meio. O destino é o
@@ -21,6 +19,34 @@ export type StatusConversa = "open" | "resolved" | "pending" | "snoozed";
 
 const GRAPH = "https://graph.facebook.com/v23.0";
 const TTL_CACHE_MS = 5 * 60_000;
+
+// Sem teto, uma Meta travada segura a função até o limite da Vercel: no
+// webhook a mensagem nem chega a ser gravada, e a Meta reenvia em cima.
+// Upload de arquivo e download de mídia recebida ganham prazo próprio.
+//
+// O POST de envio (/messages) tem prazo longo: estourar não quer dizer que a
+// Meta recusou. A mensagem pode ter saído sem o wamid voltar, e aí não entra
+// no histórico, os recibos dela não acham a quem pertencem e a equipe
+// reenvia em cima. O prazo curto fica nas leituras (templates, mídia
+// recebida, qualidade do número).
+const TEMPO_GRAPH_MS = 15_000;
+const TEMPO_ENVIO_MS = 60_000;
+const TEMPO_UPLOAD_MS = 60_000;
+const TEMPO_DOWNLOAD_MS = 30_000;
+
+/**
+ * Prazo estourado sem resposta da Meta. Tem classe própria porque, num
+ * envio, não é recusa: o chat precisa distinguir para não mandar o
+ * atendente repetir a mensagem nem trocar por template.
+ */
+export class MetaSemResposta extends Error {
+  constructor() {
+    super(
+      "Meta: sem resposta a tempo. Se era um envio, confira a conversa antes de repetir.",
+    );
+    this.name = "MetaSemResposta";
+  }
+}
 
 export function metaConfigurada(): boolean {
   return Boolean(process.env.META_WHATSAPP_TOKEN);
@@ -60,17 +86,32 @@ async function phoneNumberId(): Promise<string> {
   return id;
 }
 
+/** Estouro do AbortSignal.timeout: o fetch rejeita com TimeoutError. */
+function estourouPrazo(e: unknown): boolean {
+  const nome = (e as { name?: string } | null)?.name;
+  return nome === "TimeoutError" || nome === "AbortError";
+}
+
 async function graph<T>(caminho: string, init?: RequestInit): Promise<T> {
   const corpoJson = typeof init?.body === "string";
-  const resposta = await fetch(`${GRAPH}${caminho}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token()}`,
-      ...(corpoJson ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
-    cache: "no-store",
-  });
+  let resposta: Response;
+  try {
+    resposta = await fetch(`${GRAPH}${caminho}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token()}`,
+        ...(corpoJson ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      },
+      cache: "no-store",
+      signal: init?.signal ?? AbortSignal.timeout(TEMPO_GRAPH_MS),
+    });
+  } catch (e) {
+    // Sem resposta não dá para saber se a Meta chegou a enviar: quem tentou
+    // mandar precisa conferir a conversa antes de repetir.
+    if (estourouPrazo(e)) throw new MetaSemResposta();
+    throw e;
+  }
 
   const json = (await resposta.json().catch(() => null)) as T | null;
   if (!resposta.ok) {
@@ -92,7 +133,7 @@ async function graph<T>(caminho: string, init?: RequestInit): Promise<T> {
           erro.error_subcode ? `subcode ${erro.error_subcode}` : null,
         ]
           .filter(Boolean)
-          .join(" — ")
+          .join(" · ")
       : `HTTP ${resposta.status}`;
     throw new Error(`Meta: ${detalhe}`);
   }
@@ -101,9 +142,29 @@ async function graph<T>(caminho: string, init?: RequestInit): Promise<T> {
 
 type RespostaEnvio = { messages?: { id: string }[] };
 
+/** O wamid tem prefixo próprio; o mid do Direct, não. É por ele que a
+ *  resposta citada sabe por qual canal a mensagem passou. */
+export function ehIdWhatsApp(id: string | null | undefined): id is string {
+  return typeof id === "string" && id.startsWith("wamid.");
+}
+
+/** O que vale para qualquer envio de texto ou mídia. */
+export type OpcoesEnvioMeta = {
+  /** wamid da mensagem citada (o "responder" do app). O cliente vê o
+   *  balão da citação; a Meta não mostra se ela foi apagada ou passou do
+   *  armazenamento dela (em geral, 30 dias). */
+  responderA?: string | null;
+};
+
+function contexto(opcoes?: OpcoesEnvioMeta) {
+  const citada = opcoes?.responderA;
+  return ehIdWhatsApp(citada) ? { context: { message_id: citada } } : {};
+}
+
 export async function enviarTextoMeta(
   para: string,
   texto: string,
+  opcoes?: OpcoesEnvioMeta,
 ): Promise<string | null> {
   const pid = await phoneNumberId();
   const r = await graph<RespostaEnvio>(`/${pid}/messages`, {
@@ -113,7 +174,9 @@ export async function enviarTextoMeta(
       to: para,
       type: "text",
       text: { body: texto, preview_url: true },
+      ...contexto(opcoes),
     }),
+    signal: AbortSignal.timeout(TEMPO_ENVIO_MS),
   });
   return r.messages?.[0]?.id ?? null;
 }
@@ -143,6 +206,7 @@ export async function enviarTemplateMeta(
           : {}),
       },
     }),
+    signal: AbortSignal.timeout(TEMPO_ENVIO_MS),
   });
   return r.messages?.[0]?.id ?? null;
 }
@@ -154,23 +218,43 @@ function tipoMidia(mime: string): "image" | "audio" | "video" | "document" {
     : "document";
 }
 
-/** Sobe o arquivo para a Meta e envia. Legenda vale para imagem/vídeo/doc. */
-export async function enviarMidiaMeta(
-  para: string,
-  arquivo: File,
-  legenda?: string,
-): Promise<string | null> {
+/** Sobe o arquivo para a Meta e devolve o id da mídia. */
+async function subirMidiaMeta(arquivo: File): Promise<string> {
   const pid = await phoneNumberId();
-
   const form = new FormData();
   form.append("messaging_product", "whatsapp");
   form.append("file", arquivo, arquivo.name);
   const upload = await graph<{ id: string }>(`/${pid}/media`, {
     method: "POST",
     body: form,
+    signal: AbortSignal.timeout(TEMPO_UPLOAD_MS),
+  }).catch((e: unknown) => {
+    // Upload que estoura o prazo não manda nada ao cliente: é falha comum,
+    // não a dúvida de um envio sem resposta.
+    if (e instanceof MetaSemResposta) {
+      throw new Error("Meta: o arquivo não terminou de subir a tempo.");
+    }
+    throw e;
   });
+  return upload.id;
+}
 
-  const tipo = tipoMidia(arquivo.type);
+/** Envia uma mídia já subida (subirMidiaMeta). Legenda vale para imagem,
+ *  vídeo e documento; no áudio a Meta descarta. */
+async function enviarMidiaPorIdMeta(
+  para: string,
+  midia: { id: string; mime: string; nome: string },
+  legenda?: string,
+  opcoes?: OpcoesEnvioMeta,
+): Promise<string | null> {
+  const pid = await phoneNumberId();
+  const tipo = tipoMidia(midia.mime);
+  // O ogg/opus é a mensagem de voz do WhatsApp: com voice: true chega com o
+  // microfone e a transcrição, não como arquivo de áudio (doc da Meta,
+  // "Audio messages"). Os outros áudios (mp3, m4a) chegam como áudio comum.
+  const voz =
+    tipo === "audio" &&
+    midia.mime.toLowerCase().split(";")[0].trim() === "audio/ogg";
   const r = await graph<RespostaEnvio>(`/${pid}/messages`, {
     method: "POST",
     body: JSON.stringify({
@@ -178,52 +262,32 @@ export async function enviarMidiaMeta(
       to: para,
       type: tipo,
       [tipo]: {
-        id: upload.id,
-        ...(tipo === "document" ? { filename: arquivo.name } : {}),
+        id: midia.id,
+        ...(tipo === "document" ? { filename: midia.nome } : {}),
         ...(legenda && tipo !== "audio" ? { caption: legenda } : {}),
+        ...(voz ? { voice: true } : {}),
       },
+      ...contexto(opcoes),
     }),
+    signal: AbortSignal.timeout(TEMPO_ENVIO_MS),
   });
   return r.messages?.[0]?.id ?? null;
 }
 
-/**
- * Cria o template resumo_diario direto na WABA (Fase 7.2): o gestor não
- * conseguiu pelo WhatsApp Manager, e o token com whatsapp_business_management
- * — o mesmo que LISTA os templates — também pode criá-los. Depois de criado,
- * a Meta ainda precisa APROVAR (o motor só envia template aprovado).
- * Devolve o status que a Meta respondeu (ex.: PENDING) ou lança com a
- * mensagem dela (nome duplicado, permissão faltando…).
- */
-export async function criarTemplateResumoMeta(): Promise<string> {
-  const waba = process.env.META_WABA_ID;
-  if (!waba) throw new Error("META_WABA_ID não configurado.");
-  const corpo =
-    "Resumo Zeve de hoje: {{1}} conta(s) aberta(s), {{2}} ativação(ões) registrada(s), {{3}} venda(s) confirmada(s), {{4}} conversa(s) aguardando 24h+ e {{5}} cliente(s) com giro em risco.";
-  const r = await graph<{ id?: string; status?: string }>(
-    `/${waba}/message_templates`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        name: "resumo_diario",
-        language: "pt_BR",
-        category: "UTILITY",
-        // Se o classificador da Meta discordar da categoria, recategoriza
-        // em vez de recusar a criação inteira.
-        allow_category_change: true,
-        components: [
-          {
-            type: "BODY",
-            text: corpo,
-            // A Meta exige exemplo para cada variável antes de avaliar.
-            example: { body_text: [["3", "2", "5", "4", "7"]] },
-          },
-        ],
-      }),
-    },
+/** Sobe o arquivo para a Meta e envia. Legenda vale para imagem/vídeo/doc. */
+export async function enviarMidiaMeta(
+  para: string,
+  arquivo: File,
+  legenda?: string,
+  opcoes?: OpcoesEnvioMeta,
+): Promise<string | null> {
+  const id = await subirMidiaMeta(arquivo);
+  return enviarMidiaPorIdMeta(
+    para,
+    { id, mime: arquivo.type, nome: arquivo.name },
+    legenda,
+    opcoes,
   );
-  cacheTemplatesMeta = null; // a lista muda; o cache de 5 min não pode esconder
-  return r.status ?? "PENDING";
 }
 
 let cacheTemplatesMeta: {
@@ -278,18 +342,29 @@ export async function listarTemplatesMeta(): Promise<TemplateWhatsapp[]> {
 }
 
 /**
+ * Bucket público da mídia do chat: a recebida no WhatsApp, a cópia dos
+ * anexos do Direct (pasta instagram/) e os anexos das mensagens padrão.
+ */
+export const BUCKET_MIDIA = "midia-whatsapp";
+
+/**
  * Baixa uma mídia recebida (a URL da Meta expira em minutos) e hospeda no
- * bucket público midia-whatsapp do Supabase. Devolve a URL definitiva.
+ * bucket público midia-whatsapp do Supabase. Devolve a URL definitiva, o
+ * tipo e o tamanho em bytes (o cartão do documento mostra; a Meta não manda
+ * o tamanho no webhook).
  */
 export async function hospedarMidiaMeta(
   mediaId: string,
-): Promise<{ url: string; mime: string } | null> {
+): Promise<{ url: string; mime: string; tamanho: number } | null> {
   const meta = await graph<{ url?: string; mime_type?: string }>(`/${mediaId}`);
   if (!meta.url) return null;
 
+  // O prazo vale também para a leitura do corpo: arquivo grande num CDN lento
+  // aborta no meio em vez de prender a função.
   const resposta = await fetch(meta.url, {
     headers: { Authorization: `Bearer ${token()}` },
     cache: "no-store",
+    signal: AbortSignal.timeout(TEMPO_DOWNLOAD_MS),
   });
   if (!resposta.ok) return null;
 
@@ -299,18 +374,19 @@ export async function hospedarMidiaMeta(
     "application/octet-stream";
   const extensao = (mime.split("/")[1] ?? "bin").split(";")[0];
   const caminho = `${mediaId}.${extensao}`;
+  const conteudo = await resposta.arrayBuffer();
 
   const service = createServiceClient();
   const { error } = await service.storage
-    .from("midia-whatsapp")
-    .upload(caminho, await resposta.arrayBuffer(), {
+    .from(BUCKET_MIDIA)
+    .upload(caminho, conteudo, {
       contentType: mime,
       upsert: true,
     });
   if (error) return null;
 
-  const { data } = service.storage.from("midia-whatsapp").getPublicUrl(caminho);
-  return { url: data.publicUrl, mime };
+  const { data } = service.storage.from(BUCKET_MIDIA).getPublicUrl(caminho);
+  return { url: data.publicUrl, mime, tamanho: conteudo.byteLength };
 }
 
 /**

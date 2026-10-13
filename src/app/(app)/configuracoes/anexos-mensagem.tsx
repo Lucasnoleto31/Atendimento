@@ -1,17 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Paperclip, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { classesDoBotao } from "@/components/ui/button";
 import { prepararUploadMensagemPadrao } from "./actions";
 
 /**
- * Anexos de uma mensagem padrão (0060). O arquivo sobe NA HORA da escolha,
- * por URL assinada direto do navegador (server action tem teto de 1MB de
- * corpo — o mesmo motivo do upload do chat), e o formulário só carrega os
- * metadados num campo escondido. Remover um chip tira da lista; o Salvar do
- * formulário é quem grava a lista final.
+ * Anexos de uma mensagem pronta (0060). O arquivo sobe NA HORA da escolha,
+ * por URL assinada direto do navegador (server action tem teto de 1 MB de
+ * corpo, o mesmo motivo do upload do chat), e o formulário só carrega os
+ * metadados num campo escondido. Remover um anexo tira da lista; o Salvar do
+ * formulário é quem grava a lista final, e um reset do formulário devolve a
+ * lista salva.
  */
 
 export type AnexoMensagem = { tipo: string; url: string; nome: string };
@@ -39,6 +41,24 @@ export function AnexosMensagem({
   const [erro, setErro] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // O Cancelar do formulário é um reset, que não conhece este estado: a
+  // lista volta à salva por aqui.
+  useEffect(() => {
+    const form = inputRef.current?.form;
+    if (!form) return;
+    const restaurar = () => {
+      setAnexos(existentes);
+      setErro(null);
+    };
+    form.addEventListener("reset", restaurar);
+    return () => form.removeEventListener("reset", restaurar);
+  }, [existentes]);
+
+  // Mexer na lista conta como mexer no formulário (é o que mostra o
+  // Cancelar): o campo escondido não dispara "input" sozinho.
+  const avisarMudanca = () =>
+    inputRef.current?.dispatchEvent(new Event("input", { bubbles: true }));
+
   const escolher = async (lista: FileList | null) => {
     if (!lista || lista.length === 0) return;
     setErro(null);
@@ -50,12 +70,12 @@ export function AnexosMensagem({
     }
     for (const arquivo of arquivos) {
       if (arquivo.size > MAX_TAMANHO) {
-        setErro(`"${arquivo.name}" passa de 16MB — o WhatsApp não aceita.`);
+        setErro(`“${arquivo.name}” passa de 16 MB, o limite do WhatsApp.`);
         return;
       }
       if (arquivo.type.startsWith("image/") && arquivo.size > MAX_IMAGEM) {
         setErro(
-          `"${arquivo.name}" passa de 5MB — o WhatsApp limita imagem a 5MB.`,
+          `“${arquivo.name}” passa de 5 MB, o limite de imagem do WhatsApp.`,
         );
         return;
       }
@@ -85,6 +105,7 @@ export function AnexosMensagem({
         });
       }
       setAnexos((atuais) => [...atuais, ...novos]);
+      avisarMudanca();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha no upload.");
     } finally {
@@ -94,49 +115,62 @@ export function AnexosMensagem({
   };
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
       <input type="hidden" name="anexos" value={JSON.stringify(anexos)} />
+      <p className="tipo-nota text-texto-2">
+        Anexos{" "}
+        <span className="tabular-nums">
+          {anexos.length} de {MAX_ANEXOS}
+        </span>
+      </p>
 
       {anexos.length > 0 ? (
-        <ul className="flex flex-wrap gap-0.5">
+        <ul className="flex flex-wrap gap-1">
           {anexos.map((anexo) => (
             <li
               key={anexo.url}
-              className="inline-flex h-[24px] max-w-[220px] items-center gap-0.5 rounded-sm bg-neutral-100 px-1 text-xs text-neutral-800"
+              className="tipo-nota inline-flex h-[32px] max-w-full items-center gap-0.5 rounded-chip bg-cartao pr-0.5 pl-1 text-tinta"
             >
               <Paperclip
-                size={12}
-                strokeWidth={1.5}
+                size={14}
+                strokeWidth={1.75}
                 aria-hidden
-                className="shrink-0 text-neutral-400"
+                className="shrink-0 text-texto-2"
               />
-              <span className="truncate">{anexo.nome}</span>
+              <span className="min-w-0 truncate">{anexo.nome}</span>
               <button
                 type="button"
                 aria-label={`Remover anexo ${anexo.nome}`}
-                onClick={() =>
+                onClick={() => {
                   setAnexos((atuais) =>
                     atuais.filter((a) => a.url !== anexo.url),
-                  )
-                }
-                className="shrink-0 rounded-sm text-neutral-400 hover:text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                  );
+                  avisarMudanca();
+                }}
+                className="relative inline-flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-celula text-texto-2 transition-colors duration-[120ms] hover:bg-realce hover:text-erro focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-tinta pointer-coarse:after:absolute pointer-coarse:after:-inset-[10px]"
               >
-                <X size={12} strokeWidth={2} aria-hidden />
+                <X size={14} strokeWidth={2} aria-hidden />
               </button>
             </li>
           ))}
         </ul>
       ) : null}
 
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <label
           htmlFor={`anexos-${idBase}`}
-          className={cn(
-            "inline-flex h-[32px] cursor-pointer items-center gap-0.5 rounded-md border border-neutral-300 bg-neutral-0 px-1 text-xs font-medium text-neutral-600 transition-colors duration-[120ms] hover:bg-neutral-100 hover:text-neutral-800",
-            subindo && "cursor-wait opacity-60",
-          )}
+          className={classesDoBotao({
+            variant: "secondary",
+            size: "sm",
+            className: cn(
+              // O campo de arquivo é invisível: o anel de foco dele
+              // aparece no botão que o representa.
+              "cursor-pointer has-[+input:focus-visible]:outline-2 has-[+input:focus-visible]:outline-offset-2 has-[+input:focus-visible]:outline-tinta",
+              (subindo || anexos.length >= MAX_ANEXOS) &&
+                "pointer-events-none opacity-60",
+            ),
+          })}
         >
-          <Paperclip size={14} strokeWidth={1.5} aria-hidden />
           {subindo ? "Enviando…" : "Anexar arquivo"}
         </label>
         <input
@@ -144,17 +178,17 @@ export function AnexosMensagem({
           id={`anexos-${idBase}`}
           type="file"
           multiple
-          disabled={subindo}
+          disabled={subindo || anexos.length >= MAX_ANEXOS}
           onChange={(e) => void escolher(e.target.files)}
           className="sr-only"
         />
-        <span className="text-xs text-neutral-400">
-          sai junto ao usar a mensagem no chat
+        <span className="tipo-nota text-texto-2">
+          Saem junto quando a mensagem é usada no chat.
         </span>
       </div>
 
       {erro ? (
-        <p role="alert" className="text-xs text-danger">
+        <p role="alert" className="tipo-nota text-erro">
           {erro}
         </p>
       ) : null}

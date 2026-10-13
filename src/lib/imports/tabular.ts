@@ -11,12 +11,24 @@ export async function lerTabela(
   nomeArquivo: string,
   dados: ArrayBuffer,
 ): Promise<Aba[]> {
-  if (/\.xlsx?$|\.xlsm$/i.test(nomeArquivo)) {
+  if (/\.xls[xm]$/i.test(nomeArquivo)) {
     return lerExcel(dados);
   }
 
-  const texto = new TextDecoder("utf-8").decode(dados);
-  return [{ nome: "csv", linhas: lerCsv(texto) }];
+  return [{ nome: "csv", linhas: lerCsv(decodificarTexto(dados)) }];
+}
+
+/**
+ * CSV salvo pelo Excel no Windows sai em Windows-1252, não em UTF-8: lido
+ * como UTF-8, "José" virava "Jos�" no nome do contato. Tenta UTF-8 estrito
+ * e, se o arquivo não for UTF-8 válido, lê como Windows-1252.
+ */
+function decodificarTexto(dados: ArrayBuffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(dados);
+  } catch {
+    return new TextDecoder("windows-1252").decode(dados);
+  }
 }
 
 async function lerExcel(dados: ArrayBuffer): Promise<Aba[]> {
@@ -131,29 +143,7 @@ export const COLUNAS_TELEFONE = [
   "fone",
   "telefone_1",
 ];
-// A conta canônica é a COM dígito: é ela que aparece nos contratos diários.
-// cd_conta_sem_digito fica de fora de propósito — não casa com nada.
-export const COLUNAS_CONTA = [
-  "cd_conta_com_digito",
-  "conta",
-  "conta_sinacor",
-  "numero_conta",
-  "nr_conta",
-  "num_conta",
-  "codigo_conta",
-];
-export const COLUNAS_LOTES = [
-  "lotes_operados",
-  "lotes",
-  "quantidade",
-  "qtd",
-  "volume",
-  "contratos",
-];
-export const COLUNAS_DATA = ["data", "referencia", "data_referencia", "dt"];
-
-/** Só dígitos — contas vêm como número no Excel e como texto no CSV. */
-export function normalizarConta(bruto: string): string | null {
-  const d = bruto.replace(/\D/g, "");
-  return d.length >= 3 ? d : null;
-}
+export const COLUNAS_EMAIL = ["email", "e_mail"];
+/** A campanha de cada linha, que vira a etiqueta do contato quando ninguém
+ *  escolhe uma no formulário (lib/imports/etiqueta.ts). */
+export const COLUNAS_CAMPANHA = ["campanha", "origem", "fonte", "utm_campaign"];

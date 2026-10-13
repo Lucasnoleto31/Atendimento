@@ -1,17 +1,88 @@
-/** +55 11 98842-1170 a partir de 5511988421170. */
+/**
+ * Códigos de país de um e de dois dígitos (zonas do E.164 da UIT); o resto
+ * do mundo usa três. Serve só para separar o código do número na exibição.
+ */
+const DDI_1 = new Set(["1", "7"]);
+const DDI_2 = new Set([
+  "20",
+  "27",
+  "30",
+  "31",
+  "32",
+  "33",
+  "34",
+  "36",
+  "39",
+  "40",
+  "41",
+  "43",
+  "44",
+  "45",
+  "46",
+  "47",
+  "48",
+  "49",
+  "51",
+  "52",
+  "53",
+  "54",
+  "55",
+  "56",
+  "57",
+  "58",
+  "60",
+  "61",
+  "62",
+  "63",
+  "64",
+  "65",
+  "66",
+  "81",
+  "82",
+  "84",
+  "86",
+  "90",
+  "91",
+  "92",
+  "93",
+  "94",
+  "95",
+  "98",
+]);
+
+/**
+ * +55 11 98842-1170 a partir de 5511988421170.
+ *
+ * Só é brasileiro o que começa com 55 e tem 12 ou 13 dígitos, que é o que
+ * o normalizarTelefone grava. O wa_id de quem escreve de fora chega com o
+ * código do país dele ("14155552671"), e tratar isso como DDD inventava um
+ * "+55 14 15555-2671". Estrangeiro sai como +código e o número em blocos,
+ * do fim para o começo (4, depois 3 em 3), sem fingir o formato do país.
+ */
 export function formatarTelefone(e164: string) {
   const d = e164.replace(/\D/g, "");
-  const nacional = d.startsWith("55") ? d.slice(2) : d;
-  const ddd = nacional.slice(0, 2);
-  const numero = nacional.slice(2);
+  if (!d) return e164;
 
-  if (numero.length === 9) {
-    return `+55 ${ddd} ${numero.slice(0, 5)}-${numero.slice(5)}`;
+  if (d.startsWith("55") && (d.length === 12 || d.length === 13)) {
+    const ddd = d.slice(2, 4);
+    const numero = d.slice(4);
+    const corte = numero.length === 9 ? 5 : 4;
+    return `+55 ${ddd} ${numero.slice(0, corte)}-${numero.slice(corte)}`;
   }
-  if (numero.length === 8) {
-    return `+55 ${ddd} ${numero.slice(0, 4)}-${numero.slice(4)}`;
+
+  const tamanhoDdi = DDI_1.has(d.slice(0, 1))
+    ? 1
+    : DDI_2.has(d.slice(0, 2))
+      ? 2
+      : 3;
+  if (d.length <= tamanhoDdi + 4) return `+${d}`;
+  const ddi = d.slice(0, tamanhoDdi);
+  const resto = d.slice(tamanhoDdi);
+  const blocos = [resto.slice(-4)];
+  for (let fim = resto.length - 4; fim > 0; fim -= 3) {
+    blocos.unshift(resto.slice(Math.max(0, fim - 3), fim));
   }
-  return e164;
+  return `+${ddi} ${blocos.join(" ")}`;
 }
 
 /** Centavos para R$ 1.340,00. */
@@ -92,6 +163,30 @@ export function formatarDataCurta(valor: string | Date | null | undefined) {
 /** 18/08, 14:32 */
 export function formatarDataHora(valor: string | Date | null | undefined) {
   return valor ? diaHora.format(instante(valor)) : "—";
+}
+
+const diaHoraCompleta = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: FUSO,
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/**
+ * 07/10/2026 10:05, em Brasília e com o ano: para arquivo exportado, que é
+ * lido fora da tela e cruza a virada do ano. Sem a vírgula do Intl, para o
+ * Excel brasileiro ler a célula como data e hora.
+ */
+export function formatarDataHoraCompleta(
+  valor: string | Date | null | undefined,
+) {
+  if (!valor) return "";
+  const partes = diaHoraCompleta.formatToParts(instante(valor));
+  const pegar = (tipo: Intl.DateTimeFormatPartTypes) =>
+    partes.find((p) => p.type === tipo)?.value ?? "";
+  return `${pegar("day")}/${pegar("month")}/${pegar("year")} ${pegar("hour")}:${pegar("minute")}`;
 }
 
 /** Hora no dia de hoje, data nos dias anteriores — para listas densas. */

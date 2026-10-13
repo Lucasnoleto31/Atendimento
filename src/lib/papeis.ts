@@ -6,27 +6,30 @@
  * base inteira (policies, gates, distribuição) compara com esse literal e
  * renomear o enum quebraria tudo por um ganho cosmético. O rótulo é o que
  * muda.
+ *
+ * Os detalhes descrevem o que cada papel vê no chat, e quem decide isso é o
+ * RLS do banco (0067 e 0068), não a tela: mudar o texto não muda o acesso.
  */
 export const PAPEIS = [
   {
     papel: "atendente",
     rotulo: "Atendente",
-    detalhe: "só os próprios leads e conversas",
+    detalhe: "só as conversas em que é o responsável",
   },
   {
     papel: "vendedor",
     rotulo: "Assessor",
-    detalhe: "a própria carteira, com custódia e comissão",
+    detalhe: "as próprias conversas e as sem responsável",
   },
   {
     papel: "gestor",
     rotulo: "Gestor",
-    detalhe: "equipe inteira, redistribui e aprova",
+    detalhe: "todas as conversas, redistribui e aprova",
   },
   {
     papel: "admin",
-    rotulo: "Admin / Financeiro",
-    detalhe: "usuários, integrações, fechamento",
+    rotulo: "Admin",
+    detalhe: "todas as conversas, usuários e integrações",
   },
   {
     papel: "compliance",
@@ -53,6 +56,20 @@ export function ehGestao(papel: string | null | undefined): boolean {
 /** Quem enxerga a base inteira (gestão + compliance). */
 export function veTudo(papel: string | null | undefined): boolean {
   return ehGestao(papel) || papel === "compliance";
+}
+
+/**
+ * Onde a entrada "Administração" do menu leva cada papel: a gestão ao
+ * índice (/admin), o compliance direto ao Log de acesso (é tudo o que ele vê
+ * ali; um índice de uma linha seria um toque à toa). null: o papel não tem
+ * a entrada.
+ */
+export function entradaDaAdministracao(
+  papel: string | null | undefined,
+): string | null {
+  if (ehGestao(papel)) return "/admin";
+  if (papel === "compliance") return "/admin/acessos";
+  return null;
 }
 
 export function somenteLeitura(papel: string | null | undefined): boolean {

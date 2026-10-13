@@ -3,10 +3,16 @@
  *
  *   node --env-file=.env.local scripts/usuario.mjs <email> "<Nome>" <papel>
  *
- * Papéis: admin | gestor | vendedor (assessor) | atendente | compliance
+ * Papéis (o que cada um vê no chat; quem decide é o RLS do banco):
+ *   admin       todas as conversas, usuários e integrações
+ *   gestor      todas as conversas, redistribui e aprova
+ *   vendedor    rótulo "Assessor": as próprias conversas e as sem responsável
+ *   atendente   só as conversas em que é o responsável
+ *   compliance  vê tudo e exporta, não edita nada
  *
  * Se o usuário não existir, cria com senha aleatória e imprime a senha UMA vez.
- * Se já existir, apenas atualiza o papel.
+ * Se já existir, apenas atualiza o papel. No primeiro acesso de cada aparelho
+ * o sistema manda um código para o e-mail, então o e-mail tem de ser real.
  * Precisa de SUPABASE_SERVICE_ROLE_KEY preenchida — a chave ignora RLS, então
  * este script roda só na sua máquina, nunca no navegador.
  */
@@ -85,4 +91,7 @@ if (error) {
 
 console.log(`Usuário criado: ${email} (${papel})`);
 console.log(`Senha temporária: ${senha}`);
-console.log("Anote agora — ela não é exibida de novo. Troque no primeiro acesso.");
+console.log("Anote agora: ela não é exibida de novo.");
+console.log(
+  'No primeiro acesso chega um código no e-mail. Para trocar a senha, use "Esqueci a senha" na tela de entrada.',
+);

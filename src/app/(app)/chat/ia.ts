@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
+import { podeVerLead } from "@/lib/privacidade";
 
 const MODELO = "claude-opus-5";
 
@@ -12,22 +13,36 @@ function clienteIa(): Anthropic | null {
 }
 
 const ERRO_SEM_CHAVE =
-  "IA ainda não configurada — falta a chave ANTHROPIC_API_KEY nas variáveis de ambiente.";
+  "A IA não está configurada: falta a chave ANTHROPIC_API_KEY nas variáveis de ambiente.";
 
 function traduzirErro(e: unknown): string {
   if (e instanceof Anthropic.AuthenticationError) {
-    return "Chave da IA inválida ou revogada — confira a ANTHROPIC_API_KEY.";
+    return "A chave da IA é inválida ou foi revogada. Confira a ANTHROPIC_API_KEY.";
   }
   if (e instanceof Anthropic.RateLimitError) {
-    return "Muitos pedidos à IA ao mesmo tempo — espere alguns segundos e tente de novo.";
+    return "Muitos pedidos à IA ao mesmo tempo. Espere alguns segundos e tente de novo.";
   }
   if (e instanceof Anthropic.APIConnectionError) {
-    return "Sem conexão com a IA agora — tente de novo em instantes.";
+    return "A IA não respondeu. Confira a internet e tente de novo.";
   }
   if (e instanceof Anthropic.APIError) {
     return `A IA respondeu com erro: ${e.message}`;
   }
-  return "Não deu para falar com a IA agora — tente de novo.";
+  return "A IA não respondeu. Tente de novo.";
+}
+
+/**
+ * A privacidade entre a equipe (Administração > Privacidade) vale também
+ * para a IA: o resumo e a sugestão leem a conversa, e quem não vê o dono
+ * dela recebe a mesma resposta do contato que não existe. Regra que não
+ * carregou é erro, não passe livre (a mesma guarda de chat/actions.ts).
+ */
+async function acessoAoLead(leadId: string): Promise<string | null> {
+  try {
+    return (await podeVerLead(leadId)) ? null : "Contato não encontrado.";
+  } catch {
+    return "Não deu para conferir o acesso a esta conversa. Tente de novo.";
+  }
 }
 
 function extrairTexto(resposta: Anthropic.Message): string {
@@ -70,16 +85,17 @@ export async function sugerirResposta(
   leadId: string,
 ): Promise<{ sugestao?: string; erro?: string }> {
   const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!perfil) return { erro: "Sessão expirada. Entre de novo." };
 
   const ia = clienteIa();
   if (!ia) return { erro: ERRO_SEM_CHAVE };
 
   const supabase = await createClient();
-  const [{ data: lead }, { data: interacoes }] = await Promise.all([
+  const [negado, { data: lead }, { data: interacoes }] = await Promise.all([
+    acessoAoLead(leadId),
     supabase
       .from("leads")
-      .select("nome, entrada_motivo, observacao, customer_id")
+      .select("nome, observacao")
       .eq("id", leadId)
       .maybeSingle(),
     supabase
@@ -91,7 +107,8 @@ export async function sugerirResposta(
       .limit(30),
   ]);
 
-  if (!lead) return { erro: "Lead não encontrado." };
+  if (negado) return { erro: negado };
+  if (!lead) return { erro: "Contato não encontrado." };
   if (!interacoes || interacoes.length === 0) {
     return {
       erro: "Ainda não há conversa suficiente para sugerir uma resposta.",
@@ -100,10 +117,6 @@ export async function sugerirResposta(
 
   const contexto = [
     `Nome do lead: ${lead.nome}`,
-    lead.customer_id
-      ? "Situação: já é cliente da corretora."
-      : "Situação: ainda não é cliente.",
-    lead.entrada_motivo ? `Como chegou: ${lead.entrada_motivo}` : null,
     lead.observacao
       ? `Observações internas da equipe: ${lead.observacao}`
       : null,
@@ -143,10 +156,10 @@ export async function sugerirResposta(
       return { erro: "A IA preferiu não sugerir resposta para esta conversa." };
     }
     if (truncou(resposta)) {
-      return { erro: "A sugestão veio cortada — tente de novo." };
+      return { erro: "A sugestão veio cortada. Tente de novo." };
     }
     const sugestao = extrairTexto(resposta);
-    if (!sugestao) return { erro: "A IA não devolveu texto — tente de novo." };
+    if (!sugestao) return { erro: "A IA não devolveu texto. Tente de novo." };
     return { sugestao };
   } catch (e) {
     return { erro: traduzirErro(e) };
@@ -170,16 +183,17 @@ export async function resumirConversa(
   leadId: string,
 ): Promise<{ resumo?: string; erro?: string }> {
   const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!perfil) return { erro: "Sessão expirada. Entre de novo." };
 
   const ia = clienteIa();
   if (!ia) return { erro: ERRO_SEM_CHAVE };
 
   const supabase = await createClient();
-  const [{ data: lead }, { data: interacoes }] = await Promise.all([
+  const [negado, { data: lead }, { data: interacoes }] = await Promise.all([
+    acessoAoLead(leadId),
     supabase
       .from("leads")
-      .select("nome, customer_id, observacao")
+      .select("nome, observacao")
       .eq("id", leadId)
       .maybeSingle(),
     supabase
@@ -191,7 +205,8 @@ export async function resumirConversa(
       .limit(40),
   ]);
 
-  if (!lead) return { erro: "Lead não encontrado." };
+  if (negado) return { erro: negado };
+  if (!lead) return { erro: "Contato não encontrado." };
   if (!interacoes || interacoes.length === 0) {
     return { erro: "Ainda não há conversa para resumir." };
   }
@@ -219,7 +234,7 @@ export async function resumirConversa(
       messages: [
         {
           role: "user",
-          content: `Lead: ${lead.nome}${lead.customer_id ? " (já é cliente)" : ""}${
+          content: `Lead: ${lead.nome}${
             lead.observacao ? `\nObservação interna: ${lead.observacao}` : ""
           }\n\nConversa (da mais antiga para a mais recente):\n${historico}\n\nResuma.`,
         },
@@ -229,9 +244,9 @@ export async function resumirConversa(
       return { erro: "A IA preferiu não resumir esta conversa." };
     }
     if (truncou(resposta))
-      return { erro: "O resumo veio cortado — tente de novo." };
+      return { erro: "O resumo veio cortado. Tente de novo." };
     const resumo = extrairTexto(resposta);
-    if (!resumo) return { erro: "A IA não devolveu texto — tente de novo." };
+    if (!resumo) return { erro: "A IA não devolveu texto. Tente de novo." };
     return { resumo };
   } catch (e) {
     return { erro: traduzirErro(e) };
@@ -254,13 +269,13 @@ export async function corrigirTexto(
   texto: string,
 ): Promise<{ corrigido?: string; erro?: string }> {
   const perfil = await perfilAtual();
-  if (!perfil) return { erro: "Sessão expirada. Entre novamente." };
+  if (!perfil) return { erro: "Sessão expirada. Entre de novo." };
 
   const limpo = texto.trim();
   if (!limpo) return { erro: "Escreva algo antes de corrigir." };
   if (limpo.length > 4000) {
     return {
-      erro: "Texto longo demais para corrigir de uma vez (máx. 4000 caracteres).",
+      erro: "Texto longo demais para corrigir de uma vez: o limite é 4.000 caracteres.",
     };
   }
 
@@ -279,10 +294,10 @@ export async function corrigirTexto(
       return { erro: "A IA preferiu não processar este texto." };
     }
     if (truncou(resposta)) {
-      return { erro: "A correção veio cortada — tente com um texto menor." };
+      return { erro: "A correção veio cortada. Tente com um texto menor." };
     }
     const corrigido = extrairTexto(resposta);
-    if (!corrigido) return { erro: "A IA não devolveu texto — tente de novo." };
+    if (!corrigido) return { erro: "A IA não devolveu texto. Tente de novo." };
     return { corrigido };
   } catch (e) {
     return { erro: traduzirErro(e) };

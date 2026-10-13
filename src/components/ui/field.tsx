@@ -1,5 +1,11 @@
 import { cn } from "@/lib/utils";
+import { AJUDA, CAMPO_BASE, ERRO_CAMPO, ROTULO } from "@/components/app/form-styles";
 
+/**
+ * Campo de texto com rótulo sempre visível em cima, ajuda e erro embaixo
+ * (o erro perto do problema, kit bloco 4). O erro liga aria-invalid e
+ * aria-describedby; a borda vira a semântica de erro.
+ */
 export function Field({
   id,
   label,
@@ -18,27 +24,23 @@ export function Field({
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium text-neutral-800">
+      <label htmlFor={id} className={ROTULO}>
         {label}
       </label>
       <input
         id={id}
         aria-invalid={erro ? true : undefined}
         aria-describedby={[ajudaId, erroId].filter(Boolean).join(" ") || undefined}
-        className={cn(
-          "h-[40px] w-full rounded-md border bg-neutral-0 px-1.5 text-base text-neutral-800 transition-colors duration-[120ms] placeholder:text-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500",
-          erro ? "border-danger" : "border-neutral-300",
-          className,
-        )}
+        className={cn(CAMPO_BASE, "w-full text-base", className)}
         {...props}
       />
       {ajuda ? (
-        <p id={ajudaId} className="text-xs text-neutral-600">
+        <p id={ajudaId} className={AJUDA}>
           {ajuda}
         </p>
       ) : null}
       {erro ? (
-        <p id={erroId} className="text-xs text-danger">
+        <p id={erroId} className={ERRO_CAMPO}>
           {erro}
         </p>
       ) : null}
