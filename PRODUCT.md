@@ -39,8 +39,8 @@ WhatsApp Business, feito para a mesa da Zeve.
   conversa sem dono. No compositor: ⌘Enter (Ctrl+Enter fora do Mac) envia e resolve, Esc volta
   o foco para a fila. Em qualquer tela: ⌘K (Ctrl+K) abre a paleta global (pessoa, área ou
   comando da tela) e Alt+1 a Alt+4 (⌘1 a ⌘4 no Mac) trocam de área.
-- Entrada: senha e, em aparelho novo, código de 6 dígitos no e-mail; o aparelho fica lembrado
-  por 30 dias.
+- Entrada: e-mail e senha, sem segundo passo. "Esqueci a senha" manda um código de 6 dígitos
+  no e-mail.
 - Banco Supabase em São Paulo; função na Vercel em São Paulo.
 
 ## Capabilities and Constraints

@@ -2,17 +2,17 @@
 
 import { after } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { enviarCodigoPorEmail } from "@/lib/email";
+import { enviarCodigoNovaSenha } from "@/lib/email";
 import { registrarAcesso } from "@/lib/auditoria";
 import { destinoSeguro } from "@/lib/rotas";
 import {
   contarRecentes,
   ipDoCliente,
   MAX_FALHAS,
+  MENSAGEM_MUITAS_TENTATIVAS,
   reservarPedidoDeRecuperacao,
   type TetoRecuperacao,
 } from "../freio";
-import { MENSAGEM_FALHA } from "../emissao";
 import { urlEntrar } from "../caminhos";
 
 export type EstadoEsqueci = { erro?: string; ir?: string };
@@ -47,9 +47,8 @@ const BARRADO: Record<TetoRecuperacao, { erro: string; motivo: string }> = {
  * Com a conferência travada (5 códigos errados em 15 min pelo e-mail ou
  * pelo IP, as chaves de reservarTentativaDeCodigo), o código novo seria
  * recusado na tela da senha nova: não sai e-mail nem se grava pedido até a
- * trava passar, como em emitirCodigo. A resposta não revela conta: a tela
- * da senha nova grava a linha CODIGO para qualquer e-mail digitado, antes de
- * conferir o código.
+ * trava passar. A resposta não revela conta: a tela da senha nova grava a
+ * linha CODIGO para qualquer e-mail digitado, antes de conferir o código.
  */
 export async function pedirCodigoSenha(
   _estado: EstadoEsqueci,
@@ -64,11 +63,11 @@ export async function pedirCodigoSenha(
 
   const ip = await ipDoCliente();
   // Antes da reserva: pedido barrado aqui não gasta vaga nos tetos acima.
-  // Sem linha no Log de acesso, como em emitirCodigo: a trava aparece lá
-  // quando a conferência barra. Banco fora do ar não segura o pedido.
+  // Sem linha no Log de acesso: a trava aparece lá quando a conferência
+  // barra. Banco fora do ar não segura o pedido.
   const erros = await contarRecentes("CODIGO", { email, ip });
   if (erros !== null && erros >= MAX_FALHAS) {
-    return { erro: MENSAGEM_FALHA.muitas_tentativas };
+    return { erro: MENSAGEM_MUITAS_TENTATIVAS };
   }
 
   const reserva = await reservarPedidoDeRecuperacao(email, ip);
@@ -132,7 +131,7 @@ async function mandarCodigoDeNovaSenha(email: string, ip: string) {
   }
 
   try {
-    await enviarCodigoPorEmail(email, codigo, "nova_senha");
+    await enviarCodigoNovaSenha(email, codigo);
     await auditar(data.user?.id ?? null, { email, ip });
   } catch (erro) {
     console.error(

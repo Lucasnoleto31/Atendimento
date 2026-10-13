@@ -338,8 +338,7 @@ export async function trocarSenha(
   // A troca pelo admin encerra TODAS as sessões da pessoa no Auth, a deste
   // aparelho também (o UpdatePassword do supabase/auth sem sessão faz
   // Logout de tudo). Os outros aparelhos saem por isso; este entra de novo
-  // com a senha nova, e os cookies da sessão nova saem nesta resposta. O
-  // aparelho continua confirmado: o cookie dele é da pessoa, não da sessão.
+  // com a senha nova, e os cookies da sessão nova saem nesta resposta.
   const { error: erroEntrada } = await supabase.auth.signInWithPassword({
     email,
     password: nova,

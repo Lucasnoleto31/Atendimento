@@ -51,8 +51,11 @@ export const ROTULO_ACAO: Record<string, string> = {
   resumo_gestor_falha: "resumo do gestor falhou",
   resetou_2fa: "resetou o 2FA de alguém",
   resetou_senha: "gerou senha nova para alguém",
+  // Só linhas antigas: o código de acesso por e-mail saiu em 10/2026, e o
+  // rótulo fica para o log de antes continuar legível.
   aparelho_confirmado: "confirmou um aparelho novo",
-  codigo_login_bloqueado: "código de acesso bloqueado",
+  // Ainda gravada pela tela de nova senha (além das linhas antigas do login).
+  codigo_login_bloqueado: "palpites de código bloqueados",
   recuperacao_pedida: "pediu código de nova senha",
   recuperacao_bloqueada: "pedido de nova senha bloqueado",
   senha_redefinida: "criou senha nova pelo e-mail",

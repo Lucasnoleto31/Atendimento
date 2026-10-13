@@ -28,8 +28,8 @@ const nextConfig: NextConfig = {
   // string segue junto (/hoje?lead=<id> vira /chat?lead=<id>). Temporários
   // (307) enquanto a versão anterior puder voltar pelo "Promote" da Vercel:
   // um 308 fica gravado no navegador, e com a versão antiga de volta /leads/<id>
-  // cairia no /contatos (404 lá) e /entrar/2fa entraria em laço com o
-  // /entrar/codigo. Depois de a versão nova se firmar, dá para virar 308.
+  // cairia no /contatos (404 lá). Depois de a versão nova se firmar, dá para
+  // virar 308.
   async redirects() {
     return [
       { source: "/leads", destination: "/contatos", permanent: false },
@@ -45,14 +45,15 @@ const nextConfig: NextConfig = {
         destination: "/chat",
         permanent: false,
       })),
-      // A tela de cadastro do app autenticador saiu; o segundo passo do
-      // login agora é o código por e-mail. Favorito e aba antiga caem nele
-      // (o ?proximo= vai junto).
-      {
-        source: "/entrar/2fa",
-        destination: "/entrar/codigo",
+      // Segundos passos que já existiram no login (app autenticador, depois
+      // código por e-mail) e saíram: hoje a entrada é só e-mail e senha.
+      // Favorito e aba antiga caem no login (o ?proximo= vai junto); quem já
+      // está dentro, o middleware leva ao destino.
+      ...["/entrar/2fa", "/entrar/codigo"].map((source) => ({
+        source,
+        destination: "/entrar",
         permanent: false,
-      },
+      })),
       // Configurações virou parte da Administração (09/10/2026: uma entrada
       // só no menu). A query vai junto: /configuracoes?abrir=etiqueta:nova
       // abre o editor na subpágina certa. Temporário (307) de propósito: a

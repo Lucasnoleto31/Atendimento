@@ -11,8 +11,8 @@ equipe e o log de acesso.
 
 - **Next.js 16** (App Router, Server Actions) — aplicação e API em um só deploy.
 - **Supabase** — Postgres com RLS, Auth, Storage e Realtime.
-- **Resend** — e-mail do código de 6 dígitos da entrada (pedido uma vez por
-  aparelho a cada 30 dias) e da recuperação de senha.
+- **Resend** — e-mail do código de 6 dígitos da recuperação de senha e do
+  aviso de senha trocada.
 - **Meta WhatsApp Cloud API** e **API do Instagram** (Direct) — envio e
   recebimento direto, sem intermediário.
 - **Vercel** — função na região `gru1` (São Paulo), a mesma do Supabase

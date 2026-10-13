@@ -17,7 +17,7 @@ export default async function EntrarPage({
     <Moldura
       titulo="Que bom te ver de novo"
       descricao="Entre para atender as conversas da equipe."
-      rodape="Quem cria as contas é a administração. Em aparelho novo, depois da senha, chega um código no seu e-mail."
+      rodape="Quem cria as contas é a administração."
     >
       <LoginForm proximo={proximo} />
     </Moldura>

@@ -1,41 +1,28 @@
-import { CODIGO_VALIDADE_MS } from "@/lib/codigo-login";
+import { CODIGO_VALIDADE_MS } from "@/lib/codigo-recuperacao";
 import { FUSO } from "@/lib/format";
 
 /**
- * E-mails do login (código de acesso e código de nova senha) e o aviso de
- * senha trocada, enviados pelo Resend direto pela API HTTP: um POST só, sem
- * pacote a mais no bundle.
+ * E-mails do login (código de nova senha) e o aviso de senha trocada,
+ * enviados pelo Resend direto pela API HTTP: um POST só, sem pacote a mais
+ * no bundle.
  *
  * Sem RESEND_API_KEY fora de produção o e-mail não sai e o código vai para o
- * console do servidor, para testar o login na máquina de desenvolvimento.
+ * console do servidor, para testar o fluxo na máquina de desenvolvimento.
  * Em produção, sem a chave, o envio do código falha com erro claro: código
  * que "saiu" sem sair deixaria a pessoa esperando um e-mail que nunca chega.
  * O aviso de senha trocada não tem ninguém esperando: sem a chave, ele só
  * vai para o console, em qualquer ambiente.
  */
 
-export type ModeloCodigo = "acesso" | "nova_senha";
-
 const RESEND_URL = "https://api.resend.com/emails";
 const PRAZO_ENVIO_MS = 10_000;
 const MINUTOS = Math.round(CODIGO_VALIDADE_MS / 60_000);
 
-const MODELOS: Record<
-  ModeloCodigo,
-  { assunto: string; uso: string; fecho: string }
-> = {
-  acesso: {
-    assunto: "Seu código de acesso",
-    uso: "Digite este código na tela de entrada do Zeve Atendimento.",
-    fecho:
-      "Se não foi você que tentou entrar, alguém pode estar com a sua senha. Troque a senha em \"Esqueci a senha\", na tela de entrada.",
-  },
-  nova_senha: {
-    assunto: "Código para criar uma nova senha",
-    uso: "Digite este código na tela de nova senha do Zeve Atendimento.",
-    fecho:
-      "Se você não pediu uma senha nova, ignore este e-mail. A sua senha continua a mesma.",
-  },
+const MODELO_NOVA_SENHA = {
+  assunto: "Código para criar uma nova senha",
+  uso: "Digite este código na tela de nova senha do Zeve Atendimento.",
+  fecho:
+    "Se você não pediu uma senha nova, ignore este e-mail. A sua senha continua a mesma.",
 };
 
 function escapar(texto: string): string {
@@ -80,8 +67,8 @@ ${linhas}
 </html>`;
 }
 
-function html(modelo: ModeloCodigo, codigo: string): string {
-  const m = MODELOS[modelo];
+function html(codigo: string): string {
+  const m = MODELO_NOVA_SENHA;
   return pagina(
     m.assunto,
     `${linha(escapar(m.uso), `padding:8px 24px 0 24px;${TEXTO}`)}
@@ -95,8 +82,8 @@ ${linha(escapar(m.fecho), `padding:16px 24px 24px 24px;border-top:1px solid #e7e
   );
 }
 
-function textoPuro(modelo: ModeloCodigo, codigo: string): string {
-  const m = MODELOS[modelo];
+function textoPuro(codigo: string): string {
+  const m = MODELO_NOVA_SENHA;
   return [
     "Zeve Atendimento",
     "",
@@ -111,13 +98,13 @@ function textoPuro(modelo: ModeloCodigo, codigo: string): string {
 }
 
 /**
- * Manda o código para `para`. Lança erro quando o e-mail não sai, para quem
- * chamou decidir o que dizer na tela. A mensagem do erro nunca leva o código.
+ * Manda o código de nova senha para `para`. Lança erro quando o e-mail não
+ * sai, para quem chamou decidir o que dizer na tela. A mensagem do erro
+ * nunca leva o código.
  */
-export async function enviarCodigoPorEmail(
+export async function enviarCodigoNovaSenha(
   para: string,
   codigo: string,
-  modelo: ModeloCodigo,
 ): Promise<void> {
   const chave = process.env.RESEND_API_KEY;
 
@@ -128,16 +115,16 @@ export async function enviarCodigoPorEmail(
       );
     }
     console.warn(
-      `[email] RESEND_API_KEY vazia, e-mail não enviado. Código (${modelo}) para ${para}: ${codigo}`,
+      `[email] RESEND_API_KEY vazia, e-mail não enviado. Código (nova senha) para ${para}: ${codigo}`,
     );
     return;
   }
 
   await enviarPeloResend(chave, {
     para,
-    assunto: MODELOS[modelo].assunto,
-    html: html(modelo, codigo),
-    texto: textoPuro(modelo, codigo),
+    assunto: MODELO_NOVA_SENHA.assunto,
+    html: html(codigo),
+    texto: textoPuro(codigo),
   });
 }
 

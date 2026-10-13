@@ -7,15 +7,15 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { destinoSeguro } from "@/lib/rotas";
 import { registrarAcesso } from "@/lib/auditoria";
 import {
-  APARELHO_VALIDADE_MS,
-  assinarAparelho,
   CODIGO_VALIDADE_MS,
-  COOKIE_APARELHO,
-  COOKIE_CODIGO,
   normalizarCodigo,
-  opcoesCookie,
-} from "@/lib/codigo-login";
-import { ipDoCliente, limpar, reservarTentativaDeCodigo } from "../freio";
+} from "@/lib/codigo-recuperacao";
+import {
+  ipDoCliente,
+  limpar,
+  MENSAGEM_MUITAS_TENTATIVAS,
+  reservarTentativaDeCodigo,
+} from "../freio";
 import { COOKIE_ATIVIDADE } from "../atividade";
 import { urlEntrar } from "../caminhos";
 
@@ -44,8 +44,7 @@ const FOLGA_MS = 60_000;
 /**
  * Nova senha com o código de recuperação. O código vem do Supabase (o
  * tamanho segue o "Email OTP Length" do painel, por isso aceita de 6 a 10
- * dígitos). Errar conta no mesmo freio do código de acesso (marca CODIGO):
- * os dois são palpites de código para o mesmo e-mail.
+ * dígitos). Errar conta no freio de palpites de código (marca CODIGO).
  */
 export async function redefinirSenha(
   _estado: EstadoRedefinir,
@@ -90,9 +89,7 @@ export async function redefinirSenha(
       ip,
       motivo: "nova senha",
     });
-    return {
-      erro: "Muitas tentativas. Aguarde alguns minutos e peça um código novo.",
-    };
+    return { erro: MENSAGEM_MUITAS_TENTATIVAS };
   }
 
   // verifyOtp no cliente de servidor: o código certo abre a sessão e os
@@ -175,25 +172,8 @@ export async function redefinirSenha(
     await supabase.auth.signOut({ scope: "others" });
   }
 
-  // O código provou o e-mail, que é o mesmo que o código de acesso provaria:
-  // este aparelho já entra confirmado. Sem o segredo configurado, a senha
-  // fica trocada e o middleware leva para a tela do código, que avisa.
-  const jarro = await cookies();
-  try {
-    jarro.set(
-      COOKIE_APARELHO,
-      await assinarAparelho(usuario.id),
-      opcoesCookie(APARELHO_VALIDADE_MS),
-    );
-  } catch (erro) {
-    console.error(
-      "[redefinir] aparelho sem assinatura:",
-      erro instanceof Error ? erro.message : erro,
-    );
-  }
-  jarro.delete(COOKIE_CODIGO);
   // Sessão nova: o carimbo de atividade de antes não vale para ela.
-  jarro.delete(COOKIE_ATIVIDADE);
+  (await cookies()).delete(COOKIE_ATIVIDADE);
 
   registrarAcesso(usuario.id, "senha_redefinida", { email, ip });
   // As falhas de senha deste e-mail também saem: quem errou cinco vezes e

@@ -98,7 +98,7 @@ export function FormRedefinir({
             required
             autoFocus={Boolean(email)}
             value={codigo}
-            // Mesma limpeza do código de acesso: espaço e hífen colados saem.
+            // Espaço e hífen que vêm colados ao copiar do e-mail saem.
             // Até 10 dígitos porque o tamanho é o configurado no Supabase.
             onChange={(e) =>
               setCodigo(e.target.value.replace(/\D/g, "").slice(0, 10))

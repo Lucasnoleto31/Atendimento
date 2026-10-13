@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { COOKIE_CODIGO } from "@/lib/codigo-login";
 import { COOKIE_ATIVIDADE } from "../atividade";
 
 /**
@@ -13,8 +12,7 @@ import { COOKIE_ATIVIDADE } from "../atividade";
  * O escopo é global: revoga o refresh token no servidor, em todos os
  * aparelhos, e não só apaga o cookie deste navegador. O token de acesso
  * morre em minutos, e o getUser() do middleware derruba antes disso. O
- * aparelho continua lembrado (é para isso que o cookie existe); o código
- * pendente e o carimbo de atividade perdem o sentido e são apagados.
+ * carimbo de atividade perde o sentido e é apagado.
  *
  * Só POST, e 303 para o /entrar virar GET. O cookie de sessão é SameSite=Lax:
  * um site de fora não o manda num POST e não consegue tirar ninguém daqui.
@@ -23,8 +21,6 @@ import { COOKIE_ATIVIDADE } from "../atividade";
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   await supabase.auth.signOut({ scope: "global" });
-  const jarro = await cookies();
-  jarro.delete(COOKIE_CODIGO);
-  jarro.delete(COOKIE_ATIVIDADE);
+  (await cookies()).delete(COOKIE_ATIVIDADE);
   return NextResponse.redirect(new URL("/entrar", request.url), 303);
 }

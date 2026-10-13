@@ -1,8 +1,6 @@
 import { cache } from "react";
-import { cookies } from "next/headers";
 import type { Papel } from "@/lib/papeis";
 import { createClient } from "@/lib/supabase/server";
-import { aparelhoConfirmado, COOKIE_APARELHO } from "@/lib/codigo-login";
 
 export type PerfilSessao = {
   id: string;
@@ -24,15 +22,6 @@ export type PerfilSessao = {
  * sessão revogada com o token ainda no prazo — é justamente o que o getUser
  * do middleware pega antes de o request chegar aqui.
  *
- * Sessão de aparelho que ainda não confirmou o código do e-mail para ESTA
- * pessoa também é null. O middleware já segura essa pessoa na tela do
- * código; conferir de novo aqui faz layout, páginas, loaders e server
- * actions não dependerem só dele (um matcher que pule um caminho deixaria
- * de ser furo). É só o HMAC do cookie, conferido em memória. No layout,
- * null leva ao /entrar, e o middleware de lá manda para /entrar/codigo.
- * A tela do código e as actions dela não passam por aqui: usam getUser
- * direto, senão quem ainda não confirmou ficaria preso fora delas.
- *
  * cache() do React: layout, página e loaders do mesmo render dividem uma
  * única verificação. Server action não roda dentro de um render, então ali
  * cada chamada confere de novo — o que custa pouco, porque é local.
@@ -40,23 +29,18 @@ export type PerfilSessao = {
 export const idDaSessao = cache(async (): Promise<string | null> => {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
-  const id = data?.claims.sub;
-  if (!id) return null;
-
-  const aparelho = (await cookies()).get(COOKIE_APARELHO)?.value;
-  return (await aparelhoConfirmado(aparelho, id)) ? id : null;
+  return data?.claims.sub ?? null;
 });
 
 /**
- * Perfil do usuário logado, ou null (sem sessão, aparelho sem o código do
- * e-mail ou sem linha em profiles). Uma consulta por request, por causa do
- * cache(). O select traz tudo o que o layout e as páginas leem, inclusive
- * `ativo`.
+ * Perfil do usuário logado, ou null (sem sessão ou sem linha em profiles).
+ * Uma consulta por request, por causa do cache(). O select traz tudo o que
+ * o layout e as páginas leem, inclusive `ativo`.
  *
  * Devolve também a conta DESATIVADA, de propósito: é com ela que o layout
  * mostra "Acesso desativado". Se esta função a escondesse, o layout mandaria
- * para o /entrar, o middleware (sessão e aparelho válidos) devolveria para o
- * /chat, e assim sem fim. Guarda de quem AGE usa perfilAtivo().
+ * para o /entrar, o middleware (sessão válida) devolveria para o /chat, e
+ * assim sem fim. Guarda de quem AGE usa perfilAtivo().
  */
 export const perfilAtual = cache(async (): Promise<PerfilSessao | null> => {
   const id = await idDaSessao();

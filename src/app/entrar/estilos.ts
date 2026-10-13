@@ -1,12 +1,8 @@
 /** Classes repetidas nas telas de /entrar, na ficha padrão do kit. */
 
-/** Link e botão de texto discretos: reenviar, outro código.
- *  32px de altura (44 no toque) para o dedo acertar sem esbarrar no vizinho. */
-export const LINK_DISCRETO =
-  "inline-flex min-h-[32px] items-center rounded-celula text-sm text-texto-2 underline-offset-2 transition-colors duration-[120ms] hover:text-tinta hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tinta disabled:cursor-not-allowed disabled:text-texto-3 disabled:no-underline pointer-coarse:min-h-[44px]";
-
 /** Link de texto sempre sublinhado, na tinta: o "Esqueci a senha" ao lado do
- *  "Lembrar meu e-mail". Mesma altura do LINK_DISCRETO. */
+ *  "Lembrar meu e-mail". 32px de altura (44 no toque) para o dedo acertar
+ *  sem esbarrar no vizinho. */
 export const LINK_SUBLINHADO =
   "inline-flex min-h-[32px] items-center rounded-celula text-sm text-tinta underline underline-offset-[0.2em] transition-colors duration-[120ms] hover:text-texto-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tinta pointer-coarse:min-h-[44px]";
 
@@ -20,7 +16,7 @@ export const LINK_VOLTAR =
 export const CAIXA_ERRO =
   "rounded-controle bg-cartao px-1.5 py-1 text-sm text-erro";
 
-/** Aviso de que deu certo ("Código enviado para…"). */
+/** Aviso de que deu certo ("Sua senha foi trocada…"). */
 export const CAIXA_AVISO =
   "rounded-controle bg-cartao px-1.5 py-1 text-sm text-bom";
 
@@ -69,15 +65,7 @@ export const BOTAO_ESPERA_PREENCHER =
   "group-has-[input:invalid]/form:bg-fio group-has-[input:invalid]/form:text-texto-2 group-has-[input:invalid]/form:hover:bg-fio";
 
 /**
- * O mesmo cinza, ligado pelo estado de quem usa, para o campo em que
- * "preencher" não cabe no :invalid: no código de acesso, preenchido é ter os
- * 6 dígitos, e o required só fica inválido com o campo vazio. Também só a
- * aparência: o botão continua clicável e o envio não é barrado.
- */
-export const BOTAO_CINZA = "bg-fio text-texto-2 hover:bg-fio";
-
-/**
- * Campo do código de 6 dígitos: grande, em algarismo tabular, dígitos
+ * Campo do código de nova senha: grande, em algarismo tabular, dígitos
  * espaçados e centrados (o indent compensa o espaço que o tracking deixa
  * depois do último dígito), no mesmo desenho de linha dos outros campos.
  * Leva data-texto-grande no elemento, senão a regra do toque no globals.css

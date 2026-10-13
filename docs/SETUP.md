@@ -112,36 +112,32 @@ E do campo **`leadgen`** assinado no webhook (objeto Page) do app da Meta. O
 passo a passo e as permissões estão em
 [`META-WHATSAPP.md`](META-WHATSAPP.md#lead-ads-formulário-de-anúncio-do-facebook-e-do-instagram).
 
-## Entrada: senha e código no e-mail
+## Entrada: só e-mail e senha
 
-Quem entra com a senha num aparelho novo recebe um código de 6 dígitos no
-e-mail (vale 10 minutos). Depois do código, o aparelho fica lembrado por 30
-dias e só pede a senha. "Esqueci a senha", na tela de entrada, manda um código
-para criar uma senha nova. Os e-mails saem pelo [Resend](https://resend.com).
+A entrada é e-mail e senha, sem segundo passo (o código por e-mail em
+aparelho novo existiu e foi tirado em 10/2026, por decisão do Lucas).
+"Esqueci a senha", na tela de entrada, manda um código de 6 dígitos no
+e-mail (vale 10 minutos) para criar uma senha nova. Esse e-mail sai pelo
+[Resend](https://resend.com).
 
-Errar o código 5 vezes em 15 minutos (por e-mail ou por IP) trava a conferência
-até a janela passar; pedir código de acesso também tem teto (5 em 15 minutos
-por e-mail). Pedir nova senha tem três tetos: 5 em 15 minutos por e-mail ou IP,
-10 em 24 horas por e-mail e 30 por hora no sistema inteiro. Tudo isso usa a
-tabela `login_tentativas` da migração 0046, sem tabela nova. Tentativa barrada,
-aparelho confirmado e senha redefinida aparecem no Log de acesso.
+Errar o código 5 vezes em 15 minutos (por e-mail ou por IP) trava a
+conferência até a janela passar. Pedir nova senha tem três tetos: 5 em 15
+minutos por e-mail ou IP, 10 em 24 horas por e-mail e 30 por hora no sistema
+inteiro. Tudo isso usa a tabela `login_tentativas` da migração 0046, sem
+tabela nova. Tentativa barrada e senha redefinida aparecem no Log de acesso.
 
-**Cota do Resend.** Cada código (aparelho novo ou nova senha) é um e-mail. O
-plano gratuito do Resend tem teto por dia e por mês (100 por dia e 3.000 por
-mês quando este texto foi escrito). Se a cota acabar, ninguém recebe código até
-ela renovar, e quem está num aparelho novo não entra; quem já tem o aparelho
-lembrado continua entrando só com a senha. "Esqueci a senha" não exige login,
-e é por isso que tem os tetos de 24 horas e de hora: sem eles, qualquer pessoa
-com a lista de e-mails da equipe gastaria a cota do dia. Mesmo com os tetos, a
-recuperação sozinha pode chegar a 10 e-mails por pessoa da equipe por dia
-(e no máximo 30 por hora); com a equipe crescendo, vale o plano pago.
+**Cota do Resend.** Cada código de nova senha é um e-mail. O plano gratuito
+do Resend tem teto por dia e por mês (100 por dia e 3.000 por mês quando
+este texto foi escrito). Se a cota acabar, ninguém recebe código até ela
+renovar; a entrada com a senha não depende de e-mail. "Esqueci a senha" não
+exige login, e é por isso que tem os tetos de 24 horas e de hora: sem eles,
+qualquer pessoa com a lista de e-mails da equipe gastaria a cota do dia.
 
 ### Variáveis (Vercel > Settings > Environment Variables)
 
 | Variável | O que é |
 |---|---|
-| `CODIGO_LOGIN_SEGREDO` | Segredo que assina os cookies do aparelho e do código. 32 caracteres ou mais: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Trocar o valor faz todo aparelho pedir código de novo (é o jeito de revogar todos de uma vez). |
-| `RESEND_API_KEY` | Chave do Resend, só com permissão de envio. |
+| `RESEND_API_KEY` | Chave do Resend, só com permissão de envio. Sem ela, "Esqueci a senha" não manda o código (e o aviso de senha trocada não sai). |
 | `EMAIL_REMETENTE` | Remetente num domínio verificado, por exemplo `Zeve Atendimento <acesso@zeve.com.br>`. |
 
 As chaves vão direto no painel da Vercel. Não passe por chat nem por e-mail.
@@ -190,8 +186,7 @@ As chaves vão direto no painel da Vercel. Não passe por chat nem por e-mail.
 ### Na máquina de desenvolvimento
 
 Sem `RESEND_API_KEY`, o e-mail não sai e o código aparece no terminal do
-`npm run dev`, numa linha que começa com `[email]`. `CODIGO_LOGIN_SEGREDO` é
-obrigatório também aqui.
+`npm run dev`, numa linha que começa com `[email]`.
 
 `SUPABASE_SERVICE_ROLE_KEY` também é obrigatória. Sem ela a tela de entrada
 quebra ao clicar em Entrar: o freio da senha lê `login_tentativas` pela chave
@@ -202,15 +197,15 @@ não contam (a conferência do código segue sem freio, com o aviso
 nenhuma e "Esqueci a senha" não gera código.
 
 Para testar os freios na máquina local (errar o código 5 vezes e ver "Muitas
-tentativas" na tela e "código de acesso bloqueado" no Log de acesso), o
+tentativas" na tela e "palpites de código bloqueados" no Log de acesso), o
 `.env.local` precisa da chave de serviço válida do projeto. Atenção: se o
 `.env.local` aponta para o banco de produção, o teste grava em
 `login_tentativas` e na `auditoria` de produção, e "Esqueci a senha" troca a
 senha real da conta e derruba as outras sessões dela. Use uma conta
 descartável.
 
-**Banco de produção ainda com `exigir_2fa` = "1":** a entrada por código no
-e-mail deixa a sessão sem o app autenticador, e as telas locais abrem vazias.
+**Banco de produção ainda com `exigir_2fa` = "1":** a entrada por senha deixa
+a sessão sem o app autenticador, e as telas abrem vazias (local e na Vercel).
 Enquanto for assim, abra `/autenticador-local` (sem link no app) e digite o
 código do app autenticador: a sessão sobe para o nível que o banco pede. A
 página existe no `npm run dev`; no `npm run build` + `npm run start` local, só

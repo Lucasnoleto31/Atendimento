@@ -5,7 +5,7 @@ import { FundoMalha } from "./fundo-malha";
 import { LINK_VOLTAR } from "./estilos";
 
 /**
- * Casca das telas de fora do app: o login e os passos dele (código, esqueci,
+ * Casca das telas de fora do app: o login e os passos dele (esqueci,
  * redefinir), o erro, o 404, "Acesso desativado" e o formulário público
  * /captura. O desenho é o de duas metades.
  *
@@ -28,7 +28,6 @@ export function Moldura({
   titulo,
   descricao,
   voltar,
-  topo,
   secundaria,
   rodape,
   children,
@@ -37,10 +36,6 @@ export function Moldura({
   descricao?: React.ReactNode;
   /** Link "← …" acima do título; o rótulo diz para onde vai. */
   voltar?: { href: string; rotulo: string };
-  /** Saída acima do título que não é link (o "Entrar com outra conta" da
-   *  tela do código é um form, porque sair revoga a sessão). Ocupa o lugar
-   *  do voltar; quem usa monta com LINK_VOLTAR e a seta. */
-  topo?: React.ReactNode;
   /** Ação de contorno logo abaixo do botão principal, na largura toda. */
   secundaria?: React.ReactNode;
   /** Nota curta embaixo de tudo. */
@@ -61,16 +56,12 @@ export function Moldura({
 
       <main className="flex min-w-0 flex-1 flex-col px-2 pt-3 pb-4 md:items-center md:justify-center md:px-3 md:py-6 lg:px-6">
         <div className="w-full md:max-w-[480px]">
-          {voltar || topo ? (
+          {voltar ? (
             <div className="mb-2 flex items-center">
-              {voltar ? (
-                <Link href={voltar.href} className={LINK_VOLTAR}>
-                  <ArrowLeft size={18} strokeWidth={1.75} aria-hidden />
-                  {voltar.rotulo}
-                </Link>
-              ) : (
-                topo
-              )}
+              <Link href={voltar.href} className={LINK_VOLTAR}>
+                <ArrowLeft size={18} strokeWidth={1.75} aria-hidden />
+                {voltar.rotulo}
+              </Link>
             </div>
           ) : null}
 

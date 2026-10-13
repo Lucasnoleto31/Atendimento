@@ -1,13 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { destinoSeguro } from "@/lib/rotas";
-import { aparelhoConfirmado, COOKIE_APARELHO } from "@/lib/codigo-login";
 import { COOKIE_ATIVIDADE } from "@/app/entrar/atividade";
 
 const INATIVIDADE_MS = 24 * 60 * 60 * 1000;
 /** Idade mínima do carimbo antes de regravá-lo (ver a renovação abaixo). */
 const RENOVACAO_MS = 5 * 60 * 1000;
-const PAGINA_CODIGO = "/entrar/codigo";
 /** O sair por formulário (entrar/sair/route.ts): passa sem os desvios. */
 const ROTA_SAIR = "/entrar/sair";
 
@@ -19,8 +17,7 @@ function comCookies(destino: NextResponse, origem: NextResponse): NextResponse {
 
 /**
  * Renova o cookie de sessão a cada request, barra acesso às rotas internas
- * de quem não está autenticado, derruba sessão parada há mais de 24h e
- * segura no código do e-mail quem entrou com a senha num aparelho novo.
+ * de quem não está autenticado e derruba sessão parada há mais de 24h.
  *
  * A expiração por inatividade vive AQUI, não no Supabase: o corte por
  * inatividade é recurso pago do painel, e o middleware já vê toda
@@ -114,7 +111,7 @@ export async function middleware(request: NextRequest) {
   // e a action confere tudo no servidor. Só passa sem sessão; logado, segue
   // pelos portões abaixo como qualquer tela, porque um POST de server action
   // vale em qualquer endereço de página, e liberar /captura para quem está
-  // logado abriria um desvio do portão do aparelho e da conta desativada.
+  // logado abriria um desvio do portão da conta desativada.
   const formularioPublico =
     pathname === "/captura" || pathname.startsWith("/captura/");
 
@@ -149,36 +146,8 @@ export async function middleware(request: NextRequest) {
 
   if (semPessoa || pathname === ROTA_SAIR) return response;
 
-  // Portão do aparelho. Senha certa num aparelho que ainda não confirmou o
-  // código do e-mail para ESTA pessoa só alcança a tela do código (as ações
-  // de enviar, conferir e trocar de conta são POST para ela mesma). Vale
-  // para página, server action, RSC e /api: tudo o mais volta para lá com o
-  // destino guardado.
-  const naTelaDoCodigo =
-    pathname === PAGINA_CODIGO || pathname.startsWith(`${PAGINA_CODIGO}/`);
-  const confirmado = await aparelhoConfirmado(
-    request.cookies.get(COOKIE_APARELHO)?.value,
-    user.id,
-  );
-
-  if (!confirmado) {
-    if (naTelaDoCodigo) return response;
-    const url = request.nextUrl.clone();
-    url.pathname = PAGINA_CODIGO;
-    url.search = "";
-    // Vindo de outra tela de /entrar, o destino é o ?proximo= dela; vindo
-    // de uma tela interna, é a própria tela, com a query.
-    const pedido = pathname.startsWith("/entrar")
-      ? request.nextUrl.searchParams.get("proximo")
-      : pathname === "/"
-        ? null
-        : pathname + request.nextUrl.search;
-    if (pedido) url.searchParams.set("proximo", destinoSeguro(pedido));
-    return comCookies(NextResponse.redirect(url), response);
-  }
-
-  // Já dentro, com o aparelho confirmado: as telas de entrada não têm o
-  // que fazer e levam ao destino pedido (ou ao padrão).
+  // Já dentro: as telas de entrada não têm o que fazer e levam ao destino
+  // pedido (ou ao padrão).
   if (pathname.startsWith("/entrar")) {
     const destino = destinoSeguro(request.nextUrl.searchParams.get("proximo"));
     return comCookies(
@@ -221,7 +190,6 @@ export const config = {
   // login) e, para quem está dentro, cada pedido do ícone passava pelo
   // getUser. A exceção é por nome, nunca por extensão: pular .png ou .svg
   // abria um desvio, porque /contatos/x.png casa com a rota /contatos/[id]
-  // e chegava ao layout e às server actions sem passar pelo portão do
-  // aparelho.
+  // e chegava ao layout e às server actions sem passar pelos portões daqui.
   matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|marca/).*)"],
 };

@@ -6,27 +6,41 @@ import { createServiceClient } from "@/lib/supabase/server";
  * não guarda memória entre requisições e não há Redis. A tabela só tem
  * e-mail, IP e data; só o service role lê e grava.
  *
- * O freio da senha (5 falhas em 15 min por e-mail OU IP, sucesso apaga as
- * do e-mail e do IP) mora em actions.ts e usa e-mail e IP crus. Código,
- * envio de código e pedido de nova senha usam a MESMA tabela, mas com uma
- * marca na frente do e-mail e do IP ("CODIGO:fulano@zeve.com.br"). A marca
- * é o que impede o atalho: senha certa apaga as falhas do e-mail e do IP, e
- * quem tem a senha de outra pessoa poderia errar 4 códigos, entrar de novo
- * com a senha para zerar e repetir para sempre. Com a marca, a senha certa
- * não alcança as falhas de código. Em maiúsculas de propósito: o login
- * baixa o e-mail para minúsculas, então nenhum e-mail digitado vira uma
- * linha marcada.
+ * O freio da senha (5 falhas em 15 min por e-mail ou MAX_FALHAS_IP por IP,
+ * sucesso apaga só as do e-mail) mora em actions.ts e usa e-mail e IP crus.
+ * Palpite de
+ * código e pedido de nova senha usam a MESMA tabela, mas com uma marca na
+ * frente do e-mail e do IP ("CODIGO:fulano@zeve.com.br"). A marca é o que
+ * impede o atalho: senha certa apaga as falhas do e-mail e do IP, e quem
+ * tem a senha de outra pessoa poderia errar 4 códigos, entrar de novo com
+ * a senha para zerar e repetir para sempre. Com a marca, a senha certa não
+ * alcança as falhas de código. Em maiúsculas de propósito: o login baixa o
+ * e-mail para minúsculas, então nenhum e-mail digitado vira uma linha
+ * marcada.
  */
 
 export const MAX_FALHAS = 5;
 export const JANELA_MIN = 15;
 
 /**
+ * Teto de falhas de senha por IP na janela, mais alto que o do e-mail: a
+ * equipe entra do mesmo escritório, atrás de um IP só, e o acerto de um não
+ * apaga os erros de digitação dos outros. Com 5, cinco erros somados de
+ * pessoas diferentes travariam o escritório inteiro por 15 minutos.
+ */
+export const MAX_FALHAS_IP = 20;
+
+/** A mesma frase no pedido barrado e no palpite barrado: quem leu uma e
+ *  tentou o outro caminho lê a mesma coisa, e não um aviso novo. */
+export const MENSAGEM_MUITAS_TENTATIVAS =
+  "Muitas tentativas. Aguarde alguns minutos e peça um código novo.";
+
+/**
  * Tetos a mais do pedido de nova senha, além dos 5 em 15 min por e-mail ou
  * IP: 10 por e-mail em 24 h e 30 no sistema inteiro por hora. O pedido não
  * exige login e cada um gasta um e-mail do Resend; sem estes tetos, um
  * anônimo com a lista de e-mails da equipe (nome@zeve.com.br) esgotaria a
- * cota do dia e ninguém mais receberia código de aparelho novo. As linhas
+ * cota do dia e ninguém mais receberia código de nova senha. As linhas
  * duram 24 h: o expurgo do login certo só apaga as mais velhas que isso.
  */
 export const RECUPERACAO_MAX_DIA = 10;
@@ -35,9 +49,9 @@ export const RECUPERACAO_MAX_HORA = 30;
 const HORA_MS = 60 * 60 * 1000;
 const DIA_MS = 24 * HORA_MS;
 
-/** CODIGO: código errado (acesso ou nova senha). ENVIO: código de acesso
- *  mandado. RECUPERACAO: pedido de nova senha. */
-export type Marca = "CODIGO" | "ENVIO" | "RECUPERACAO";
+/** CODIGO: palpite errado de código de nova senha. RECUPERACAO: pedido de
+ *  nova senha. */
+export type Marca = "CODIGO" | "RECUPERACAO";
 
 /**
  * Valor seguro para o filtro or= do PostgREST: vírgula, parêntese e aspas
@@ -114,19 +128,6 @@ export async function contarRecentes(
     return null;
   }
   return contar(s, marca, JANELA_MIN * 60_000, chaves);
-}
-
-export async function registrar(
-  marca: Marca,
-  email: string,
-  ip: string,
-): Promise<void> {
-  const s = servico();
-  if (!s) return;
-  const { error } = await s
-    .from("login_tentativas")
-    .insert({ email: marcado(marca, email), ip: marcado(marca, ip) });
-  if (error) console.error(`[freio] registro ${marca} falhou: ${error.message}`);
 }
 
 /** Apaga as linhas desta marca para o e-mail (só o e-mail, nunca o IP). */
