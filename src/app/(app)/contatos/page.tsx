@@ -32,8 +32,9 @@ import { ListaSelecionavel } from "./lista-selecionavel";
 import { Paginador } from "./navegacao-lista";
 import { ExportarLista } from "./exportar-lista";
 import { ProvedorSelecao } from "./selecao-na-tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Contatos · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Contatos") };
 
 const POR_PAGINA = 60;
 

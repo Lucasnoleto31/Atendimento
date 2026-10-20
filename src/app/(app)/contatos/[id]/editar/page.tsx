@@ -8,9 +8,10 @@ import { formatarTelefone } from "@/lib/format";
 import { FormContato } from "../../form-contato";
 import { LinkVoltar } from "../../link-voltar";
 import { lerVoltar, rotuloVoltar, voltarDiferenteDe } from "../../voltar";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Editar contato · Zeve Atendimento",
+  title: titulo("Editar contato"),
 };
 
 type ContatoEditavel = {

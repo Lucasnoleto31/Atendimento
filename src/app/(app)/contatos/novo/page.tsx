@@ -6,8 +6,9 @@ import { ehGestao, somenteLeitura } from "@/lib/papeis";
 import { FormContato } from "../form-contato";
 import { LinkVoltar } from "../link-voltar";
 import { lerVoltar, rotuloVoltar, voltarDiferenteDe } from "../voltar";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Novo contato · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Novo contato") };
 
 /** O primeiro valor de um parâmetro da URL, limpo e cortado. */
 function textoDe(valor: unknown, maximo: number): string {

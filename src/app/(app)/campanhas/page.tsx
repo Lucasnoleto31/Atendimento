@@ -23,9 +23,10 @@ import {
 } from "./regras";
 import type { TextoDaCampanha } from "./editar-campanha";
 import { PainelDisparos, type CampanhaVista } from "./painel";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Disparos · Zeve Atendimento",
+  title: titulo("Disparos"),
 };
 
 type Campanha = {

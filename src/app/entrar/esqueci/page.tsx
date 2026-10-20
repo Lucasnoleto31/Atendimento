@@ -4,9 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Moldura } from "../moldura";
 import { urlEntrar } from "../caminhos";
 import { FormEsqueci } from "./form-esqueci";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Esqueci a senha · Zeve Atendimento",
+  title: titulo("Esqueci a senha"),
 };
 
 export default async function EsqueciPage({

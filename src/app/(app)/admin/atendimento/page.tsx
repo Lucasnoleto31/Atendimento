@@ -12,8 +12,9 @@ import { exigirGestao } from "../acesso";
 import { caminhoDa } from "../rotas";
 import { voltarDaSubpagina } from "../subpagina";
 import { TelaAtendimento, type Pessoa } from "./tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Atendimento · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Atendimento") };
 
 export default async function AtendimentoPage({
   searchParams,

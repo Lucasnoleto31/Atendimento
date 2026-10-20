@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Poppins } from "next/font/google";
 import "./globals.css";
+import { NOME_DA_EMPRESA, NOME_DO_PRODUTO } from "@/lib/marca";
 
 // A família única da ficha padrão do kit: 400 no corpo, 600 em destaque e
 // título, 700 no título grande e no número de destaque. Código e ID usam o
@@ -14,10 +15,9 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Zeve Atendimento",
-  description:
-    "Caixa de entrada da equipe da Zeve para as conversas do WhatsApp e do Instagram Direct.",
-  applicationName: "Zeve Atendimento",
+  title: NOME_DO_PRODUTO,
+  description: `Caixa de entrada da equipe da ${NOME_DA_EMPRESA} para as conversas do WhatsApp e do Instagram Direct.`,
+  applicationName: NOME_DO_PRODUTO,
 };
 
 async function temaEscuro(): Promise<boolean> {

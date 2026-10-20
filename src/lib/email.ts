@@ -1,5 +1,6 @@
 import { CODIGO_VALIDADE_MS } from "@/lib/codigo-recuperacao";
 import { FUSO } from "@/lib/format";
+import { NOME_DO_PRODUTO } from "@/lib/marca";
 
 /**
  * E-mails do login (código de nova senha) e o aviso de senha trocada,
@@ -20,7 +21,7 @@ const MINUTOS = Math.round(CODIGO_VALIDADE_MS / 60_000);
 
 const MODELO_NOVA_SENHA = {
   assunto: "Código para criar uma nova senha",
-  uso: "Digite este código na tela de nova senha do Zeve Atendimento.",
+  uso: `Digite este código na tela de nova senha do ${NOME_DO_PRODUTO}.`,
   fecho:
     "Se você não pediu uma senha nova, ignore este e-mail. A sua senha continua a mesma.",
 };
@@ -57,7 +58,7 @@ function pagina(assunto: string, linhas: string): string {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fafaf9;">
 <tr><td align="center" style="padding:32px 16px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:#ffffff;border:1px solid #e7e5e1;border-radius:10px;">
-${linha("Zeve Atendimento", `padding:24px 24px 0 24px;font-family:${FONTE};font-size:14px;line-height:20px;font-weight:600;color:#1a1917;`)}
+${linha(escapar(NOME_DO_PRODUTO), `padding:24px 24px 0 24px;font-family:${FONTE};font-size:14px;line-height:20px;font-weight:600;color:#1a1917;`)}
 ${linha(escapar(assunto), `padding:16px 24px 0 24px;font-family:${FONTE};font-size:20px;line-height:28px;font-weight:600;color:#1a1917;`)}
 ${linhas}
 </table>
@@ -85,7 +86,7 @@ ${linha(escapar(m.fecho), `padding:16px 24px 24px 24px;border-top:1px solid #e7e
 function textoPuro(codigo: string): string {
   const m = MODELO_NOVA_SENHA;
   return [
-    "Zeve Atendimento",
+    NOME_DO_PRODUTO,
     "",
     `${m.assunto}: ${codigo}`,
     "",
@@ -160,7 +161,7 @@ export async function enviarAvisoSenhaTrocada(
   para: string,
   quando: Date,
 ): Promise<void> {
-  const frase = `Sua senha do Zeve Atendimento foi trocada em ${quandoEmTexto(quando)}.`;
+  const frase = `Sua senha do ${NOME_DO_PRODUTO} foi trocada em ${quandoEmTexto(quando)}.`;
   const fecho = "Se não foi você, fale com a administração.";
   const chave = process.env.RESEND_API_KEY;
 
@@ -179,7 +180,7 @@ export async function enviarAvisoSenhaTrocada(
       `${linha(escapar(frase), `padding:8px 24px 0 24px;${TEXTO}`)}
 ${linha(escapar(fecho), `padding:8px 24px 24px 24px;${TEXTO}`)}`,
     ),
-    texto: ["Zeve Atendimento", "", frase, "", fecho].join("\n"),
+    texto: [NOME_DO_PRODUTO, "", frase, "", fecho].join("\n"),
   });
 }
 
@@ -200,7 +201,7 @@ async function enviarPeloResend(
       );
     }
     // Remetente de teste do Resend: só entrega para o dono da conta do Resend.
-    remetente = "Zeve Atendimento <onboarding@resend.dev>";
+    remetente = `${NOME_DO_PRODUTO} <onboarding@resend.dev>`;
     console.warn(
       "[email] EMAIL_REMETENTE vazio, usando o remetente de teste do Resend.",
     );
@@ -213,7 +214,7 @@ async function enviarPeloResend(
       headers: {
         Authorization: `Bearer ${chave}`,
         "Content-Type": "application/json",
-        "User-Agent": "zeve-atendimento",
+        "User-Agent": "atendimento",
       },
       body: JSON.stringify({
         from: remetente,

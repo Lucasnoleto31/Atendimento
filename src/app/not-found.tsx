@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Moldura } from "./entrar/moldura";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Página não encontrada · Zeve Atendimento",
+  title: titulo("Página não encontrada"),
 };
 
 /**

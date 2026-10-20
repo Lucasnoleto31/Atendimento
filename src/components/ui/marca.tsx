@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { MARCA_DA_ZEVE, NOME_DA_EMPRESA, NOME_DO_PRODUTO } from "@/lib/marca";
 
 /**
  * O Z da Zeve, na cor do texto em volta (currentColor): a tinta no claro e
@@ -8,6 +9,20 @@ import { cn } from "@/lib/utils";
  * Decorativo: quem usa põe o nome ao lado.
  */
 export function MarcaZ({ className }: { className?: string }) {
+  if (!MARCA_DA_ZEVE) {
+    // Outra empresa: a inicial num quadrado, no lugar do Z.
+    return (
+      <span
+        aria-hidden
+        className={cn(
+          "inline-flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-[5px] bg-tinta text-[12px] font-bold leading-none text-fundo",
+          className,
+        )}
+      >
+        {NOME_DA_EMPRESA.charAt(0).toUpperCase()}
+      </span>
+    );
+  }
   return (
     <svg
       viewBox="0 0 319.67 232.99"
@@ -24,10 +39,20 @@ export function MarcaZ({ className }: { className?: string }) {
 }
 
 /**
- * Marca do produto: o Z e "Atendimento" (o "Zeve" fica para o leitor de
- * tela, que lê "Zeve Atendimento"). Quem usa decide o link em volta.
+ * Marca do produto. Na Zeve, o Z e "Atendimento" (o "Zeve" fica para o
+ * leitor de tela, que lê "Zeve Atendimento"). Em outra empresa, o nome do
+ * produto em texto (src/lib/marca.ts). Quem usa decide o link em volta.
  */
 export function Marca({ className }: { className?: string }) {
+  if (!MARCA_DA_ZEVE) {
+    return (
+      <span className={cn("inline-flex items-center gap-1 text-tinta", className)}>
+        <span className="text-base font-semibold tracking-[-0.01em]">
+          {NOME_DO_PRODUTO}
+        </span>
+      </span>
+    );
+  }
   return (
     <span className={cn("inline-flex items-center gap-1 text-tinta", className)}>
       <MarcaZ className="h-[18px]" />

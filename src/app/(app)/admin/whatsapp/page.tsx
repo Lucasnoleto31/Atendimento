@@ -9,8 +9,9 @@ import {
   webhookConfigurado,
 } from "../webhook";
 import { TelaWhatsapp, type Instancia, type PessoaAtendente } from "./tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "WhatsApp · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("WhatsApp") };
 
 /**
  * Administração › WhatsApp: os números e, logo abaixo, o webhook. Eram duas

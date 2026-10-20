@@ -20,8 +20,9 @@ import {
   lerFiltrosLog,
   rotuloDoPeriodoLog,
 } from "./url";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Log de acesso · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Log de acesso") };
 
 /** Hoje e ontem em dd/mm/aaaa, e o nome do período. Fora do componente
  *  (regra de pureza: relógio não se lê no render). */

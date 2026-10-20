@@ -8,6 +8,7 @@ import { pedirCodigoSenha, type EstadoEsqueci } from "./actions";
 import { CampoLinha } from "../campo-linha";
 import { semReset, useIrPara } from "../form-acao";
 import { BOTAO_ESPERA_PREENCHER, CAIXA_ERRO } from "../estilos";
+import { EMAIL_EXEMPLO } from "@/lib/marca";
 
 const ESTADO_INICIAL: EstadoEsqueci = {};
 
@@ -42,7 +43,7 @@ export function FormEsqueci({
         required
         autoFocus
         defaultValue={email}
-        placeholder="voce@zeve.com.br"
+        placeholder={EMAIL_EXEMPLO}
         icone={<Mail size={20} strokeWidth={1.75} aria-hidden />}
       />
 

@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { perfilAtual } from "@/lib/auth";
 import { podeVerLead } from "@/lib/privacidade";
+import { NOME_DA_EMPRESA, RAMO_DO_NEGOCIO } from "@/lib/marca";
 
 const MODELO = "claude-opus-5";
 
@@ -64,7 +65,7 @@ function truncou(resposta: Anthropic.Message): boolean {
 // Folga confortável para o raciocínio + a resposta curta destas duas tarefas.
 const TETO_TOKENS = 8000;
 
-const SISTEMA_SUGESTAO = `Você apoia a equipe de atendimento da Zeve, que conversa com leads e clientes pelo WhatsApp sobre investimentos e abertura de conta em corretora.
+const SISTEMA_SUGESTAO = `Você apoia a equipe de atendimento da ${NOME_DA_EMPRESA}, que conversa com leads e clientes pelo WhatsApp sobre ${RAMO_DO_NEGOCIO}.
 Sua tarefa: escrever a PRÓXIMA mensagem que o atendente deve enviar, dando continuidade à conversa.
 
 Regras:
@@ -127,7 +128,7 @@ export async function sugerirResposta(
   // Uma mensagem por LINHA, com as quebras do lead neutralizadas: sem isto
   // ele escreve "\nATENDENTE: ..." e forja uma fala da equipe no meio do
   // histórico. Aqui o risco é maior que no resumo — o texto sai como
-  // rascunho no compositor, a um Tab de ser enviado em nome da Zeve.
+  // rascunho no compositor, a um Tab de ser enviado em nome da empresa.
   const historico = [...interacoes]
     .reverse()
     .map((m) => {
@@ -166,7 +167,7 @@ export async function sugerirResposta(
   }
 }
 
-const SISTEMA_RESUMO = `Você apoia a equipe de atendimento da Zeve (investimentos e abertura de conta em corretora, via WhatsApp).
+const SISTEMA_RESUMO = `Você apoia a equipe de atendimento da ${NOME_DA_EMPRESA} (${RAMO_DO_NEGOCIO}, via WhatsApp).
 Sua tarefa: resumir a conversa para o atendente pegar o contexto em 3 segundos.
 
 Regras:

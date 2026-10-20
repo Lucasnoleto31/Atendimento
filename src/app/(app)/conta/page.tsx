@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { perfilAtual } from "@/lib/auth";
 import { fotoDaSessao } from "@/lib/fotos-equipe";
 import { TelaConta } from "./tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Minha conta · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Minha conta") };
 
 /** Minha conta, para todo papel. Sem perfil (ou com a conta desativada), o
  *  layout já mostra a tela certa no lugar desta. */
