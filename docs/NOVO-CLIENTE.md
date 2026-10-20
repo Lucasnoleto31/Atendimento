@@ -40,10 +40,13 @@ pela do cliente, sem mexer no código:
 | `simbolo.svg` | Só o símbolo, para a barra lateral recolhida. |
 | `icone.svg` | O favicon: fundo arredondado de 64×64 com o símbolo, e a `@media (prefers-color-scheme: dark)` para o fundo escuro. |
 
-Regras do kit que valem em todo tema: um acento por tela, o neutro sai do
-acento (mesma matiz, saturação de 10% a 20%), a tinta continua sendo texto e
-botão principal, contraste de 4,5:1 medido, e a mesma Poppins. Degradê da
-marca só no símbolo; botão, selo e chamada ficam cheios.
+Regras que valem em todo tema: a base (fundo, cartão, fio, botão principal)
+fica nos cinzas do sistema, e a cor da marca entra só nos detalhes, como o
+símbolo e a cor de informação (pedido de Artur em 20/10/2026, depois de a
+tela de entrada da Incell ficar estranha com os neutros tingidos). Um acento
+por tela, a tinta como texto e botão principal, contraste de 4,5:1 medido, e
+a mesma Poppins. Degradê da marca só no símbolo; botão, selo e chamada ficam
+cheios.
 
 A primeira pasta é `public/temas/incell/`, montada em 20/10/2026 a partir
 dos arquivos da marca (`IN-CELL.ai`/`.pdf`, preto e branco, e o PNG colorido
