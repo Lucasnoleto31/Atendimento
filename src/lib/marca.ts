@@ -39,10 +39,34 @@ export const QUEM_ATENDE =
   process.env.NEXT_PUBLIC_QUEM_ATENDE?.trim() || "um assessor";
 
 /**
- * O Z da Zeve só aparece na Zeve. Qualquer outra empresa usa a marca em
- * texto (o nome do produto) e, com a barra lateral recolhida, a inicial.
+ * O tema do cliente: o nome de uma pasta em public/temas/ com tema.css (os
+ * tokens de cor dos dois temas, com a ficha do projeto no topo), logo.svg e
+ * logo-escuro.svg (a marca por extenso, uma por tema), simbolo.svg (a barra
+ * recolhida) e icone.svg (o favicon). Só letras minúsculas, dígitos e
+ * hífen: vira caminho de URL e de arquivo. Em branco, não há tema.
  */
-export const MARCA_DA_ZEVE = NOME_DA_EMPRESA === "Zeve";
+export const TEMA = (() => {
+  const t = process.env.NEXT_PUBLIC_TEMA?.trim() ?? "";
+  return /^[a-z0-9-]+$/.test(t) ? t : "";
+})();
+
+/** Caminhos públicos dos arquivos do tema, ou null sem tema. */
+export const ARQUIVOS_DO_TEMA = TEMA
+  ? {
+      css: `/temas/${TEMA}/tema.css`,
+      logo: `/temas/${TEMA}/logo.svg`,
+      logoEscuro: `/temas/${TEMA}/logo-escuro.svg`,
+      simbolo: `/temas/${TEMA}/simbolo.svg`,
+      icone: `/temas/${TEMA}/icone.svg`,
+    }
+  : null;
+
+/**
+ * O Z da Zeve só aparece na Zeve, sem tema. Com tema, a marca vem dos
+ * arquivos dele; sem tema e com outra empresa, a marca é o nome em texto e,
+ * com a barra lateral recolhida, a inicial.
+ */
+export const MARCA_DA_ZEVE = !TEMA && NOME_DA_EMPRESA === "Zeve";
 
 /** O e-mail de exemplo dos campos de entrada e da validação do admin. */
 export const EMAIL_EXEMPLO = MARCA_DA_ZEVE ? "voce@zeve.com.br" : "voce@email.com";

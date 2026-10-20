@@ -1,5 +1,10 @@
 import { cn } from "@/lib/utils";
-import { MARCA_DA_ZEVE, NOME_DA_EMPRESA, NOME_DO_PRODUTO } from "@/lib/marca";
+import {
+  ARQUIVOS_DO_TEMA,
+  MARCA_DA_ZEVE,
+  NOME_DA_EMPRESA,
+  NOME_DO_PRODUTO,
+} from "@/lib/marca";
 
 /**
  * O Z da Zeve, na cor do texto em volta (currentColor): a tinta no claro e
@@ -9,6 +14,18 @@ import { MARCA_DA_ZEVE, NOME_DA_EMPRESA, NOME_DO_PRODUTO } from "@/lib/marca";
  * Decorativo: quem usa põe o nome ao lado.
  */
 export function MarcaZ({ className }: { className?: string }) {
+  if (ARQUIVOS_DO_TEMA) {
+    // Tema do cliente: o símbolo dele, com as cores próprias.
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- SVG estático do tema, sem otimização
+      <img
+        src={ARQUIVOS_DO_TEMA.simbolo}
+        alt=""
+        aria-hidden
+        className={cn("h-[20px] w-auto shrink-0", className)}
+      />
+    );
+  }
   if (!MARCA_DA_ZEVE) {
     // Outra empresa: a inicial num quadrado, no lugar do Z.
     return (
@@ -44,6 +61,26 @@ export function MarcaZ({ className }: { className?: string }) {
  * produto em texto (src/lib/marca.ts). Quem usa decide o link em volta.
  */
 export function Marca({ className }: { className?: string }) {
+  if (ARQUIVOS_DO_TEMA) {
+    // Tema do cliente: a marca por extenso, uma versão por tema de cor (o
+    // SVG num <img> não herda a cor do texto, por isso dois arquivos).
+    return (
+      <span className={cn("inline-flex items-center text-tinta", className)}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático do tema */}
+        <img
+          src={ARQUIVOS_DO_TEMA.logo}
+          alt={NOME_DO_PRODUTO}
+          className="h-[26px] w-auto dark:hidden"
+        />
+        {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático do tema */}
+        <img
+          src={ARQUIVOS_DO_TEMA.logoEscuro}
+          alt={NOME_DO_PRODUTO}
+          className="hidden h-[26px] w-auto dark:block"
+        />
+      </span>
+    );
+  }
   if (!MARCA_DA_ZEVE) {
     return (
       <span className={cn("inline-flex items-center gap-1 text-tinta", className)}>

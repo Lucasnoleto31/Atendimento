@@ -1,0 +1,109 @@
+/*
+ * Tema da Incell, loja de iPhones. Carregado pelo layout quando
+ * NEXT_PUBLIC_TEMA=incell (src/lib/marca.ts); sobrescreve os tokens de
+ * src/app/globals.css nos dois temas. Os seletores levam `html` na frente
+ * para vencer a folha do build seja qual for a ordem de carregamento.
+ *
+ * FICHA DO PROJETO (kit estético, bloco 0)
+ *   produto        Incell Atendimento: chat de WhatsApp e Instagram da loja
+ *   plataformas    desktop e telefone, no navegador
+ *   meio/entrega   tela / sistema (blocos 0 a 5, 8, 16 a 18, 20 a 22; mínimo)
+ *   temperatura    os dois
+ *   acento         violeta do meio do degradê da marca: #7A3FA6 no claro
+ *                  (6,8:1 no fundo), #C58BE8 no escuro (7,8:1). Entra onde a
+ *                  ficha padrão põe o azul: a informação. O degradê inteiro
+ *                  (#2F98E5 → #4B3D9B → #8E38A6 → #EA3FBF, medido no PNG
+ *                  da marca em 20/10/2026) só aparece no símbolo.
+ *   fundo          #FFFFFF / #0B0A0D
+ *   tinta          o grafite do CELL, #2D2D2D (14,0:1); #F5F3F8 no escuro
+ *   neutro         sai do acento: cinzas com a matiz do violeta a 10–20%
+ *   semânticas     as da ficha padrão (bom, atenção, erro), sem mudança
+ *   tipografia     Poppins, a mesma do sistema (uma família)
+ *   raio, densidade, material, movimento: os do sistema, sem mudança
+ *   marca          logo.svg / logo-escuro.svg (CELL na cor do texto de cada
+ *                  tema), simbolo.svg (favicon e barra recolhida)
+ */
+
+html:root {
+  --color-cartao: #f5f3f8;
+  --color-tinta: #2d2d2d;
+  --color-tinta-hover: #444444;
+  --color-texto-2: #5a5562;
+  --color-texto-3: #6b6572;
+  --color-fio: #e6e2ec;
+  --color-fio-forte: #c8c2d2;
+  --color-selecao-texto: #e3dcec;
+
+  --color-avatar-1: #eeeaf3;
+  --color-avatar-2: #e3deea;
+  --color-avatar-3: #d7d1e0;
+  --color-avatar-4: #cbc4d6;
+
+  --color-primary-50: #e3deea;
+  --color-primary-100: #d7d1e0;
+  --color-primary-300: #a79fb3;
+  --color-primary-500: #2d2d2d;
+  --color-primary-600: #2d2d2d;
+  --color-primary-700: #444444;
+  --color-primary-900: #2d2d2d;
+
+  --color-neutral-50: #f5f3f8;
+  --color-neutral-100: #ece8f1;
+  --color-neutral-200: #e6e2ec;
+  --color-neutral-300: #c8c2d2;
+  --color-neutral-400: #6b6572;
+  --color-neutral-600: #5a5562;
+  --color-neutral-800: #2d2d2d;
+  --color-neutral-900: #2d2d2d;
+
+  --color-accent-100: #f5f3f8;
+  --color-success-bg: #f5f3f8;
+  --color-warning-bg: #f5f3f8;
+  --color-danger-bg: #f5f3f8;
+  --color-info: #7a3fa6;
+  --color-info-bg: #f5f3f8;
+}
+
+html[data-theme="dark"] {
+  --color-fundo: #0b0a0d;
+  --color-cartao: #161419;
+  --color-flutuante: #1b1820;
+  --color-elevado: #2b2731;
+  --color-tinta: #f5f3f8;
+  --color-tinta-hover: #d8d3df;
+  --color-texto-2: #a39dad;
+  --color-texto-3: #8e8798;
+  --color-fio: #27242d;
+  --color-fio-forte: #3c3845;
+  --color-selecao-texto: #35303d;
+
+  --color-avatar-1: #242129;
+  --color-avatar-2: #2d2a33;
+  --color-avatar-3: #37333d;
+  --color-avatar-4: #413c47;
+
+  --color-primary-50: #2b2731;
+  --color-primary-100: #35303d;
+  --color-primary-300: #6e6878;
+  --color-primary-500: #f5f3f8;
+  --color-primary-600: #f5f3f8;
+  --color-primary-700: #d8d3df;
+  --color-primary-900: #f5f3f8;
+
+  --color-neutral-0: #161419;
+  --color-neutral-50: #0b0a0d;
+  --color-neutral-100: #221f28;
+  --color-neutral-200: #27242d;
+  --color-neutral-300: #3c3845;
+  --color-neutral-400: #8e8798;
+  --color-neutral-600: #a39dad;
+  --color-neutral-800: #f5f3f8;
+  --color-neutral-900: #f5f3f8;
+
+  --color-accent-100: #221f28;
+  --color-success-bg: #221f28;
+  --color-warning-bg: #221f28;
+  --color-danger-bg: #221f28;
+  --color-info: #c58be8;
+  --color-info-bg: #221f28;
+}

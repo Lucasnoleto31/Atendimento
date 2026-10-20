@@ -185,11 +185,12 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   // Tudo passa por aqui, menos os arquivos do build, o ícone da aba
-  // (src/app/icon.tsx, servido em /icon) e a pasta public/marca. Sem o ícone na exceção, as
+  // (src/app/icon.tsx, servido em /icon) e as pastas public/marca e
+  // public/temas (a marca e os tokens do tema do cliente). Sem o ícone na exceção, as
   // telas de /entrar ficavam sem ícone (o pedido dele era desviado para o
   // login) e, para quem está dentro, cada pedido do ícone passava pelo
   // getUser. A exceção é por nome, nunca por extensão: pular .png ou .svg
   // abria um desvio, porque /contatos/x.png casa com a rota /contatos/[id]
   // e chegava ao layout e às server actions sem passar pelos portões daqui.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon$|marca/).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon$|marca/|temas/).*)"],
 };

@@ -22,9 +22,33 @@ Quatro variáveis `NEXT_PUBLIC_*`, embutidas no código na hora do build
 | `NEXT_PUBLIC_RAMO_DO_NEGOCIO` | Sobre o que a IA do chat entende que a equipe conversa | `investimentos e abertura de conta em corretora` |
 | `NEXT_PUBLIC_QUEM_ATENDE` | Quem chama o lead de volta, na `/captura` ("um vendedor") | `um assessor` |
 
-O Z da Zeve só aparece quando a empresa é a Zeve. Qualquer outra usa o nome
-em texto e, no favicon e na barra recolhida, a inicial. Logo próprio do
-cliente é trabalho à parte, não existe variável para ele.
+O Z da Zeve só aparece quando a empresa é a Zeve e não há tema. Sem tema,
+outra empresa usa o nome em texto e, no favicon e na barra recolhida, a
+inicial.
+
+### A cara do cliente: o tema
+
+A quinta variável, `NEXT_PUBLIC_TEMA`, aponta para uma pasta em
+`public/temas/<tema>/` com cinco arquivos. É o que troca a marca e as cores
+pela do cliente, sem mexer no código:
+
+| Arquivo | O que é |
+| --- | --- |
+| `tema.css` | Os tokens de cor de `src/app/globals.css` que mudam, nos dois temas (`html:root` e `html[data-theme="dark"]`), com a ficha do projeto do kit estético no comentário do topo. O que não está lá fica como no sistema. |
+| `logo.svg` | A marca por extenso para o tema claro (texto na tinta clara). |
+| `logo-escuro.svg` | A mesma marca para o tema escuro. Dois arquivos porque o SVG num `<img>` não herda a cor do texto. |
+| `simbolo.svg` | Só o símbolo, para a barra lateral recolhida. |
+| `icone.svg` | O favicon: fundo arredondado de 64×64 com o símbolo, e a `@media (prefers-color-scheme: dark)` para o fundo escuro. |
+
+Regras do kit que valem em todo tema: um acento por tela, o neutro sai do
+acento (mesma matiz, saturação de 10% a 20%), a tinta continua sendo texto e
+botão principal, contraste de 4,5:1 medido, e a mesma Poppins. Degradê da
+marca só no símbolo; botão, selo e chamada ficam cheios.
+
+A primeira pasta é `public/temas/incell/`, montada em 20/10/2026 a partir
+dos arquivos da marca (`IN-CELL.ai`/`.pdf`, preto e branco, e o PNG colorido
+de onde o degradê foi medido). Serve de modelo: copie a pasta, troque os
+SVGs e os valores do `tema.css`, e preencha a ficha no topo.
 
 ## 2. Supabase
 
@@ -55,7 +79,7 @@ Siga `docs/SETUP.md`, resumido aqui:
 | Variável | Origem |
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase do cliente › Project Settings › API |
-| `NEXT_PUBLIC_NOME_DA_EMPRESA` e as outras três da seção 1 | a ficha do cliente |
+| `NEXT_PUBLIC_NOME_DA_EMPRESA`, `NEXT_PUBLIC_TEMA` e as outras três da seção 1 | a ficha do cliente |
 | `META_APP_SECRET` | App do cliente › App Settings › Basic |
 | `META_WHATSAPP_TOKEN` | token permanente do System User do BM do cliente (seção 4) |
 | `META_WEBHOOK_VERIFY_TOKEN` | frase aleatória, a mesma no painel do webhook |
@@ -156,6 +180,7 @@ Lucas).
 | `NEXT_PUBLIC_NOME_DO_PRODUTO` | em branco (`Incell Atendimento`) |
 | `NEXT_PUBLIC_RAMO_DO_NEGOCIO` | `iPhones, acessórios e assistência` |
 | `NEXT_PUBLIC_QUEM_ATENDE` | `um vendedor` |
+| `NEXT_PUBLIC_TEMA` | `incell` (pasta `public/temas/incell/`) |
 
 Ids da Meta, domínio e Supabase: a preencher no cofre quando a instalação
 fechar.

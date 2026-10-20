@@ -1,8 +1,10 @@
-import { MARCA_DA_ZEVE, NOME_DA_EMPRESA } from "@/lib/marca";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { MARCA_DA_ZEVE, NOME_DA_EMPRESA, TEMA } from "@/lib/marca";
 
 /**
- * O favicon, gerado no servidor: o Z da Zeve na Zeve, a inicial da empresa
- * em qualquer outra (src/lib/marca.ts). SVG com media query, e não PNG,
+ * O favicon, gerado no servidor: o icone.svg do tema do cliente quando há
+ * tema; senão o Z da Zeve na Zeve, ou a inicial da empresa (src/lib/marca.ts). SVG com media query, e não PNG,
  * para o ícone acompanhar o tema claro e escuro do navegador, como o
  * arquivo estático fazia.
  */
@@ -26,6 +28,15 @@ function inicial(): string {
 }
 
 export default function Icon() {
+  if (TEMA) {
+    // Lido do disco no build (força estático): a pasta public/ não é
+    // importável, e buscar pela rede no build traria o problema da URL.
+    const svg = readFileSync(
+      join(process.cwd(), "public", "temas", TEMA, "icone.svg"),
+      "utf8",
+    );
+    return new Response(svg, { headers: { "Content-Type": contentType } });
+  }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <style>${ESTILO}
   </style>
