@@ -10,8 +10,9 @@ import { lerAviso } from "./aviso-ficha";
 import type { EtiquetaDoCatalogo } from "./etiquetas-contato";
 import { FichaContato, type NotaFicha } from "./ficha";
 import { lerVoltar, voltarDiferenteDe } from "../voltar";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Contato · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Contato") };
 
 /**
  * A ficha do contato: dados, etiquetas, observação e as notas internas, numa

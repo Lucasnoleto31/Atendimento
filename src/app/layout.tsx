@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Poppins } from "next/font/google";
 import "./globals.css";
+import { ARQUIVOS_DO_TEMA, NOME_DA_EMPRESA, NOME_DO_PRODUTO } from "@/lib/marca";
 
 // A família única da ficha padrão do kit: 400 no corpo, 600 em destaque e
 // título, 700 no título grande e no número de destaque. Código e ID usam o
@@ -14,10 +15,9 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Zeve Atendimento",
-  description:
-    "Caixa de entrada da equipe da Zeve para as conversas do WhatsApp e do Instagram Direct.",
-  applicationName: "Zeve Atendimento",
+  title: NOME_DO_PRODUTO,
+  description: `Caixa de entrada da equipe da ${NOME_DA_EMPRESA} para as conversas do WhatsApp e do Instagram Direct.`,
+  applicationName: NOME_DO_PRODUTO,
 };
 
 async function temaEscuro(): Promise<boolean> {
@@ -56,6 +56,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       data-theme={escuro ? "dark" : undefined}
       className={`${poppins.variable} h-full antialiased`}
     >
+      {ARQUIVOS_DO_TEMA ? (
+        <head>
+          {/* Os tokens do tema do cliente, por cima dos de globals.css
+              (src/lib/marca.ts; docs/NOVO-CLIENTE.md). */}
+          <link rel="stylesheet" href={ARQUIVOS_DO_TEMA.css} />
+        </head>
+      ) : null}
       {/* suppressHydrationWarning: extensões de navegador injetam atributos
           no body antes do React hidratar (ex.: inject_newsvd) e disparavam
           aviso falso. Vale só para atributos deste elemento, nada além. */}

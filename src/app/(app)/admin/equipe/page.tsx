@@ -7,8 +7,9 @@ import { caminhoDa } from "../rotas";
 import { voltarDaSubpagina } from "../subpagina";
 import type { UsuarioLinha } from "../usuarios";
 import { TelaEquipe } from "./tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Equipe · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Equipe") };
 
 /** Administração › Equipe: só o admin. */
 export default async function EquipePage({

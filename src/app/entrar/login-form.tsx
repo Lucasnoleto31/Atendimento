@@ -14,6 +14,7 @@ import {
   LINK_SUBLINHADO,
 } from "./estilos";
 import { urlEntrar } from "./caminhos";
+import { EMAIL_EXEMPLO } from "@/lib/marca";
 
 const ESTADO_INICIAL: EstadoLogin = {};
 
@@ -92,7 +93,7 @@ export function LoginForm({ proximo }: { proximo: string }) {
         type="email"
         autoComplete="username"
         required
-        placeholder="voce@zeve.com.br"
+        placeholder={EMAIL_EXEMPLO}
         icone={<Mail size={20} strokeWidth={1.75} aria-hidden />}
       />
 

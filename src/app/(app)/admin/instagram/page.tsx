@@ -9,9 +9,10 @@ import {
   situacaoInstagram,
 } from "../webhook";
 import { TelaInstagram } from "./tela";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Instagram Direct · Zeve Atendimento",
+  title: titulo("Instagram Direct"),
 };
 
 /**

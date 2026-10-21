@@ -6,8 +6,9 @@ import { exigirGestao } from "./acesso";
 import { situacaoInstagram, webhookConfigurado } from "./webhook";
 import { PARAM_ABRIR, hrefDoEditor, subpaginaDoEditor } from "./rotas";
 import { TelaIndice, type ResumoAdministracao } from "./tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Administração · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Administração") };
 
 type Busca = Record<string, string | string[] | undefined>;
 

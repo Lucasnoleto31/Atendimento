@@ -4,9 +4,10 @@ import { exigirGestao } from "../acesso";
 import { caminhoDa } from "../rotas";
 import { voltarDaSubpagina } from "../subpagina";
 import { TelaImportar, type Importacao } from "./tela";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Importar contatos · Zeve Atendimento",
+  title: titulo("Importar contatos"),
 };
 
 export default async function ImportarPage({

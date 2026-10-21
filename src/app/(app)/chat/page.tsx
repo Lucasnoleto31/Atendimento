@@ -18,8 +18,9 @@ import {
   lerFiltrosFila,
   type CatalogosChat,
 } from "./mensagem";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Chat · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Chat") };
 
 const SEM_CATALOGOS: CatalogosChat = {
   mensagensPadrao: null,

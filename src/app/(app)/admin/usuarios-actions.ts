@@ -7,6 +7,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { perfilAtivo } from "@/lib/auth";
 import { registrarAcesso } from "@/lib/auditoria";
 import type { ResultadoAcao } from "../configuracoes/resultado";
+import { EMAIL_EXEMPLO } from "@/lib/marca";
 
 export type ResultadoUsuario = {
   ok?: boolean;
@@ -150,7 +151,7 @@ export async function corrigirUsuario(
     return { erro: `O nome pode ter no máximo ${NOME_MAX} caracteres.` };
   }
   if (!EMAIL_VALIDO.test(email)) {
-    return { erro: "Escreva um e-mail válido, como nome@zeve.com.br." };
+    return { erro: `Escreva um e-mail válido, como ${EMAIL_EXEMPLO.replace("voce@", "nome@")}.` };
   }
 
   const supabase = await createClient();

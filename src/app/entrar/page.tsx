@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { LoginForm } from "./login-form";
 import { Moldura } from "./moldura";
 import { destinoSeguro } from "@/lib/rotas";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Entrar · Zeve Atendimento",
+  title: titulo("Entrar"),
 };
 
 export default async function EntrarPage({

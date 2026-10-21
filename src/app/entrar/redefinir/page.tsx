@@ -3,9 +3,10 @@ import { destinoSeguro } from "@/lib/rotas";
 import { Moldura } from "../moldura";
 import { urlEntrar } from "../caminhos";
 import { FormRedefinir } from "./form-redefinir";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Nova senha · Zeve Atendimento",
+  title: titulo("Nova senha"),
 };
 
 export default async function RedefinirPage({

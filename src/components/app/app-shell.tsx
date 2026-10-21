@@ -41,6 +41,7 @@ import {
   useEhMac,
   type AreaPaleta,
 } from "./paleta-global";
+import { NOME_DO_PRODUTO } from "@/lib/marca";
 
 /*
  * A casca do app.
@@ -358,7 +359,7 @@ function MenuLateral({
       >
         <Link
           href="/chat"
-          title={recolhido ? "Zeve Atendimento" : undefined}
+          title={recolhido ? NOME_DO_PRODUTO : undefined}
           className={cn(
             "flex h-[40px] items-center rounded-controle transition-colors duration-[120ms] hover:bg-realce focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-tinta pointer-coarse:h-[44px]",
             recolhido ? "w-[48px] justify-center" : "px-1",
@@ -367,7 +368,7 @@ function MenuLateral({
           {recolhido ? (
             <>
               <MarcaZ className="h-[20px] text-tinta" />
-              <span className="sr-only">Zeve Atendimento</span>
+              <span className="sr-only">{NOME_DO_PRODUTO}</span>
             </>
           ) : (
             <Marca />

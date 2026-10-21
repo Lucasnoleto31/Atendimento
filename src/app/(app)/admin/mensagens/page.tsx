@@ -4,9 +4,10 @@ import { exigirGestao } from "../acesso";
 import { caminhoDa, PARAM_TEXTO } from "../rotas";
 import { voltarDaSubpagina } from "../subpagina";
 import { TelaMensagens, type Mensagem } from "./tela";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Mensagens prontas · Zeve Atendimento",
+  title: titulo("Mensagens prontas"),
 };
 
 /** O texto que vem pela URL não passa do tamanho de uma mensagem. */

@@ -4,8 +4,9 @@ import { exigirGestao } from "../acesso";
 import { caminhoDa } from "../rotas";
 import { voltarDaSubpagina } from "../subpagina";
 import { TelaEtiquetas, type Campanha, type Tag } from "./tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Etiquetas · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Etiquetas") };
 
 export default async function EtiquetasPage({
   searchParams,

@@ -15,6 +15,7 @@
  */
 
 import type { CanalConversa } from "./mensagem";
+import { NOME_DO_PRODUTO } from "@/lib/marca";
 
 export async function prepararGravacao(
   gravacao: Blob,
@@ -241,7 +242,7 @@ function paginaOgg(
 
 function montarOgg(cabecalho: Uint8Array, pacotes: Uint8Array[]): Uint8Array {
   const serie = crypto.getRandomValues(new Uint32Array(1))[0];
-  const fornecedor = new TextEncoder().encode("Zeve Atendimento");
+  const fornecedor = new TextEncoder().encode(NOME_DO_PRODUTO);
   const tags = new Uint8Array(8 + 4 + fornecedor.length + 4);
   tags.set(new TextEncoder().encode("OpusTags"), 0);
   new DataView(tags.buffer).setUint32(8, fornecedor.length, true);

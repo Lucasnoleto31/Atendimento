@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { Moldura } from "@/app/entrar/moldura";
 import { FormCaptura } from "./form-captura";
 import { lerRastreio } from "./rastreio";
+import { NOME_DA_EMPRESA, QUEM_ATENDE, capitalizar } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Fale com a Zeve",
-  description: "Deixe seu nome e WhatsApp para a equipe da Zeve falar com você.",
+  title: `Fale com a ${NOME_DA_EMPRESA}`,
+  description: `Deixe seu nome e WhatsApp para a equipe da ${NOME_DA_EMPRESA} falar com você.`,
 };
 
 /**
@@ -38,7 +39,7 @@ export default async function CapturaPage({
           rotulo: "Enviar outro número",
         }}
         titulo="Recebemos seu contato"
-        descricao="Um assessor da Zeve vai chamar você no WhatsApp. Pode fechar esta página."
+        descricao={`${capitalizar(QUEM_ATENDE)} da ${NOME_DA_EMPRESA} vai chamar você no WhatsApp. Pode fechar esta página.`}
       >
         {null}
       </Moldura>
@@ -47,9 +48,9 @@ export default async function CapturaPage({
 
   return (
     <Moldura
-      titulo="Fale com a Zeve"
-      descricao="Deixe seu nome e WhatsApp e um assessor chama você por lá."
-      rodape="Seu nome e WhatsApp ficam com a equipe da Zeve e não são repassados a terceiros."
+      titulo={`Fale com a ${NOME_DA_EMPRESA}`}
+      descricao={`Deixe seu nome e WhatsApp e ${QUEM_ATENDE} chama você por lá.`}
+      rodape={`Seu nome e WhatsApp ficam com a equipe da ${NOME_DA_EMPRESA} e não são repassados a terceiros.`}
     >
       <FormCaptura rastreio={rastreio} />
     </Moldura>

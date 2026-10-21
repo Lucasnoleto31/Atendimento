@@ -26,6 +26,8 @@ equipe e o log de acesso.
    [`docs/META-WHATSAPP.md`](docs/META-WHATSAPP.md).
 3. As migrações do banco (ordem e estado de cada uma) estão documentadas em
    [`supabase/migrations/README.md`](supabase/migrations/README.md).
+4. Para subir o sistema para outra empresa, com o nome e a marca dela, veja
+   [`docs/NOVO-CLIENTE.md`](docs/NOVO-CLIENTE.md).
 
 ```bash
 npm install

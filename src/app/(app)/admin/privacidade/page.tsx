@@ -6,8 +6,9 @@ import type { PessoaPrivacidade } from "../privacidade-texto";
 import { caminhoDa } from "../rotas";
 import { voltarDaSubpagina } from "../subpagina";
 import { TelaPrivacidade } from "./tela";
+import { titulo } from "@/lib/marca";
 
-export const metadata: Metadata = { title: "Privacidade · Zeve Atendimento" };
+export const metadata: Metadata = { title: titulo("Privacidade") };
 
 /** Administração › Privacidade: só o admin vê e grava. */
 export default async function PrivacidadePage({

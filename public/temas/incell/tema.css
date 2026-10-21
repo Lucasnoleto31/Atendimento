@@ -1,0 +1,47 @@
+/*
+ * Tema da Incell, loja de iPhones. Carregado pelo layout quando
+ * NEXT_PUBLIC_TEMA=incell (src/lib/marca.ts); sobrescreve os tokens de
+ * src/app/globals.css nos dois temas. Os seletores levam `html` na frente
+ * para vencer a folha do build seja qual for a ordem de carregamento, e o
+ * bloco claro exclui o escuro de propósito: `html:root` sozinho (0,1,1)
+ * vence o `[data-theme="dark"]` do sistema (0,1,0) e apagaria o texto no
+ * escuro (visto na Incell em 21/10/2026).
+ *
+ * FICHA DO PROJETO (kit estético, bloco 0)
+ *   produto        Incell Atendimento: chat de WhatsApp e Instagram da loja
+ *   plataformas    desktop e telefone, no navegador
+ *   meio/entrega   tela / sistema (blocos 0 a 5, 8, 16 a 18, 20 a 22; mínimo)
+ *   temperatura    os dois
+ *   acento         violeta do meio do degradê da marca: #7A3FA6 no claro
+ *                  (6,8:1 no fundo), #C58BE8 no escuro (7,8:1). Só na
+ *                  informação, onde a ficha padrão põe o azul. O degradê
+ *                  inteiro (#2F98E5 → #4B3D9B → #8E38A6 → #EA3FBF, medido no
+ *                  PNG da marca em 20/10/2026) só aparece no símbolo.
+ *   fundo          o do sistema (#FFFFFF / #0B0B0B)
+ *   tinta          o grafite do CELL, #2D2D2D (14,0:1); #F5F5F5 no escuro
+ *   neutro         cinza puro, o do sistema. Pedido de Artur em 20/10/2026:
+ *                  a primeira versão tingia os neutros com a matiz do
+ *                  violeta e "a tela inicial com esse roxo ficou estranho";
+ *                  o degradê e o colorido ficam "somente para os detalhes".
+ *   semânticas     as da ficha padrão (bom, atenção, erro), sem mudança
+ *   tipografia     Poppins, a mesma do sistema (uma família)
+ *   raio, densidade, material, movimento: os do sistema, sem mudança
+ *   marca          logo.svg / logo-escuro.svg (CELL na cor do texto de cada
+ *                  tema), simbolo.svg (favicon e barra recolhida)
+ */
+
+html:root:not([data-theme="dark"]) {
+  --color-tinta: #2d2d2d;
+  --color-tinta-hover: #444444;
+  --color-primary-500: #2d2d2d;
+  --color-primary-600: #2d2d2d;
+  --color-primary-700: #444444;
+  --color-primary-900: #2d2d2d;
+  --color-neutral-800: #2d2d2d;
+  --color-neutral-900: #2d2d2d;
+  --color-info: #7a3fa6;
+}
+
+html[data-theme="dark"] {
+  --color-info: #c58be8;
+}

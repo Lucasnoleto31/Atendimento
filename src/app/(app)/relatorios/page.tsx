@@ -5,9 +5,10 @@ import { ehGestao, veTudo } from "@/lib/papeis";
 import { carregarRelatorio } from "./dados";
 import { lerPeriodo } from "./periodo";
 import { PainelRelatorio } from "./painel";
+import { titulo } from "@/lib/marca";
 
 export const metadata: Metadata = {
-  title: "Relatório · Zeve Atendimento",
+  title: titulo("Relatório"),
 };
 
 /**
