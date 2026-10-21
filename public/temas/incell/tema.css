@@ -2,7 +2,10 @@
  * Tema da Incell, loja de iPhones. Carregado pelo layout quando
  * NEXT_PUBLIC_TEMA=incell (src/lib/marca.ts); sobrescreve os tokens de
  * src/app/globals.css nos dois temas. Os seletores levam `html` na frente
- * para vencer a folha do build seja qual for a ordem de carregamento.
+ * para vencer a folha do build seja qual for a ordem de carregamento, e o
+ * bloco claro exclui o escuro de propósito: `html:root` sozinho (0,1,1)
+ * vence o `[data-theme="dark"]` do sistema (0,1,0) e apagaria o texto no
+ * escuro (visto na Incell em 21/10/2026).
  *
  * FICHA DO PROJETO (kit estético, bloco 0)
  *   produto        Incell Atendimento: chat de WhatsApp e Instagram da loja
@@ -27,7 +30,7 @@
  *                  tema), simbolo.svg (favicon e barra recolhida)
  */
 
-html:root {
+html:root:not([data-theme="dark"]) {
   --color-tinta: #2d2d2d;
   --color-tinta-hover: #444444;
   --color-primary-500: #2d2d2d;
